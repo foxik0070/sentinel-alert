@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Runtime data — SQLite, stats, persisted state
+data/alerts.db
+data/sniproxy_stats.json
+data/fsc_hosts.json
+data/topo.json
+data/topology.json
+data/settings.json
+
+# Sentinel credentials (configured via UI or setup.sh)
+data/sentinel.json
+
+# GeoIP database (large binary, download separately)
+data/GeoLite2-City.mmdb
+
+# SSH keys — never commit private keys
+conf/id_ed25519
+conf/id_ed25519.pub
+
+# Node
+node_modules/
+package-lock.json
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

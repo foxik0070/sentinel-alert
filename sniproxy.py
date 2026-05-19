@@ -1,0 +1,233 @@
+"""Sniproxy Monitor — reads sniproxy access logs from a remote server via SSH.
+
+Runs two daemon threads:
+  - _poll_worker: every 5 s fetches new log lines via SSH, deduplicates, updates stats
+  - _speed_worker: every 2 s computes KB/s metrics and appends to speed_history
+"""
+import json
+import os
+import re
+import subprocess
+import threading
+import time
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_STATS_FILE = os.path.join(BASE_DIR, "data", "sniproxy_stats.json")
+
+_PATTERN = re.compile(
+    r"(?P<date>\d{4}-\d{2}-\d{2})\s+"
+    r"(?P<time>\d{2}:\d{2}:\d{2})\s+"
+    r"(?:\[::ffff:)?(?P<src_ip>[0-9a-fA-F\.:]+)(?:\])?:(?P<src_port>\d+)\s+->\s+"
+    r"(?:\[::ffff:)?(?P<proxy_ip>[0-9a-fA-F\.:]+)(?:\])?:(?P<proxy_port>\d+)\s+->\s+"
+    r"(?:(?P<dest_ip>[0-9a-fA-F\.:]+):(?P<dest_port>\d+)|NONE)\s+"
+    r"\[(?P<domain>[^\]]*)\]\s+"
+    r"(?P<tx>\d+)/\d+\s+bytes tx\s+"
+    r"(?P<rx>\d+)/\d+\s+bytes rx\s+"
+    r"(?P<duration>[0-9\.]+)\s+seconds"
+)
+
+data_store = {
+    "total_tx": 0, "total_rx": 0,
+    "last_tx": 0, "last_rx": 0, "last_conn": 0,
+    "speed_tx": 0.0, "speed_rx": 0.0, "speed_conn": 0.0,
+    "total_connections": 0,
+    "top_domains": {}, "top_ips": {},
+    "recent_connections": [],
+    "bans": [],
+    "speed_history": {"labels": [], "tx": [], "rx": [], "conn": []},
+    "connected": False,
+    "server": "",
+    "last_error": "",
+}
+
+_lock = threading.Lock()
+_seen: set = set()
+
+_server = ""
+_ssh_user = "root"
+_ssh_key = ""
+_log_files: list = []
+
+
+def _fetch_lines(n=500):
+    """Return list of lines on success, None on any SSH failure."""
+    if not _server or not _log_files:
+        return None
+    files = " ".join(_log_files)
+    cmd = [
+        "ssh", "-i", _ssh_key,
+        "-o", "BatchMode=yes",
+        "-o", "ConnectTimeout=5",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "LogLevel=ERROR",
+        f"{_ssh_user}@{_server}",
+        f"cat {files} 2>/dev/null | tail -n {n}",
+    ]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        if r.returncode != 0:
+            err = (r.stderr.strip() or f"SSH exit {r.returncode}")[:200]
+            with _lock:
+                data_store["connected"] = False
+                data_store["last_error"] = err
+            return None
+        return r.stdout.splitlines()
+    except Exception as e:
+        with _lock:
+            data_store["connected"] = False
+            data_store["last_error"] = str(e)[:200]
+        return None
+
+
+def _process_lines(lines: list[str]) -> int:
+    count = 0
+    for line in lines:
+        h = hash(line)
+        if h in _seen:
+            continue
+        _seen.add(h)
+        if len(_seen) > 20000:
+            _seen.clear()
+
+        m = _PATTERN.search(line)
+        if not m:
+            continue
+        d = m.groupdict()
+        tx, rx = int(d["tx"]), int(d["rx"])
+        if tx == 0 and rx == 0:
+            continue
+        domain = d["domain"] or d.get("dest_ip") or "unknown"
+        src_ip = d["src_ip"]
+        dest = f"{d['dest_ip']}:{d['dest_port']}" if d.get("dest_ip") else "NONE"
+
+        with _lock:
+            data_store["total_tx"] += tx
+            data_store["total_rx"] += rx
+            data_store["total_connections"] += 1
+            data_store["top_domains"][domain] = (
+                data_store["top_domains"].get(domain, 0) + tx + rx
+            )
+            if src_ip not in data_store["top_ips"]:
+                data_store["top_ips"][src_ip] = {"tx": 0, "rx": 0, "hits": 0}
+            data_store["top_ips"][src_ip]["tx"] += tx
+            data_store["top_ips"][src_ip]["rx"] += rx
+            data_store["top_ips"][src_ip]["hits"] += 1
+
+            conn = {
+                "time": d["time"],
+                "src_ip": src_ip,
+                "src_port": d["src_port"],
+                "dest": dest,
+                "domain": domain,
+                "tx": tx,
+                "rx": rx,
+                "duration": d["duration"],
+            }
+            data_store["recent_connections"].insert(0, conn)
+            if len(data_store["recent_connections"]) > 100:
+                data_store["recent_connections"].pop()
+        count += 1
+    return count
+
+
+def _load_stats():
+    try:
+        with open(_STATS_FILE) as f:
+            s = json.load(f)
+        with _lock:
+            for k in ("total_tx", "total_rx", "total_connections", "top_domains", "top_ips", "bans"):
+                if k in s:
+                    data_store[k] = s[k]
+    except Exception:
+        pass
+
+
+def _save_stats():
+    while True:
+        time.sleep(60)
+        try:
+            with _lock:
+                snapshot = {k: data_store[k] for k in
+                            ("total_tx", "total_rx", "total_connections", "top_domains", "top_ips", "bans")}
+            os.makedirs(os.path.dirname(_STATS_FILE), exist_ok=True)
+            with open(_STATS_FILE, "w") as f:
+                json.dump(snapshot, f)
+        except Exception:
+            pass
+
+
+def _poll_worker():
+    lines = _fetch_lines(1000)
+    if lines is not None:
+        _process_lines(lines)
+        with _lock:
+            data_store["connected"] = True
+            data_store["last_error"] = ""
+
+    while True:
+        time.sleep(5)
+        lines = _fetch_lines(200)
+        if lines is not None:
+            _process_lines(lines)
+            with _lock:
+                data_store["connected"] = True
+                data_store["last_error"] = ""
+
+
+def _speed_worker():
+    first = True
+    while True:
+        time.sleep(2)
+        with _lock:
+            ctx = data_store["total_tx"]
+            crx = data_store["total_rx"]
+            cconn = data_store["total_connections"]
+            if first:
+                data_store["last_tx"] = ctx
+                data_store["last_rx"] = crx
+                data_store["last_conn"] = cconn
+                first = False
+            else:
+                data_store["speed_tx"] = round((ctx - data_store["last_tx"]) / 1024 / 2, 2)
+                data_store["speed_rx"] = round((crx - data_store["last_rx"]) / 1024 / 2, 2)
+                data_store["speed_conn"] = round((cconn - data_store["last_conn"]) / 2, 1)
+                data_store["last_tx"] = ctx
+                data_store["last_rx"] = crx
+                data_store["last_conn"] = cconn
+
+                ts = time.strftime("%H:%M:%S")
+                h = data_store["speed_history"]
+                h["labels"].append(ts)
+                h["tx"].append(data_store["speed_tx"])
+                h["rx"].append(data_store["speed_rx"])
+                h["conn"].append(data_store["speed_conn"])
+                if len(h["labels"]) > 40:
+                    for k in ("labels", "tx", "rx", "conn"):
+                        h[k].pop(0)
+
+
+def add_ban(ban_dict: dict):
+    """Called by fail2ban webhook or collector to register a new ban."""
+    with _lock:
+        data_store["bans"].insert(0, ban_dict)
+        data_store["bans"] = data_store["bans"][:50]
+
+
+def start(server: str, ssh_user: str, log_files: list, ssh_key: str):
+    global _server, _ssh_user, _log_files, _ssh_key
+    _server = server
+    _ssh_user = ssh_user
+    _log_files = log_files if isinstance(log_files, list) else [log_files]
+    _ssh_key = ssh_key
+    data_store["server"] = server
+
+    if not _server:
+        data_store["last_error"] = "No proxy server configured — set sniproxy.server in sentinel-alert.conf"
+        return
+
+    _load_stats()
+    threading.Thread(target=_poll_worker,  daemon=True).start()
+    threading.Thread(target=_speed_worker, daemon=True).start()
+    threading.Thread(target=_save_stats,   daemon=True).start()
+    print(f"sniproxy: monitoring {_server} logs: {', '.join(_log_files)}")
