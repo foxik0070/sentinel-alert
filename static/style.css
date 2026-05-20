@@ -635,3 +635,29 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
     #net-svg { height: 50vh; }
     .net-panel { width: 100%; }
 }
+
+/* Login overlay */
+.login-overlay {
+    position: fixed; inset: 0; z-index: 9999;
+    background: rgba(2,6,10,0.97);
+    display: flex; align-items: center; justify-content: center;
+}
+.login-overlay.hidden { display: none; }
+.login-box {
+    width: 300px; padding: 32px 28px;
+    border: 1px solid var(--accent); background: var(--bg-1);
+    display: flex; flex-direction: column; gap: 12px;
+}
+.login-title {
+    font-size: 16px; font-weight: 800; letter-spacing: 3px; color: var(--accent);
+}
+.login-sub {
+    font-size: 9px; letter-spacing: 2px; color: var(--muted); margin-top: -6px;
+}
+.login-box input {
+    background: #0a1418; border: 1px solid #1a4046; color: var(--fg);
+    padding: 8px 10px; font-family: inherit; font-size: 12px; outline: none;
+    letter-spacing: 1px;
+}
+.login-box input:focus { border-color: var(--accent); }
+.login-err { font-size: 10px; color: var(--red); min-height: 14px; }

@@ -869,7 +869,52 @@ $('cfg-export').addEventListener('click', () => { window.location.href = '/api/c
 setInterval(() => { hudClock.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }, 1000);
 setInterval(loadStatic, 60000);
 
-loadStatic().then(connectWS);
+// ── Auth ─────────────────────────────────────────────────────────────────────
+const _loginOverlay = $('login-overlay');
+const _loginBtn     = $('login-btn');
+const _loginErr     = $('login-err');
+
+function applyAuthState(authenticated) {
+    document.querySelectorAll('.auth-only').forEach(el => {
+        el.style.display = authenticated ? '' : 'none';
+    });
+    document.querySelectorAll('.tab-btn:not([data-tab="threat"])').forEach(btn => {
+        btn.style.display = authenticated ? '' : 'none';
+    });
+    if (_loginOverlay) _loginOverlay.classList.toggle('hidden', authenticated);
+}
+
+async function checkAuth() {
+    const r = await fetch('/api/auth/status').then(x => x.json()).catch(() => ({ authenticated: false }));
+    applyAuthState(r.authenticated);
+    return r.authenticated;
+}
+
+_loginBtn.addEventListener('click', async () => {
+    _loginErr.textContent = '';
+    _loginBtn.disabled = true;
+    _loginBtn.textContent = '…';
+    const r = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: $('login-user').value, password: $('login-pass').value }),
+    }).then(x => x.json()).catch(() => ({ ok: false, error: 'Network error' }));
+    _loginBtn.disabled = false;
+    _loginBtn.textContent = 'LOGIN';
+    if (r.ok) {
+        applyAuthState(true);
+    } else {
+        _loginErr.textContent = r.error || 'Login failed';
+    }
+});
+$('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') _loginBtn.click(); });
+
+$('logout-btn').addEventListener('click', async () => {
+    await fetch('/api/logout', { method: 'POST' });
+    applyAuthState(false);
+});
+
+checkAuth().then(() => loadStatic().then(connectWS));
 
 // Fullscreen button handlers
 document.querySelectorAll('.btn-fullscreen').forEach(btn => {

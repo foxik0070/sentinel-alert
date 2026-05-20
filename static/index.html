@@ -13,6 +13,17 @@
 <body>
 <div class="scanlines"></div>
 
+<div id="login-overlay" class="login-overlay hidden">
+    <div class="login-box">
+        <div class="login-title">◤ SENTINEL-ALERT</div>
+        <div class="login-sub">AUTHENTICATION REQUIRED</div>
+        <input id="login-user" type="text" placeholder="USERNAME" autocomplete="username" spellcheck="false">
+        <input id="login-pass" type="password" placeholder="PASSWORD" autocomplete="current-password">
+        <div id="login-err" class="login-err"></div>
+        <button id="login-btn" class="btn primary" style="width:100%;">LOGIN</button>
+    </div>
+</div>
+
 <header class="hud-top">
     <div class="hud-cell hud-hide-sm">
         <span class="lbl">SYS</span>
@@ -46,8 +57,9 @@
             <button class="tab-btn" data-tab="proxy" id="tab-btn-proxy">PROXY MONITOR</button>
             <button class="tab-btn" data-tab="network" id="tab-btn-network">NETWORK MAP</button>
         </div>
-        <button id="settings-btn" class="btn hud-hide-sm">⚙ SETTINGS</button>
-        <button id="report-btn" class="btn hud-hide-sm">REPORT</button>
+        <button id="settings-btn" class="btn hud-hide-sm auth-only">⚙ SETTINGS</button>
+        <button id="report-btn" class="btn hud-hide-sm auth-only">REPORT</button>
+        <button id="logout-btn" class="btn ghost hud-hide-sm auth-only" style="font-size:10px;">LOGOUT</button>
     </div>
 </header>
 

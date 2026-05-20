@@ -1,14 +1,17 @@
 import asyncio
+import hashlib
+import hmac
 import os
 import random
 import sqlite3
+import time
 from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Set
 
-from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import Body, FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 import blocklist
@@ -154,6 +157,54 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# ── Auth helpers ──────────────────────────────────────────────────────────────
+_AUTH_COOKIE = "sa_token"
+_TOKEN_TTL   = 86400 * 7  # 7 days
+
+
+def _make_token() -> str:
+    ts = str(int(time.time()))
+    sig = hmac.new(conf.AUTH_SECRET.encode(), ts.encode(), hashlib.sha256).hexdigest()
+    return f"{ts}.{sig}"
+
+
+def _verify_token(token: str | None) -> bool:
+    if not token:
+        return False
+    try:
+        ts_str, sig = token.rsplit(".", 1)
+        if int(time.time()) - int(ts_str) > _TOKEN_TTL:
+            return False
+        expected = hmac.new(conf.AUTH_SECRET.encode(), ts_str.encode(), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, sig)
+    except Exception:
+        return False
+
+
+def _is_authed(request: Request) -> bool:
+    return _verify_token(request.cookies.get(_AUTH_COOKIE))
+
+
+@app.post("/api/login")
+def login(payload: dict = Body(...), response: Response = None):
+    if (payload.get("username") == conf.AUTH_USERNAME
+            and payload.get("password") == conf.AUTH_PASSWORD):
+        token = _make_token()
+        response.set_cookie(_AUTH_COOKIE, token, max_age=_TOKEN_TTL, httponly=True, samesite="lax")
+        return {"ok": True}
+    return JSONResponse({"ok": False, "error": "Invalid credentials"}, status_code=401)
+
+
+@app.post("/api/logout")
+def logout(response: Response):
+    response.delete_cookie(_AUTH_COOKIE)
+    return {"ok": True}
+
+
+@app.get("/api/auth/status")
+def auth_status(request: Request):
+    return {"authenticated": _is_authed(request)}
 
 
 @app.get("/")

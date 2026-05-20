@@ -29,6 +29,11 @@ def _f(section, key, fallback=0.0):
 SERVER_HOST = _s("server", "host", "0.0.0.0")
 SERVER_PORT = _i("server", "port", 5056)
 
+# [auth]
+AUTH_USERNAME = _s("auth", "username", "admin")
+AUTH_PASSWORD = _s("auth", "password", "admin")
+AUTH_SECRET   = _s("auth", "secret",   "") or os.urandom(32).hex()
+
 # [home]
 HOME_LAT = _f("home", "lat", 0.0)   # 0.0 = auto-detect from public IP
 HOME_LON = _f("home", "lon", 0.0)
