@@ -25,7 +25,7 @@ const acVec      = $('ac-vec');
 
 let HOME = { lat: 49.8209, lon: 18.2625 };
 let attackCount = 0;
-const MAX_ARCS = 100, MAX_PTS = 200, MAX_LABELS = 30, MAX_FEED = 200;
+const MAX_ARCS = 300, MAX_PTS = 300, MAX_LABELS = 50, MAX_FEED = 200;
 let _globePaused = false, _histPaused = false;
 function _globeFlush() {
     globe.arcsData([...arcs]);
@@ -37,6 +37,9 @@ const arcs = [], points = [], labels = [], rings = [];
 const arcTimestamps = []; // track arc creation time for age-based coloring
 const homeRings = [];   // permanent target indicator
 const homePoints = [];  // permanent target dot
+
+let _countriesGeo = null;
+let _countryAttackMap = {}; // normalized country name -> [{src_ip, protocol, dst_port, ts}]
 
 const TX_NIGHT = '//unpkg.com/three-globe/example/img/earth-night.jpg';
 const TX_DAY   = '//unpkg.com/three-globe/example/img/earth-blue-marble.jpg';
@@ -61,8 +64,8 @@ const globe = Globe()(globeEl)
     .arcEndLat(d => d.endLat).arcEndLng(d => d.endLng)
     .arcColor(d => d.color)
     .arcStroke(1.2)
-    .arcDashLength(1).arcDashGap(0).arcDashInitialGap(0)
-    .arcDashAnimateTime(0)
+    .arcDashLength(0.6).arcDashGap(0.4).arcDashInitialGap(d => d.phase)
+    .arcDashAnimateTime(1800)
     .arcAltitudeAutoScale(0.7)
     .arcsTransitionDuration(0)
     .pointsData([...points, ...homePoints])
@@ -150,6 +153,60 @@ function centerGlobeOn(lat, lon) {
     }, 6000);
 }
 
+function _polyName(d) {
+    const p = d.properties;
+    return p.ADMIN || p.NAME || p.name || '';
+}
+
+function refreshCountryPolygons() {
+    _countryAttackMap = {};
+    _attackHistory.forEach(a => {
+        if (!a.country || a.country === '?' || a.country === 'Unknown') return;
+        if (!_countryAttackMap[a.country]) _countryAttackMap[a.country] = [];
+        _countryAttackMap[a.country].push(a);
+    });
+    if (_countriesGeo) globe.polygonsData([..._countriesGeo]);
+}
+
+async function loadCountryPolygons() {
+    try {
+        const geo = await fetch('/static/vendor/countries.geojson').then(r => r.json());
+        _countriesGeo = geo.features;
+        globe
+            .polygonsData(_countriesGeo)
+            .polygonGeoJsonGeometry(d => d.geometry)
+            .polygonAltitude(0.001)
+            .polygonCapColor(d => {
+                const hits = _countryAttackMap[_polyName(d)];
+                return hits ? 'rgba(255,42,94,0.05)' : 'rgba(0,0,0,0)';
+            })
+            .polygonSideColor(() => 'rgba(0,0,0,0)')
+            .polygonStrokeColor(d => {
+                const hits = _countryAttackMap[_polyName(d)];
+                return hits ? 'rgba(255,80,40,0.85)' : 'rgba(20,60,70,0.5)';
+            })
+            .polygonLabel(d => {
+                const name = _polyName(d);
+                const hits = _countryAttackMap[name] || [];
+                const uniqIPs = [...new Set(hits.map(a => a.src_ip))].slice(0, 6);
+                if (!hits.length) return `<div style="background:rgba(2,10,14,0.92);padding:5px 9px;border:1px solid #1a4046;font-size:11px;color:#4d7479;">${name}</div>`;
+                return `<div style="background:rgba(2,10,14,0.95);padding:6px 10px;border:1px solid #ff2a5e;font-size:11px;color:#cfe7ec;line-height:1.5;">
+                    <b style="color:#ff2a5e;">${name}</b><br>
+                    <span style="color:#4d7479;">${hits.length} attack${hits.length!==1?'s':''}</span><br>
+                    ${uniqIPs.map(ip=>`<span style="color:#ffe83b;">${ip}</span>`).join('<br>')}
+                </div>`;
+            })
+            .onPolygonClick(d => {
+                if (!d) return;
+                const name = _polyName(d);
+                const hit = _attackHistory.find(a => a.country === name && (a.lat || a.lon));
+                if (hit) centerGlobeOn(hit.lat, hit.lon);
+            });
+    } catch(e) {
+        console.warn('countries.geojson unavailable:', e);
+    }
+}
+
 
 function pushAttack(a, isNew = true) {
     if (!a.lat && !a.lon) return; // skip LAN/0,0
@@ -161,7 +218,8 @@ function pushAttack(a, isNew = true) {
     // Arc: start (origin, dim) → end (HOME, hot). Persistent.
     // Store original attack timestamp for accurate age-based coloring
     const arcObj = { startLat: a.lat, startLng: a.lon, endLat: HOME.lat, endLng: HOME.lon,
-                     color: [c1, c2], attackTime: a.ts ? new Date(a.ts).getTime() : Date.now(),
+                     color: [c1, c2], phase: Math.random(),
+                     attackTime: a.ts ? new Date(a.ts).getTime() : Date.now(),
                      src_ip: a.src_ip, country: a.country, isp: a.isp,
                      dst_port: a.dst_port, protocol: a.protocol };
     arcs.push(arcObj);
@@ -613,6 +671,7 @@ async function loadStatic() {
     renderDevices(devs);
     bans.forEach(b => pushAttackHistory(b));
     renderCountries(ctys);
+    loadCountryPolygons();
 }
 
 function applyTabVisibility(cfg) {
@@ -654,10 +713,12 @@ function connectWS() {
             (m.proxy_attacks || []).forEach(a => { pushAttack(a, false); pushAttackHistory(a); });
             _globePaused = false; _histPaused = false;
             _globeFlush(); renderAttackHistory();
+            refreshCountryPolygons();
             (m.logs          || []).forEach(l => pushLog(l, false));
         } else if (m.type === 'attack' || m.type === 'ban') {
             pushAttack(m, true);
             if (m.type === 'ban' || m.source === 'proxy') pushAttackHistory(m);
+            refreshCountryPolygons();
             pushLog({ level: 'attack',
                       source: m.type === 'ban' ? 'fail2ban' : m.source || 'honeypot',
                       ts: m.ts,
