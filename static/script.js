@@ -871,8 +871,8 @@ setInterval(loadStatic, 60000);
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 const _loginOverlay = $('login-overlay');
-const _loginBtn     = $('login-btn');
 const _loginErr     = $('login-err');
+const _loginSubmit  = $('login-submit');
 
 function applyAuthState(authenticated) {
     document.querySelectorAll('.auth-only').forEach(el => {
@@ -881,7 +881,10 @@ function applyAuthState(authenticated) {
     document.querySelectorAll('.tab-btn:not([data-tab="threat"])').forEach(btn => {
         btn.style.display = authenticated ? '' : 'none';
     });
-    if (_loginOverlay) _loginOverlay.classList.toggle('hidden', authenticated);
+    // Show LOGIN button only when logged out
+    const loginHeaderBtn = $('login-btn');
+    if (loginHeaderBtn) loginHeaderBtn.style.display = authenticated ? 'none' : '';
+    if (authenticated) _loginOverlay.classList.add('hidden');
 }
 
 async function checkAuth() {
@@ -890,24 +893,35 @@ async function checkAuth() {
     return r.authenticated;
 }
 
-_loginBtn.addEventListener('click', async () => {
+// Open login modal
+$('login-btn').addEventListener('click', () => {
+    $('login-user').value = '';
+    $('login-pass').value = '';
     _loginErr.textContent = '';
-    _loginBtn.disabled = true;
-    _loginBtn.textContent = '…';
+    _loginOverlay.classList.remove('hidden');
+    setTimeout(() => $('login-user').focus(), 50);
+});
+$('login-close').addEventListener('click', () => _loginOverlay.classList.add('hidden'));
+_loginOverlay.addEventListener('click', e => { if (e.target === _loginOverlay) _loginOverlay.classList.add('hidden'); });
+
+_loginSubmit.addEventListener('click', async () => {
+    _loginErr.textContent = '';
+    _loginSubmit.disabled = true;
+    _loginSubmit.textContent = '…';
     const r = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: $('login-user').value, password: $('login-pass').value }),
     }).then(x => x.json()).catch(() => ({ ok: false, error: 'Network error' }));
-    _loginBtn.disabled = false;
-    _loginBtn.textContent = 'LOGIN';
+    _loginSubmit.disabled = false;
+    _loginSubmit.textContent = 'LOGIN';
     if (r.ok) {
         applyAuthState(true);
     } else {
-        _loginErr.textContent = r.error || 'Login failed';
+        _loginErr.textContent = r.error || 'Invalid credentials';
     }
 });
-$('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') _loginBtn.click(); });
+$('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') _loginSubmit.click(); });
 
 $('logout-btn').addEventListener('click', async () => {
     await fetch('/api/logout', { method: 'POST' });
