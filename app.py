@@ -275,6 +275,48 @@ def get_logs(limit: int = 200):
     return list(_log_buffer)[-limit:]
 
 
+@app.get("/api/config/full")
+def config_full():
+    """Return all editable config sections."""
+    import configparser
+    c = configparser.ConfigParser(interpolation=None)
+    c.read(conf.CONF_PATH)
+    result = {}
+    for section in c.sections():
+        result[section] = dict(c.items(section))
+    return result
+
+
+@app.post("/api/config/update")
+async def config_update(payload: dict = Body(...)):
+    """Update config file. Body: { section: { key: value } }"""
+    import configparser
+    c = configparser.ConfigParser(interpolation=None)
+    c.read(conf.CONF_PATH)
+    for section, keys in payload.items():
+        if not c.has_section(section):
+            c.add_section(section)
+        for key, value in keys.items():
+            c.set(section, key, str(value))
+    try:
+        os.makedirs(os.path.dirname(conf.CONF_PATH), exist_ok=True)
+        with open(conf.CONF_PATH, "w") as f:
+            c.write(f)
+        return {"ok": True, "note": "Restart service for changes to take effect."}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/config/export")
+def config_export():
+    """Download the raw config file."""
+    from fastapi.responses import FileResponse as FR
+    if os.path.exists(conf.CONF_PATH):
+        return FR(conf.CONF_PATH, media_type="text/plain",
+                  filename="sentinel-alert.conf")
+    return JSONResponse({"error": "config file not found"}, status_code=404)
+
+
 # Demo IPs for visual testing (real public ranges, geo-resolvable).
 DEMO_IPS = [
     "1.1.1.1", "8.8.8.8", "77.88.8.8", "114.114.114.114",
@@ -292,7 +334,12 @@ async def demo_attack(count: int = 5):
         for _ in range(max(1, min(count, 20))):
             ip = random.choice(DEMO_IPS)
             port = random.choice([22, 80, 443, 3389, 2222, 8080])
-            proto = "ssh" if port in (22, 2222) else "http"
+            if port in (22, 2222):
+                proto = "ssh"
+            elif port == 443:
+                proto = "https"
+            else:
+                proto = "http"
             lat, lon, country, isp = geoip.lookup(ip)
             ts = datetime.now().isoformat()
             conn.execute(
@@ -308,6 +355,24 @@ async def demo_attack(count: int = 5):
                 _broadcast_queue.put_nowait({
                     "type": "log", "level": "attack", "source": "demo",
                     "ts": ts, "msg": f"DEMO {proto.upper()} :{port} from {ip} ({country})"})
+            except asyncio.QueueFull:
+                pass
+        # Inject 2 demo fail2ban bans
+        for _ in range(2):
+            ip = random.choice(DEMO_IPS)
+            lat, lon, country, isp = geoip.lookup(ip)
+            ts = datetime.now().isoformat()
+            conn.execute(
+                "INSERT INTO ban_history (ip, country, lat, lon, isp, timestamp) VALUES (?,?,?,?,?,?)",
+                (ip, country, lat, lon, isp, ts),
+            )
+            ban_ev = {"type": "ban", "src_ip": ip, "dst_port": 22, "protocol": "fail2ban",
+                      "ts": ts, "country": country, "lat": lat, "lon": lon, "isp": isp}
+            try:
+                _broadcast_queue.put_nowait(ban_ev)
+                _broadcast_queue.put_nowait({
+                    "type": "log", "level": "attack", "source": "demo",
+                    "ts": ts, "msg": f"DEMO FAIL2BAN :22 from {ip} ({country})"})
             except asyncio.QueueFull:
                 pass
         conn.commit()
@@ -341,6 +406,43 @@ async def save_topo_data(data: dict = Body(...)):
 @app.get("/api/blocklist")
 def get_blocklist():
     return {"entries": blocklist.get(), "stats": blocklist.stats()}
+
+
+@app.get("/api/report/data")
+def report_data():
+    """Aggregate all data needed for PDF report generation."""
+    from datetime import timedelta
+    since_24h = (datetime.now() - timedelta(hours=24)).isoformat()
+    attacks_24h = _query(
+        "SELECT ts, src_ip, dst_port, protocol, country, isp FROM attacks "
+        "WHERE ts >= ? ORDER BY ts DESC LIMIT 500", (since_24h,)
+    )
+    bans_24h = _query(
+        "SELECT ip AS src_ip, country, isp, timestamp AS ts FROM ban_history "
+        "WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT 200", (since_24h,)
+    )
+    for b in bans_24h:
+        b["dst_port"] = 22; b["protocol"] = "fail2ban"
+    countries = _query(
+        "SELECT country, COUNT(*) AS hits FROM attacks "
+        "WHERE ts >= ? AND country NOT IN ('LAN','Unknown','Invalid','NoDB') "
+        "GROUP BY country ORDER BY hits DESC LIMIT 20", (since_24h,)
+    )
+    devices = _query(
+        "SELECT mac, ip, hostname, vendor, is_online, last_seen, ports FROM devices "
+        "ORDER BY is_online DESC, last_seen DESC"
+    )
+    return {
+        "generated_at": datetime.now().isoformat(),
+        "attacks_24h":  attacks_24h,
+        "bans_24h":     bans_24h,
+        "countries":    countries,
+        "devices":      devices,
+        "proxy":        sniproxy.data_store if conf.SNIPROXY_SERVER else {},
+        "fsc":          fsc.data_store      if conf.FSC_ENABLED else {},
+        "logs":         list(_log_buffer)[-100:],
+        "proxy_attacks_24h": list(_proxy_attack_history),
+    }
 
 
 _NET_SETTINGS_FILE = os.path.join(BASE_DIR, "data", "net_settings.json")

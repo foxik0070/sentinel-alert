@@ -248,6 +248,19 @@ html, body {
 .cfg-result.ok   { color: var(--green); }
 .cfg-result.err  { color: var(--red); }
 
+/* Settings tabs */
+.cfg-tabs { display: flex; gap: 2px; border-bottom: 1px solid #14333a; padding-bottom: 6px; margin: 8px 0; }
+.cfg-tab  { background: transparent; border: 1px solid transparent; color: var(--muted); font-family: inherit;
+            font-size: 9px; letter-spacing: 2px; padding: 4px 10px; cursor: pointer; }
+.cfg-tab:hover  { color: var(--fg); border-color: #14333a; }
+.cfg-tab.active { color: var(--accent); border-color: var(--accent); background: rgba(0,255,213,0.05); }
+.cfg-section    { font-size: 9px; font-weight: 800; letter-spacing: 2px; color: #4d7479;
+                  margin: 12px 0 6px; padding-top: 8px; border-top: 1px solid #0e2228; }
+.cfg-section:first-child { margin-top: 0; border-top: none; }
+.cfg-toggle-row { display: flex !important; align-items: center; justify-content: space-between;
+                  flex-direction: row !important; margin-top: 8px; }
+.cfg-toggle-row span, .cfg-toggle-row label.fsc-toggle { margin-top: 0; }
+
 /* Fullscreen button */
 .btn-fullscreen {
     background: transparent; color: var(--accent); border: none;

@@ -9,6 +9,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
 <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 </head>
 <body>
 <div class="scanlines"></div>
@@ -27,7 +28,7 @@
         <span class="val danger" id="hud-attacks">0</span>
     </div>
     <div class="hud-cell hud-hide-sm">
-        <span class="lbl">UTC</span>
+        <span class="lbl">LOCAL</span>
         <span class="val" id="hud-clock">--:--:--</span>
     </div>
     <div class="hud-cell hud-hide-md">
@@ -47,31 +48,93 @@
             <button class="tab-btn" data-tab="network" id="tab-btn-network">NETWORK MAP</button>
         </div>
         <button id="settings-btn" class="btn hud-hide-sm">⚙ SETTINGS</button>
-        <button id="demo-btn" class="btn hud-hide-sm">INJECT DEMO</button>
+        <button id="report-btn" class="btn hud-hide-sm">PDF REPORT</button>
     </div>
 </header>
 
 <!-- SETTINGS MODAL -->
 <div id="settings-modal" class="modal hidden">
-    <div class="modal-box">
-        <div class="ph"><span>◤ SENTINEL LINK</span>
-            <span class="chip" id="settings-status">DISCONNECTED</span></div>
-        <label>Sentinel URL
-            <input id="cfg-url" type="text" placeholder="https://sentinel.example.com">
-        </label>
-        <label>Bearer Token
-            <input id="cfg-token" type="password" placeholder="••••••••">
-        </label>
-        <label>Agent hostname
-            <input id="cfg-hostname" type="text" placeholder="sentinel-alert">
-        </label>
-        <div class="modal-actions">
-            <button class="btn" id="cfg-test">TEST</button>
-            <button class="btn primary" id="cfg-save">SAVE &amp; CONNECT</button>
-            <button class="btn" id="cfg-reset" style="color:#ff2a5e;border-color:#ff2a5e;">RESET</button>
-            <button class="btn ghost" id="cfg-close">CLOSE</button>
+    <div class="modal-box" style="width:600px;max-height:88vh;display:flex;flex-direction:column;">
+        <div class="ph" style="flex-shrink:0;">
+            <span>◤ SETTINGS</span>
+            <button class="btn ghost" id="cfg-close">✕</button>
         </div>
-        <div id="cfg-result" class="cfg-result"></div>
+        <!-- Tab bar -->
+        <div class="cfg-tabs" id="cfg-tab-bar" style="flex-shrink:0;">
+            <button class="cfg-tab active" data-cfg-tab="sentinel">SENTINEL</button>
+            <button class="cfg-tab" data-cfg-tab="system">SYSTEM</button>
+            <button class="cfg-tab" data-cfg-tab="modules">MODULES</button>
+            <button class="cfg-tab" data-cfg-tab="hosts">HOSTS</button>
+        </div>
+        <!-- Tab panes (scrollable) -->
+        <div style="overflow-y:auto;flex:1;padding:8px 2px;">
+            <!-- SENTINEL -->
+            <div class="cfg-pane" id="cfg-pane-sentinel">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                    <span style="font-size:9px;letter-spacing:2px;color:#4d7479;">BRIDGE STATUS</span>
+                    <span class="chip" id="settings-status">DISCONNECTED</span>
+                </div>
+                <label>Sentinel URL<input id="cfg-url" type="text" placeholder="https://sentinel.example.com"></label>
+                <label>Bearer Token<input id="cfg-token" type="password" placeholder="••••••••"></label>
+                <label>Agent hostname<input id="cfg-hostname" type="text" placeholder="sentinel-alert"></label>
+                <div class="modal-actions">
+                    <button class="btn" id="cfg-test">TEST</button>
+                    <button class="btn primary" id="cfg-save">SAVE &amp; CONNECT</button>
+                    <button class="btn" id="cfg-reset" style="color:#ff2a5e;border-color:#ff2a5e;">RESET</button>
+                </div>
+                <div id="cfg-result" class="cfg-result"></div>
+            </div>
+            <!-- SYSTEM -->
+            <div class="cfg-pane hidden" id="cfg-pane-system">
+                <div class="cfg-section">SERVER</div>
+                <label>Listen host<input id="cfg-srv-host" type="text" placeholder="0.0.0.0"></label>
+                <label>Listen port<input id="cfg-srv-port" type="number" placeholder="5056"></label>
+                <div class="cfg-section">HOME LOCATION</div>
+                <label>Latitude (0 = auto-detect)<input id="cfg-home-lat" type="text" placeholder="0"></label>
+                <label>Longitude<input id="cfg-home-lon" type="text" placeholder="0"></label>
+                <div class="cfg-section">HONEYPOT</div>
+                <label>SSH honeypot port<input id="cfg-hp-ssh" type="number" placeholder="2222"></label>
+                <label>HTTP honeypot port<input id="cfg-hp-http" type="number" placeholder="8080"></label>
+                <div class="modal-actions">
+                    <button class="btn primary" id="cfg-system-save">SAVE</button>
+                    <div id="cfg-system-result" class="cfg-result" style="margin-top:0;flex:1;text-align:right;"></div>
+                </div>
+            </div>
+            <!-- MODULES -->
+            <div class="cfg-pane hidden" id="cfg-pane-modules">
+                <div class="cfg-section">LAN SCANNER</div>
+                <label class="cfg-toggle-row">Enabled
+                    <label class="fsc-toggle"><input type="checkbox" id="cfg-scanner-en"><span class="fsc-slider"></span></label>
+                </label>
+                <div class="cfg-section">PROXY MONITOR (sniproxy)</div>
+                <label>Remote server IP<input id="cfg-sni-server" type="text" placeholder="192.168.x.x"></label>
+                <label>SSH user<input id="cfg-sni-user" type="text" placeholder="root"></label>
+                <label>Log files (comma-separated)<input id="cfg-sni-logs" type="text" placeholder="/var/log/sniproxy/..."></label>
+                <div class="cfg-section">SECURITY CENTER</div>
+                <label class="cfg-toggle-row">Enabled
+                    <label class="fsc-toggle"><input type="checkbox" id="cfg-fsc-en"><span class="fsc-slider"></span></label>
+                </label>
+                <label>HA URL<input id="cfg-fsc-ha-url" type="text" placeholder="http://homeassistant:8123"></label>
+                <label>HA Token<input id="cfg-fsc-ha-token" type="password" placeholder="••••••••"></label>
+                <label>Ignore IPs (comma-separated)<input id="cfg-fsc-ignore" type="text" placeholder="192.168.2.1,..."></label>
+                <div class="cfg-section">COLLECTOR</div>
+                <label>SSH user<input id="cfg-col-user" type="text" placeholder="root"></label>
+                <label>Hosts file<input id="cfg-col-hosts" type="text" placeholder="/etc/hosts"></label>
+                <label>Monitor hosts (empty = auto)<input id="cfg-col-monitor" type="text" placeholder="host1,host2,..."></label>
+                <div class="cfg-section">THREAT / BLOCKLIST</div>
+                <label>Blocked IPs file<input id="cfg-threat-file" type="text" placeholder="/path/to/blocked.txt"></label>
+                <div class="modal-actions">
+                    <button class="btn primary" id="cfg-modules-save">SAVE</button>
+                    <button class="btn" id="cfg-export">EXPORT CONFIG</button>
+                    <div id="cfg-modules-result" class="cfg-result" style="margin-top:0;flex:1;text-align:right;"></div>
+                </div>
+            </div>
+            <!-- HOSTS -->
+            <div class="cfg-pane hidden" id="cfg-pane-hosts">
+                <div style="font-size:10px;color:#4d7479;margin-bottom:8px;">Per-device notification settings. Click a device to edit in detail modal.</div>
+                <div id="cfg-hosts-list"></div>
+            </div>
+        </div>
     </div>
 </div>
 
