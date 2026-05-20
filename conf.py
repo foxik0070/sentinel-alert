@@ -81,3 +81,8 @@ FSC_IGNORE_IPS = [
 
 # [threat]
 BLOCKLIST_FILE = _s("threat", "blocks_ips_file", "")
+
+# [mode]
+MODE_TYPE     = _s("mode", "type",     "home")  # 'home' or 'work'
+MODE_IPS_FILE = _s("mode", "ips_file", "")      # work: extra blocked-IPs file (same globe viz as blocklist)
+MODE_WHO_FILE = _s("mode", "who_file", "")      # work: users file (CSV: name,dept,ip,note)

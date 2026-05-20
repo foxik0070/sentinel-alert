@@ -60,11 +60,13 @@ let _lastCfg = {};
 const TX_NIGHT = '//unpkg.com/three-globe/example/img/earth-night.jpg';
 const TX_DAY   = '//unpkg.com/three-globe/example/img/earth-blue-marble.jpg';
 
+let _manualDay = null; // null = auto (time-based), true/false = user override
+
 function pickTexture() {
-    const h = new Date().getHours();
-    const day = (h >= 7 && h < 19);
-    globeModeEl.textContent = day ? 'DAY' : 'NIGHT';
-    return day ? TX_DAY : TX_NIGHT;
+    const autoDay = new Date().getHours() >= 7 && new Date().getHours() < 19;
+    const isDay = _manualDay !== null ? _manualDay : autoDay;
+    globeModeEl.textContent = isDay ? 'DAY' : 'NIGHT';
+    return isDay ? TX_DAY : TX_NIGHT;
 }
 
 const globe = Globe()(globeEl)
@@ -135,8 +137,13 @@ window.addEventListener('resize', () => {
 });
 if (_SOLO_GLOBE) setTimeout(() => globe.width(globeEl.clientWidth).height(globeEl.clientHeight), 50);
 
-// Refresh texture every 15 min (covers day/night transition).
-setInterval(() => globe.globeImageUrl(pickTexture()), 15 * 60 * 1000);
+// Refresh texture every 15 min (auto mode covers day/night transition).
+setInterval(() => { if (_manualDay === null) globe.globeImageUrl(pickTexture()); }, 15 * 60 * 1000);
+
+globeModeEl.addEventListener('click', () => {
+    _manualDay = globeModeEl.textContent !== 'DAY';
+    globe.globeImageUrl(pickTexture());
+});
 
 // Protocol colors [r,g,b] at full brightness — age dims them
 const PROTO_RGB = {
@@ -554,6 +561,33 @@ document.getElementById('vsw-modal').addEventListener('click', e => {
     if (e.target === document.getElementById('vsw-modal')) document.getElementById('vsw-modal').classList.add('hidden');
 });
 
+// ── Work mode ─────────────────────────────────────────────────────────────
+let _workMode = false;
+
+function renderUsers(list) {
+    const el = $('users-list');
+    const countEl = $('users-count');
+    if (!el) return;
+    if (countEl) countEl.textContent = list.length;
+    if (!list.length) {
+        el.innerHTML = '<div class="empty">No users configured</div>';
+        return;
+    }
+    el.innerHTML = '<div class="who-hdr"><span>NAME / DEPT</span><span>IP</span><span>NOTE</span></div>'
+        + list.map(u => `
+        <div class="who-row">
+            <div><div class="who-name">${u.name || '—'}</div><div class="who-dept">${u.dept || ''}</div></div>
+            <div class="who-ip">${u.ip || '—'}</div>
+            <div style="color:var(--muted);font-size:10px;">${u.note || ''}</div>
+        </div>`).join('');
+}
+
+async function loadUsers() {
+    const list = await fetch('/api/who').then(r => r.json()).catch(() => []);
+    renderUsers(list);
+}
+
+// ── Attack history ─────────────────────────────────────────────────────────
 const _ATTACK_HIST_MAX_S = 24 * 3600;
 
 function pushAttackHistory(entry) {
@@ -719,36 +753,67 @@ async function loadStatic() {
         // Tab visibility based on config flags
         applyTabVisibility(cfg);
 
-        // Load blocklist onto globe
+        // Load blocklist / work IPS onto globe
         if (cfg.blocklist_enabled) loadBlocklist();
+        // Load work mode users
+        if (cfg.work_mode && cfg.who_enabled) loadUsers();
     } catch {}
-    const [devs, bans, ctys, netCfgInit] = await Promise.all([
-        fetch('/api/devices').then(r => r.json()),
+    const fetches = [
         fetch('/api/bans').then(r => r.json()),
         fetch('/api/stats/countries').then(r => r.json()),
-        fetch('/api/network/settings').then(r => r.json()).catch(() => ({})),
-    ]);
-    _netSettings = netCfgInit;
-    renderDevices(devs);
+    ];
+    // Only fetch devices and network settings in home mode
+    if (!_workMode) {
+        fetches.push(fetch('/api/devices').then(r => r.json()));
+        fetches.push(fetch('/api/network/settings').then(r => r.json()).catch(() => ({})));
+    }
+    const results = await Promise.all(fetches);
+    const [bans, ctys] = results;
+    if (!_workMode) {
+        const [, , devs, netCfgInit] = results;
+        _netSettings = netCfgInit || {};
+        renderDevices(devs || []);
+    }
     bans.forEach(b => pushAttackHistory(b));
     renderCountries(ctys);
     loadCountryPolygons();
 }
 
 function applyTabVisibility(cfg) {
+    _workMode = cfg.work_mode === true;
+
     const btnSecurity = $('tab-btn-security');
     const btnProxy    = $('tab-btn-proxy');
     const btnNetwork  = $('tab-btn-network');
+    const settingsBtn = $('settings-btn');
     const lanPanel    = $('lan-panel');
+    const usersPanel  = $('users-panel');
     const logPanel    = $('log-panel');
-    // Auth gates all protected elements; config flags further restrict them
-    if (btnSecurity) btnSecurity.style.display = (_isAuthenticated && cfg.fsc_enabled !== false) ? '' : 'none';
-    if (btnProxy)    btnProxy.style.display    = (_isAuthenticated && cfg.sniproxy_enabled)      ? '' : 'none';
-    if (btnNetwork)  btnNetwork.style.display  = (_isAuthenticated && cfg.scanner_enabled)       ? '' : 'none';
-    if (lanPanel)    lanPanel.style.display    = (_isAuthenticated && cfg.scanner_enabled)       ? '' : 'none';
-    if (logPanel)    logPanel.style.display    = _isAuthenticated                                ? '' : 'none';
-    const mainGrid = document.querySelector('.grid');
-    if (mainGrid) mainGrid.classList.toggle('no-scanner', !cfg.scanner_enabled || !_isAuthenticated);
+
+    if (_workMode) {
+        // Work mode: hide home-only tabs and panels entirely (regardless of auth)
+        if (btnSecurity) btnSecurity.style.display = 'none';
+        if (btnProxy)    btnProxy.style.display    = 'none';
+        if (btnNetwork)  btnNetwork.style.display  = 'none';
+        if (settingsBtn) settingsBtn.style.display  = 'none';
+        if (lanPanel)    lanPanel.style.display    = 'none';
+        // Show users panel if auth granted
+        if (usersPanel)  usersPanel.style.display  = _isAuthenticated ? '' : 'none';
+        if (logPanel)    logPanel.style.display    = _isAuthenticated ? '' : 'none';
+        const mainGrid = document.querySelector('.grid');
+        if (mainGrid) mainGrid.classList.toggle('no-scanner', !_isAuthenticated);
+    } else {
+        // Home mode: auth + config flags
+        if (btnSecurity) btnSecurity.style.display = (_isAuthenticated && cfg.fsc_enabled !== false) ? '' : 'none';
+        if (btnProxy)    btnProxy.style.display    = (_isAuthenticated && cfg.sniproxy_enabled)      ? '' : 'none';
+        if (btnNetwork)  btnNetwork.style.display  = (_isAuthenticated && cfg.scanner_enabled)       ? '' : 'none';
+        if (settingsBtn) settingsBtn.style.display  = _isAuthenticated ? '' : 'none';
+        if (lanPanel)    lanPanel.style.display    = (_isAuthenticated && cfg.scanner_enabled)       ? '' : 'none';
+        if (usersPanel)  usersPanel.style.display  = 'none';
+        if (logPanel)    logPanel.style.display    = _isAuthenticated                                ? '' : 'none';
+        const mainGrid = document.querySelector('.grid');
+        if (mainGrid) mainGrid.classList.toggle('no-scanner', !cfg.scanner_enabled || !_isAuthenticated);
+    }
 }
 
 async function loadBlocklist() {
@@ -994,9 +1059,25 @@ function applyAuthState(authenticated) {
     // Always hide auth-gated panels when logged out
     const lanPanel = $('lan-panel');
     const logPanel = $('log-panel');
+    const usersPanel = $('users-panel');
     if (!authenticated) {
-        if (lanPanel) lanPanel.style.display = 'none';
-        if (logPanel) logPanel.style.display = 'none';
+        if (lanPanel)   lanPanel.style.display   = 'none';
+        if (logPanel)   logPanel.style.display   = 'none';
+        if (usersPanel) usersPanel.style.display = 'none';
+    }
+    // Work mode: re-hide elements that auth-only unhid but work mode forbids
+    if (_workMode && authenticated) {
+        const settingsBtn = $('settings-btn');
+        const btnSecurity = $('tab-btn-security');
+        const btnProxy    = $('tab-btn-proxy');
+        const btnNetwork  = $('tab-btn-network');
+        if (settingsBtn) settingsBtn.style.display = 'none';
+        if (btnSecurity) btnSecurity.style.display = 'none';
+        if (btnProxy)    btnProxy.style.display    = 'none';
+        if (btnNetwork)  btnNetwork.style.display  = 'none';
+        if (lanPanel)    lanPanel.style.display    = 'none';
+        if (usersPanel)  usersPanel.style.display  = '';
+        if (logPanel)    logPanel.style.display    = '';
     }
     // Show LOGIN button only when logged out
     const loginHeaderBtn = $('login-btn');

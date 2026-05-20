@@ -172,6 +172,24 @@ fi
 # ── interactive config ──────────────────────────────────────────────────────
 if [[ "$SKIP_CONF" == "false" ]]; then
 
+    echo -e "${CYN}── Deployment Mode ──────────────────────────────${NC}"
+    warn "Choose 'work' for a work/corporate deployment."
+    warn "  work: hides Local Network, Security Center, Proxy Monitor, Network Map, Settings"
+    warn "        shows USERS panel (from who_file) and IPS attackers on globe"
+    read -rp "  Deployment mode [home/work, default: home]: " _mode
+    _mode="${_mode:-home}"
+    [[ "$_mode" == "work" ]] && MODE_TYPE="work" || MODE_TYPE="home"
+
+    MODE_IPS_FILE=""
+    MODE_WHO_FILE=""
+    if [[ "$MODE_TYPE" == "work" ]]; then
+        warn "IPS file: one blocked IP per line — visualized on globe as attackers."
+        ask MODE_IPS_FILE "Path to IPS file (empty to skip)" ""
+        warn "WHO file: CSV — name,department,ip,note"
+        ask MODE_WHO_FILE "Path to WHO file (empty to skip)" ""
+    fi
+
+    echo ""
     echo -e "${CYN}── Authentication ───────────────────────────────${NC}"
     warn "Dashboard login credentials (default: admin / admin)."
     warn "Change before exposing to any network!"
@@ -270,6 +288,16 @@ if [[ "$SKIP_CONF" == "false" ]]; then
 #
 # Re-run setup:   sudo $APP_DIR/setup.sh --reconf
 # Uninstall:      sudo $APP_DIR/setup.sh --uninstall
+
+[mode]
+# Deployment type: 'home' or 'work'
+# work: hides Local Network, Security Center, Proxy Monitor, Network Map, Settings
+#       shows USERS panel (who_file) and IPS file attackers on the globe
+type     = ${MODE_TYPE}
+# Path to file with one blocked/monitored IP per line (visualized on globe)
+ips_file = ${MODE_IPS_FILE}
+# Path to CSV file with users: name,department,ip,note
+who_file = ${MODE_WHO_FILE}
 
 [auth]
 # Dashboard login credentials

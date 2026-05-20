@@ -23,6 +23,7 @@ import geoip
 import honeypot
 import sniproxy
 import tasks
+import workmode
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -228,9 +229,18 @@ def get_config():
         "scanner_enabled": conf.SCANNER_ENABLED,
         "fsc_enabled": conf.FSC_ENABLED,
         "sniproxy_enabled": bool(conf.SNIPROXY_SERVER),
-        "blocklist_enabled": bool(conf.BLOCKLIST_FILE),
+        "blocklist_enabled": bool(conf.BLOCKLIST_FILE or conf.MODE_IPS_FILE),
         "blocklist_stats": blocklist.stats(),
+        # Work mode
+        "work_mode": workmode.is_work(),
+        "who_enabled": bool(conf.MODE_WHO_FILE),
     }
+
+
+@app.get("/api/who")
+def get_who():
+    """Work mode: return users from WHO file."""
+    return workmode.get_users()
 
 
 @app.post("/api/sentinel/configure")

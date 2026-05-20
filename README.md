@@ -112,6 +112,18 @@ password = admin
 # HMAC secret for session tokens — leave blank to auto-generate on each start
 secret   =
 
+[mode]
+# Deployment mode: "home" (default) or "work"
+# In work mode: Security Center, Proxy Monitor, Network Map and Settings
+# tabs are hidden; the USERS panel replaces Local Network.
+type     = home
+# Path to a file of blocked IPs (one per line, # comments allowed).
+# These are visualized as attack arcs on the globe exactly like fail2ban bans.
+ips_file =
+# Path to a CSV file listing known users (name,dept,ip,note).
+# Shown in the USERS panel when authenticated.
+who_file =
+
 [server]
 host     = 0.0.0.0
 port     = 5056
@@ -169,6 +181,58 @@ Config is read at startup. After editing, restart the service:
 ```bash
 sudo systemctl restart sentinel-alert
 ```
+
+---
+
+## Work Mode
+
+Work mode adapts the dashboard for office deployments where LAN scanning and security auditing are not available or not needed.
+
+### Enable
+
+```ini
+[mode]
+type     = work
+ips_file = /etc/sentinel/blocked.txt
+who_file = /etc/sentinel/users.csv
+```
+
+### UI differences
+
+| Feature | Home mode | Work mode |
+|---------|-----------|-----------|
+| Threat Map (globe) | visible to all | visible to all |
+| SYSTEM LOGS panel | auth required | auth required |
+| **LOCAL NETWORK panel** | auth required | **hidden** |
+| **USERS panel** | hidden | auth required |
+| Security Center tab | auth + config | **hidden** |
+| Proxy Monitor tab | auth + config | **hidden** |
+| Network Map tab | auth + config | **hidden** |
+| Settings tab | auth required | **hidden** |
+
+### IPS file format
+
+One IP address per line. Lines starting with `#` are ignored. The IPs are geo-resolved and visualised on the globe exactly like fail2ban bans (attack arcs, country coloring, attack cards).
+
+```
+# Blocklist for office network
+1.2.3.4
+5.6.7.8
+# Another block
+10.20.30.40
+```
+
+### WHO file format
+
+CSV with a header row. Fields: `name,dept,ip,note`.
+
+```csv
+name,dept,ip,note
+Alice Smith,Engineering,192.168.2.10,workstation
+Bob Jones,Marketing,192.168.2.11,laptop
+```
+
+All fields except `name` are optional. The USERS panel shows a searchable table of all entries.
 
 ---
 
@@ -290,6 +354,7 @@ All endpoints returning sensitive data require authentication (session cookie).
 | GET | `/api/config/full` | yes | Full INI config as JSON |
 | POST | `/api/config/update` | yes | Update config file |
 | GET | `/api/config/export` | yes | Download raw `.conf` file |
+| GET | `/api/who` | no | Work mode user list (from WHO file) |
 | GET | `/api/devices` | no | LAN devices |
 | GET | `/api/attacks` | no | Recent honeypot attacks |
 | GET | `/api/bans` | no | fail2ban ban history |

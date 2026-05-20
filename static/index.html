@@ -52,7 +52,10 @@
         <span class="lbl">SENTINEL</span>
         <span class="val" id="hud-sentinel">OFF</span>
     </div>
-    <div class="hud-title">SENTINEL // ALERT</div>
+    <div class="hud-title">
+        <div><span class="ht-sentinel">SENTINEL</span><span class="ht-sep">//</span><span class="ht-alert">ALERT</span></div>
+        <span class="ht-ver">v 2026.05.009</span>
+    </div>
     <div class="hud-cell right">
         <div class="tab-group">
             <button class="tab-btn active" data-tab="threat">THREAT MAP</button>
@@ -161,6 +164,11 @@
     <section class="panel red" id="lan-panel">
         <div class="ph"><span>◤ LOCAL NETWORK</span><button class="btn-fullscreen" data-target="lan-panel" title="Fullscreen">⛶</button><button id="add-switch-btn" class="btn" style="font-size:9px;padding:2px 7px;margin-left:4px;">+ SW</button><span class="chip" id="net-count">0</span></div>
         <div id="net-list" class="scroll"></div>
+    </section>
+
+    <section class="panel red" id="users-panel" style="display:none;">
+        <div class="ph"><span>◤ USERS</span><span class="chip" id="users-count">0</span></div>
+        <div id="users-list" class="scroll"></div>
     </section>
 
     <section class="panel yellow globe-panel" id="globe-panel">
@@ -460,5 +468,6 @@
 </div>
 
 <script src="/static/script.js"></script>
+<footer class="hud-bottom">FoxiK 2026</footer>
 </body>
 </html>
