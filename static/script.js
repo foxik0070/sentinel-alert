@@ -42,7 +42,7 @@ function pickTexture() {
     return day ? TX_DAY : TX_NIGHT;
 }
 
-const globe = Globe({ rendererConfig: { preserveDrawingBuffer: true } })(globeEl)
+const globe = Globe()(globeEl)
     .globeImageUrl(pickTexture())
     .backgroundColor('rgba(0,0,0,0)')
     .showAtmosphere(true)
