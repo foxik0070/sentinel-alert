@@ -786,9 +786,18 @@ $('report-btn').addEventListener('click', generateReport);
 
 async function generateReport() {
     const btn = $('report-btn');
-    btn.textContent = 'GENERATING…';
+    btn.textContent = 'LOADING…';
     btn.disabled = true;
     try {
+        if (!window.jspdf) {
+            await new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js';
+                s.onload = resolve; s.onerror = reject;
+                document.head.appendChild(s);
+            });
+        }
+        btn.textContent = 'GENERATING…';
         await _doGenerateReport();
     } catch(e) {
         alert('Report generation failed: ' + e.message);
