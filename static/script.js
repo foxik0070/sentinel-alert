@@ -408,6 +408,16 @@ function _attackHistClick(row) {
     pushAttack._t = setTimeout(() => card.classList.remove('hot'), 10000);
 }
 
+function _fmtLocalTs(ts) {
+    if (!ts) return { time: '—', date: '' };
+    const d = new Date(ts);
+    if (isNaN(d)) return { time: ts.substring(11, 16), date: ts.substring(0, 10) };
+    return {
+        time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        date: d.toLocaleDateString([], { month: '2-digit', day: '2-digit' }),
+    };
+}
+
 function renderAttackHistory() {
     if (!_attackHistory.length) {
         attackHistEl.innerHTML = '<div class="empty">No attack history yet.</div>';
@@ -415,17 +425,24 @@ function renderAttackHistory() {
     }
     const _PROTO_LABEL = { fail2ban: 'F2B', ssh: 'SSH', http: 'HTTP', https: 'HTTPS' };
     attackHistEl.innerHTML = _attackHistory.map(b => {
-        const timeStr = b.ts ? b.ts.replace('T', ' ').substring(0, 16) : '—';
+        const { time, date } = _fmtLocalTs(b.ts);
         const proto   = b.protocol || 'fail2ban';
         const label   = _PROTO_LABEL[proto] || proto.toUpperCase();
         const portCls = proto === 'fail2ban' ? 'port ssh' : proto === 'https' ? 'port web' : 'port';
         return `<div class="row ban clickable" data-lat="${b.lat}" data-lon="${b.lon}"
                      data-ip="${escape(b.src_ip)}" data-country="${escape(b.country)}"
                      data-isp="${escape(b.isp)}" data-port="${b.dst_port}" data-protocol="${proto}">
-            <span class="${portCls}" style="min-width:38px;text-align:center;">${label}</span>
-            <span class="ip" style="flex:1">${escape(b.src_ip)}</span>
-            <span class="country" style="min-width:60px;">${escape(b.country)}</span>
-            <span class="meta" style="min-width:90px;text-align:right;">${timeStr}</span>
+            <span class="${portCls}" style="min-width:38px;text-align:center;align-self:center;">${label}</span>
+            <div style="flex:1;min-width:0;padding-left:4px;">
+                <div style="display:flex;justify-content:space-between;gap:4px;">
+                    <span class="ip" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escape(b.src_ip)}</span>
+                    <span class="meta" style="white-space:nowrap;">${time}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:4px;">
+                    <span style="color:#4d7479;font-size:10px;">${escape(b.country)}</span>
+                    <span style="color:#4d7479;font-size:10px;white-space:nowrap;">${date}</span>
+                </div>
+            </div>
         </div>`;
     }).join('');
     attackHistEl.querySelectorAll('.ban.clickable').forEach(row => {
@@ -555,9 +572,10 @@ function connectWS() {
     ws.onmessage = (ev) => {
         const m = JSON.parse(ev.data);
         if (m.type === 'snapshot') {
-            (m.attacks || []).forEach(a => pushAttack(a, false));
-            (m.bans    || []).forEach(b => { pushAttack(b, false); pushAttackHistory(b); });
-            (m.logs    || []).forEach(l => pushLog(l, false));
+            (m.attacks       || []).forEach(a => pushAttack(a, false));
+            (m.bans          || []).forEach(b => { pushAttack(b, false); pushAttackHistory(b); });
+            (m.proxy_attacks || []).forEach(a => { pushAttack(a, false); pushAttackHistory(a); });
+            (m.logs          || []).forEach(l => pushLog(l, false));
         } else if (m.type === 'attack' || m.type === 'ban') {
             pushAttack(m, true);
             if (m.type === 'ban' || m.source === 'proxy') pushAttackHistory(m);

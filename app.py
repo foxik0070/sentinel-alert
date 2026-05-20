@@ -68,6 +68,7 @@ async def _detect_home():
 _clients: Set[WebSocket] = set()
 _broadcast_queue: asyncio.Queue = asyncio.Queue(maxsize=2048)
 _log_buffer: deque = deque(maxlen=400)
+_proxy_attack_history: deque = deque(maxlen=500)  # last 24h proxy attacks
 
 
 def _query(sql, params=()):
@@ -118,8 +119,15 @@ async def lifespan(app: FastAPI):
     )
 
     def _sniproxy_attack(ev: dict):
+        entry = {**ev, "source": "proxy"}
+        _proxy_attack_history.append(entry)
+        # Prune entries older than 24h
+        from datetime import timedelta
+        cutoff = datetime.now() - timedelta(hours=24)
+        while _proxy_attack_history and _proxy_attack_history[0].get("ts", "") < cutoff.isoformat():
+            _proxy_attack_history.popleft()
         try:
-            _broadcast_queue.put_nowait({**ev, "source": "proxy"})
+            _broadcast_queue.put_nowait(entry)
             _broadcast_queue.put_nowait({
                 "type": "log", "level": "attack", "source": "proxy",
                 "ts": ev["ts"],
@@ -402,6 +410,7 @@ async def ws_live(ws: WebSocket):
         await ws.send_json({"type": "snapshot",
                             "attacks": list(reversed(recent)),
                             "bans": list(reversed(bans)),
+                            "proxy_attacks": list(_proxy_attack_history),
                             "logs": list(_log_buffer)})
         while True:
             await ws.receive_text()
