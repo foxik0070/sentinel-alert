@@ -253,8 +253,7 @@ function renderDevices(list) {
     });
 }
 
-let _allDevices = [];   // cache for parent selector
-let _netSettings = {}; // cache for device notification settings
+let _allDevices = [];    // cache for parent selector
 let _attackHistory = []; // combined fail2ban + proxy attacks, last 24h
 
 async function openDeviceModal(mac) {

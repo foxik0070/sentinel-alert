@@ -373,7 +373,7 @@ async def net_settings_post(payload: dict = Body(...)):
     devices[mac] = {
         "notify_connect":    bool(payload.get("notify_connect",    existing.get("notify_connect",    True))),
         "notify_disconnect": bool(payload.get("notify_disconnect", existing.get("notify_disconnect", True))),
-        "notify_new":        bool(payload.get("notify_new",        existing.get("notify_new",        False))),
+        "notify_new":        bool(payload.get("notify_new",        existing.get("notify_new",        True))),
         "type":        payload.get("type",        existing.get("type",        "host")),
         "parent_mac":  payload.get("parent_mac",  existing.get("parent_mac",  "")),
         "parent_port": payload.get("parent_port", existing.get("parent_port", "")),
