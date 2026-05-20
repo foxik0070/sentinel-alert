@@ -25,7 +25,13 @@ const acVec      = $('ac-vec');
 
 let HOME = { lat: 49.8209, lon: 18.2625 };
 let attackCount = 0;
-const MAX_ARCS = 500, MAX_PTS = 500, MAX_LABELS = 30, MAX_FEED = 200;
+const MAX_ARCS = 100, MAX_PTS = 200, MAX_LABELS = 30, MAX_FEED = 200;
+let _globePaused = false, _histPaused = false;
+function _globeFlush() {
+    globe.arcsData([...arcs]);
+    globe.pointsData([...points, ...homePoints]);
+    globe.labelsData([...labels]);
+}
 
 const arcs = [], points = [], labels = [], rings = [];
 const arcTimestamps = []; // track arc creation time for age-based coloring
@@ -163,21 +169,17 @@ function pushAttack(a, isNew = true) {
                      dst_port: a.dst_port, protocol: a.protocol };
     arcs.push(arcObj);
     arcTimestamps.push(Date.now());
-    while (arcs.length > MAX_ARCS) {
-        arcs.shift();
-        arcTimestamps.shift();
-    }
-    globe.arcsData([...arcs]);
+    while (arcs.length > MAX_ARCS) { arcs.shift(); arcTimestamps.shift(); }
 
     points.push({ ...a, color: c1, radius: 0.3, alt: 0.01 });
     while (points.length > MAX_PTS) points.shift();
-    globe.pointsData([...points, ...homePoints]);
 
     if (a.country && !labels.some(l => l.country === a.country)) {
         labels.push({ lat: a.lat, lon: a.lon, country: a.country });
         while (labels.length > MAX_LABELS) labels.shift();
-        globe.labelsData([...labels]);
     }
+
+    if (!_globePaused) _globeFlush();
 
     if (isNew) {
         // Impact ring at origin
@@ -318,15 +320,15 @@ async function openDeviceModal(mac) {
             <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:#4d7479;margin-top:4px;">SENTINEL ALERTS</div>
             <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;">
                 <span>Connected</span>
-                <label class="fsc-toggle"><input type="checkbox" id="dd-nc" ${cfg.notify_connect!==false?'checked':''}><span class="fsc-slider"></span></label>
+                <label class="fsc-toggle"><input type="checkbox" id="dd-nc" ${cfg.notify_connect!==false?'checked':''}><span class="fsc-toggle-slider"></span></label>
             </div>
             <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;">
                 <span>Disconnected</span>
-                <label class="fsc-toggle"><input type="checkbox" id="dd-nd" ${cfg.notify_disconnect!==false?'checked':''}><span class="fsc-slider"></span></label>
+                <label class="fsc-toggle"><input type="checkbox" id="dd-nd" ${cfg.notify_disconnect!==false?'checked':''}><span class="fsc-toggle-slider"></span></label>
             </div>
             <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;">
                 <span>New device</span>
-                <label class="fsc-toggle"><input type="checkbox" id="dd-nn" ${cfg.notify_new!==false?'checked':''}><span class="fsc-slider"></span></label>
+                <label class="fsc-toggle"><input type="checkbox" id="dd-nn" ${cfg.notify_new!==false?'checked':''}><span class="fsc-toggle-slider"></span></label>
             </div>
         </div>`;
 
@@ -392,7 +394,7 @@ function pushAttackHistory(entry) {
     } else if (_attackHistory.length > 200) {
         _attackHistory.length = 200;
     }
-    renderAttackHistory();
+    if (!_histPaused) renderAttackHistory();
 }
 
 function _attackHistClick(row) {
@@ -452,7 +454,7 @@ function renderAttackHistory() {
 
 function renderCountries(list) {
     ctyCountEl.textContent = list.length;
-    if (!list.length) { countryListEl.innerHTML = '<div class="empty">No attacks yet.<br>Click <b>INJECT DEMO</b> to test.</div>'; return; }
+    if (!list.length) { countryListEl.innerHTML = '<div class="empty">No attacks yet.</div>'; return; }
     const max = Math.max(...list.map(c => c.hits));
     countryListEl.innerHTML = list.map(c => `
         <div class="row cty">
@@ -572,9 +574,12 @@ function connectWS() {
     ws.onmessage = (ev) => {
         const m = JSON.parse(ev.data);
         if (m.type === 'snapshot') {
+            _globePaused = true; _histPaused = true;
             (m.attacks       || []).forEach(a => pushAttack(a, false));
             (m.bans          || []).forEach(b => { pushAttack(b, false); pushAttackHistory(b); });
             (m.proxy_attacks || []).forEach(a => { pushAttack(a, false); pushAttackHistory(a); });
+            _globePaused = false; _histPaused = false;
+            _globeFlush(); renderAttackHistory();
             (m.logs          || []).forEach(l => pushLog(l, false));
         } else if (m.type === 'attack' || m.type === 'ban') {
             pushAttack(m, true);
@@ -593,126 +598,138 @@ function connectWS() {
     };
 }
 
-$('demo-btn').addEventListener('click', () => {
-    fetch('/api/demo/attack?count=8', { method: 'POST' });
-});
+$('report-btn').addEventListener('click', generateReport);
+
+async function generateReport() {
+    const btn = $('report-btn');
+    if (btn) { btn.textContent = 'GENERATING…'; btn.disabled = true; }
+    try {
+        const d = await fetch('/api/report/data').then(r => r.json());
+        const now = new Date();
+        const lines = [
+            `# SENTINEL-ALERT Report`,
+            `**Generated:** ${now.toLocaleString()}`,
+            '',
+            '---',
+            '',
+            '## Summary (last 24 h)',
+            `- Attacks: ${(d.attacks_24h||[]).length}`,
+            `- Fail2ban bans: ${(d.bans_24h||[]).length}`,
+            `- Proxy attacks (80/443): ${(d.proxy_attacks_24h||[]).length}`,
+            '',
+            ...(d.countries||[]).length ? ['### Top Attack Origins', '', ...(d.countries||[]).map(c=>`- ${c.country}: ${c.hits} hits`), ''] : [],
+            '---',
+            '',
+            '## Attacks',
+            '',
+            '| Timestamp | IP | Protocol | Port | Country | ISP |',
+            '|-----------|----|---------:|-----:|---------|-----|',
+            ...(d.attacks_24h||[]).map(a=>`| ${(a.ts||'').substring(0,19)} | \`${a.src_ip}\` | ${a.protocol||'?'} | :${a.dst_port} | ${a.country||'?'} | ${a.isp||'—'} |`),
+            '',
+            '## Fail2ban Bans',
+            '',
+            '| Timestamp | IP | Country |',
+            '|-----------|----|---------:|',
+            ...(d.bans_24h||[]).map(b=>`| ${(b.ts||'').substring(0,19)} | \`${b.src_ip}\` | ${b.country||'?'} |`),
+            '',
+            '## Proxy Attacks (80/443)',
+            '',
+            '| Timestamp | IP | Protocol | Domain | Country |',
+            '|-----------|----|---------:|--------|---------|',
+            ...(d.proxy_attacks_24h||[]).map(a=>`| ${(a.ts||'').substring(0,19)} | \`${a.src_ip}\` | ${a.protocol||'?'} | ${a.domain||'—'} | ${a.country||'?'} |`),
+            '',
+            '## Devices',
+            '',
+            '| Hostname | IP | Status | Last Seen |',
+            '|----------|----|--------|-----------|',
+            ...(d.devices||[]).map(dv=>`| ${dv.hostname||'?'} | ${dv.ip} | ${dv.is_online?'ONLINE':'OFFLINE'} | ${(dv.last_seen||'—').substring(0,16)} |`),
+            '',
+            '---',
+            '',
+            '## System Logs',
+            '',
+            ...(d.logs||[]).map(l=>`- \`${(l.ts||'').substring(11,19)}\` [${l.level||'info'}] ${l.source||'sys'}: ${l.msg||''}`),
+            '',
+            '---',
+            '_Sentinel-Alert — automated security report_',
+        ];
+        const md = lines.join('\n');
+        const blob = new Blob([md], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `sentinel-${now.toISOString().substring(0,10)}.md`;
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) { alert('Report failed: ' + e.message); }
+    if (btn) { btn.textContent = 'REPORT'; btn.disabled = false; }
+}
 
 // --- Settings modal ---
-const modal = $('settings-modal');
-const cfgUrl = $('cfg-url'), cfgToken = $('cfg-token'), cfgHost = $('cfg-hostname');
-const cfgResult = $('cfg-result'), settingsStatus = $('settings-status');
+const _settingsModal = $('settings-modal');
 
-let _lastKnownToken = ''; // Track last valid token
-async function openSettings() {
-    const cfg = await fetch('/api/config').then(r => r.json());
-    cfgUrl.value = cfg.sentinel_url || '';
-    // If token_set is true, show placeholder; if not, show empty for new entry
-    cfgToken.value = cfg.sentinel_token_set ? '••••••••' : '';
-    cfgToken.placeholder = 'Paste 64-char token here';
-    cfgHost.value = cfg.sentinel_hostname || '';
-    settingsStatus.textContent = cfg.sentinel_enabled ? 'CONNECTED' : 'DISCONNECTED';
-    settingsStatus.classList.toggle('live', !!cfg.sentinel_enabled);
-    cfgResult.textContent = '';
-    cfgResult.className = 'cfg-result';
-    modal.classList.remove('hidden');
-}
 function showResult(ok, msg) {
-    cfgResult.textContent = msg;
-    cfgResult.className = 'cfg-result ' + (ok ? 'ok' : 'err');
+    const el = $('cfg-result');
+    el.textContent = msg;
+    el.className = 'cfg-result ' + (ok ? 'ok' : 'err');
 }
+
+async function openSettings() {
+    const cfgBody = $('cfg-body');
+    const cfgResult = $('cfg-result');
+    cfgBody.innerHTML = '<div style="padding:16px;color:#4d7479;">Loading…</div>';
+    cfgResult.textContent = ''; cfgResult.className = 'cfg-result';
+    _settingsModal.classList.remove('hidden');
+    let data = {};
+    try { data = await fetch('/api/config/full').then(r => r.json()); } catch(e) {
+        cfgBody.innerHTML = `<div style="color:var(--red)">Failed to load config: ${e.message}</div>`; return;
+    }
+    const SENSITIVE = new Set(['token', 'ha_token', 'password', 'api_key', 'key']);
+    const LABELS = { server:'SERVER', home:'HOME LOCATION', sentinel:'SENTINEL LINK',
+        honeypot:'HONEYPOT', collector:'COLLECTOR', sniproxy:'SNIPROXY PROXY',
+        scanner:'SCANNER', security_center:'SECURITY CENTER', threat:'THREAT INTEL' };
+    cfgBody.innerHTML = Object.entries(data).map(([section, keys]) => `
+        <div style="margin-bottom:14px;">
+            <div style="font-size:9px;font-weight:800;letter-spacing:3px;color:#4d7479;border-bottom:1px solid #14333a;padding-bottom:3px;margin-bottom:8px;">${LABELS[section]||section.toUpperCase()}</div>
+            ${Object.entries(keys).map(([key, val]) => `
+                <div style="margin-bottom:6px;">
+                    <div style="font-size:9px;letter-spacing:1px;color:#4d7479;margin-bottom:2px;">${key.toUpperCase()}</div>
+                    <input type="${SENSITIVE.has(key)?'password':'text'}" data-section="${section}" data-key="${key}"
+                        value="${escape(String(val))}"
+                        style="width:100%;padding:4px 7px;background:#0a1418;color:var(--fg);border:1px solid #1a4046;font-family:inherit;font-size:11px;outline:none;">
+                </div>`).join('')}
+        </div>`).join('');
+}
+
 $('settings-btn').addEventListener('click', openSettings);
-$('cfg-close').addEventListener('click', () => modal.classList.add('hidden'));
+$('cfg-close').addEventListener('click', () => _settingsModal.classList.add('hidden'));
+$('cfg-close2').addEventListener('click', () => _settingsModal.classList.add('hidden'));
+_settingsModal.addEventListener('click', (e) => { if (e.target === _settingsModal) _settingsModal.classList.add('hidden'); });
+
 $('cfg-save').addEventListener('click', async () => {
-    const tokenValue = cfgToken.value.trim();
-    // If token is the placeholder "••••••••", don't send it (keep existing)
-    // If token looks like new/real token (64+ chars), send it
-    // If token is empty or short, send as null (clear it)
-    let token = undefined;
-    if (tokenValue && tokenValue !== '••••••••') {
-        // User entered new token
-        token = tokenValue;
-    } else if (tokenValue === '') {
-        // User cleared it
-        token = null;
-    }
-    // else: token stays undefined = keep existing
-
-    const body = { url: cfgUrl.value.trim(),
-                   token: token,
-                   hostname: cfgHost.value.trim() || undefined };
-    const res = await fetch('/api/sentinel/configure', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-    }).then(r => r.json());
-    showResult(res.ok, res.ok ? `OK · HTTP ${res.status}` : `FAIL · ${res.detail}`);
-    settingsStatus.textContent = res.ok ? 'CONNECTED' : 'ERROR';
-    settingsStatus.classList.toggle('live', !!res.ok);
-
-    // Update Sentinel status from response
-    if (res.config) {
-        if (!res.config.configured) {
-            hudSentinel.textContent = 'OFF';
-            hudSentinel.classList.remove('live', 'warn');
-        } else if (res.config.enabled) {
-            hudSentinel.textContent = res.ok ? 'LINKED' : 'DISCONNECTED';
-            hudSentinel.classList.toggle('live', !!res.ok);
-            if (!res.ok) hudSentinel.classList.add('warn');
-        }
-    }
-
-    // Re-fetch config to ensure HUD is updated with actual disk state
-    setTimeout(async () => {
-        const cfg = await fetch('/api/config').then(r => r.json()).catch(() => ({}));
-        if (cfg.sentinel_enabled) {
-            hudSentinel.textContent = 'LINKED';
-            hudSentinel.classList.add('live');
-            hudSentinel.classList.remove('warn');
-        } else if (cfg.sentinel_url) {
-            hudSentinel.textContent = 'DISCONNECTED';
-            hudSentinel.classList.remove('live');
-            hudSentinel.classList.add('warn');
-        }
-    }, 500);
-});
-$('cfg-reset').addEventListener('click', async () => {
-    if (!confirm('Reset all Sentinel configuration?')) return;
-    const res = await fetch('/api/sentinel/reset', { method: 'POST' }).then(r => r.json());
-    if (res.ok) {
-        cfgUrl.value = '';
-        cfgToken.value = '';
-        cfgHost.value = '';
-        showResult(true, 'Configuration reset');
-        hudSentinel.textContent = 'OFF';
-        hudSentinel.classList.remove('live', 'warn');
-        settingsStatus.textContent = 'DISCONNECTED';
-        settingsStatus.classList.remove('live');
-    }
+    const payload = {};
+    $('cfg-body').querySelectorAll('input[data-section]').forEach(inp => {
+        const s = inp.dataset.section, k = inp.dataset.key;
+        if (!payload[s]) payload[s] = {};
+        payload[s][k] = inp.value;
+    });
+    try {
+        const res = await fetch('/api/config/update', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        }).then(r => r.json());
+        showResult(res.ok, res.ok ? '✓ Saved — restart service for changes to take effect' : `Error: ${res.error||'unknown'}`);
+    } catch (e) { showResult(false, e.message); }
 });
 
 $('cfg-test').addEventListener('click', async () => {
-    showResult(true, 'testing…');
+    showResult(true, 'Testing Sentinel connection…');
     try {
-        // First show debug info
-        const debug = await fetch('/api/sentinel/debug').then(r => r.json());
-        const debugMsg = `[DEBUG] URL: ${debug.url_len} chars, Hostname: "${debug.hostname}" (${debug.hostname_len} chars), Token: ${debug.token_len} chars`;
-        console.log(debugMsg);
-
         const res = await fetch('/api/sentinel/test', { method: 'POST' }).then(r => r.json());
-        if (res.ok) {
-            showResult(true, `✓ Connected · HTTP ${res.status}`);
-        } else {
-            // Provide detailed error info
-            let msg = res.detail || 'Unknown error';
-            if (res.status === 401) msg = 'Unauthorized - check hostname and token';
-            if (res.status === 400) msg = 'Bad request - check URL format';
-            if (res.status === 0) msg = 'Connection failed - check URL and port';
-            showResult(false, `FAIL · ${msg}\n\nDEBUG: ${debugMsg}`);
-        }
-    } catch (e) {
-        showResult(false, `ERROR · ${e.message}`);
-    }
+        showResult(res.ok, res.ok ? `✓ Connected · HTTP ${res.status}` : `FAIL · ${res.detail||''}`);
+    } catch (e) { showResult(false, e.message); }
 });
-modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+
+$('cfg-export').addEventListener('click', () => { window.location.href = '/api/config/export'; });
 
 setInterval(() => { hudClock.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }, 1000);
 setInterval(loadStatic, 60000);
@@ -1771,9 +1788,9 @@ function netOpenPanel(d) {
         ${dev ? `<div style="font-size:10px;color:var(--muted)">Status: <span style="color:${dev.is_online?'var(--green)':'#555'}">${dev.is_online?'ONLINE':'OFFLINE'}</span></div>` : ''}
         <div class="net-section-title">Notifications</div>
         <div class="net-notify-row"><span>Connect alert</span>
-            <label class="fsc-toggle"><input type="checkbox" id="np-notify-con" ${notif.connect?'checked':''}><span class="fsc-slider"></span></label></div>
+            <label class="fsc-toggle"><input type="checkbox" id="np-notify-con" ${notif.connect?'checked':''}><span class="fsc-toggle-slider"></span></label></div>
         <div class="net-notify-row"><span>Disconnect alert</span>
-            <label class="fsc-toggle"><input type="checkbox" id="np-notify-dis" ${notif.disconnect?'checked':''}><span class="fsc-slider"></span></label></div>`;
+            <label class="fsc-toggle"><input type="checkbox" id="np-notify-dis" ${notif.disconnect?'checked':''}><span class="fsc-toggle-slider"></span></label></div>`;
     } else if (d.type === 'switch' || d.type === 'router') {
         html += `
         <label>Ports<input type="number" id="np-ports" value="${d.ports || 8}" min="1" max="48"></label>`;

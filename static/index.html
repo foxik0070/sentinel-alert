@@ -47,43 +47,36 @@
             <button class="tab-btn" data-tab="network" id="tab-btn-network">NETWORK MAP</button>
         </div>
         <button id="settings-btn" class="btn hud-hide-sm">⚙ SETTINGS</button>
-        <button id="demo-btn" class="btn hud-hide-sm">INJECT DEMO</button>
+        <button id="report-btn" class="btn hud-hide-sm">REPORT</button>
     </div>
 </header>
 
 <!-- SETTINGS MODAL -->
 <div id="settings-modal" class="modal hidden">
-    <div class="modal-box">
-        <div class="ph"><span>◤ SENTINEL LINK</span>
-            <span class="chip" id="settings-status">DISCONNECTED</span></div>
-        <label>Sentinel URL
-            <input id="cfg-url" type="text" placeholder="https://sentinel.example.com">
-        </label>
-        <label>Bearer Token
-            <input id="cfg-token" type="password" placeholder="••••••••">
-        </label>
-        <label>Agent hostname
-            <input id="cfg-hostname" type="text" placeholder="sentinel-alert">
-        </label>
-        <div class="modal-actions">
-            <button class="btn" id="cfg-test">TEST</button>
-            <button class="btn primary" id="cfg-save">SAVE &amp; CONNECT</button>
-            <button class="btn" id="cfg-reset" style="color:#ff2a5e;border-color:#ff2a5e;">RESET</button>
-            <button class="btn ghost" id="cfg-close">CLOSE</button>
+    <div class="modal-box" style="width:560px;display:flex;flex-direction:column;max-height:88vh;overflow:hidden;padding-bottom:0;">
+        <div class="ph"><span>◤ CONFIGURATION</span>
+            <button class="btn ghost" id="cfg-close">✕</button>
         </div>
-        <div id="cfg-result" class="cfg-result"></div>
+        <div id="cfg-body" style="flex:1;min-height:0;overflow-y:auto;padding:6px 0 4px;"></div>
+        <div style="border-top:1px solid #14333a;padding:8px 0 6px;display:flex;gap:6px;justify-content:flex-end;flex-shrink:0;">
+            <button class="btn" id="cfg-test">TEST SENTINEL</button>
+            <button class="btn" id="cfg-export">EXPORT CONF</button>
+            <button class="btn ghost" id="cfg-close2">CLOSE</button>
+            <button class="btn primary" id="cfg-save">SAVE</button>
+        </div>
+        <div id="cfg-result" class="cfg-result" style="padding:0 0 6px;flex-shrink:0;min-height:16px;"></div>
     </div>
 </div>
 
 <!-- DEVICE DETAIL MODAL -->
 <div id="detail-modal" class="modal hidden">
-    <div class="modal-box">
+    <div class="modal-box" style="display:flex;flex-direction:column;max-height:88vh;overflow:hidden;padding-bottom:0;">
         <div class="ph">
             <span id="detail-title">◤ DEVICE</span>
             <button class="btn ghost" onclick="document.getElementById('detail-modal').classList.add('hidden')">✕</button>
         </div>
-        <div id="detail-body" style="margin-bottom:12px;max-height:60vh;overflow-y:auto;"></div>
-        <div id="detail-actions" class="modal-actions"></div>
+        <div id="detail-body" style="flex:1;min-height:0;overflow-y:auto;padding-bottom:12px;"></div>
+        <div id="detail-actions" class="modal-actions" style="flex-shrink:0;border-top:1px solid #14333a;padding-top:8px;margin-top:0;"></div>
     </div>
 </div>
 
