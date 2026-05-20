@@ -62,8 +62,8 @@ const globe = Globe()(globeEl)
     .arcColor(d => d.color)
     .arcStroke(0.9)
     // Long bright dash, small gap, very fast = smooth flowing trail start→end
-    .arcDashLength(0.55).arcDashGap(0.25).arcDashInitialGap(() => Math.random())
-    .arcDashAnimateTime(700)
+    .arcDashLength(0.6).arcDashGap(0.4).arcDashInitialGap(() => Math.random())
+    .arcDashAnimateTime(2000)
     .arcAltitudeAutoScale(0.7)
     .arcsTransitionDuration(0)
     .pointsData([...points, ...homePoints])
@@ -109,8 +109,8 @@ const globe = Globe()(globeEl)
     });
 
 globe.controls().autoRotate = false;
-globe.controls().autoRotateSpeed = 1.6;
-globe.controls().enableDamping = true;
+globe.controls().autoRotateSpeed = 1.2;
+globe.controls().enableDamping = false;
 
 window.addEventListener('resize', () => {
     globe.width(globeEl.clientWidth).height(globeEl.clientHeight);
@@ -121,11 +121,11 @@ setInterval(() => globe.globeImageUrl(pickTexture()), 15 * 60 * 1000);
 
 // Protocol hues (H in HSL) — start, end of arc gradient
 const PROTO_HUE = {
-    ssh:      [350,  10],   // red
-    http:     [220, 240],   // blue
-    https:    [190, 210],   // cyan-blue
-    fail2ban: [ 45,  55],   // yellow
-    blocked:  [ 25,  40],   // orange
+    ssh:      [300, 320],   // purple (honeypot)
+    http:     [ 48,  58],   // yellow (port 80)
+    https:    [  0,  10],   // red (port 443)
+    fail2ban: [ 28,  42],   // orange → dark with age (port 22)
+    blocked:  [ 20,  32],   // deep orange
 };
 const _DEFAULT_HUE = [160, 180];  // green-cyan fallback
 
@@ -216,41 +216,61 @@ function pushAttack(a, isNew = true) {
 
 function renderDevices(list) {
     const online = list.filter(d => d.is_online).length;
-    netCountEl.textContent = `${online} / ${list.length}`;
-    hudLan.textContent = `${online} / ${list.length}`;
-    if (!list.length) { netListEl.innerHTML = '<div class="empty">No devices.</div>'; return; }
+    const vswitches = (_netSettings.virtual_switches || []);
+    netCountEl.textContent = `${online} / ${list.length + vswitches.length}`;
+    hudLan.textContent = `${online} / ${list.length + vswitches.length}`;
 
     const now = Date.now();
-    const newThreshold = 48 * 3600 * 1000; // 48h = new device
+    const newThreshold = 48 * 3600 * 1000;
     const devSettings = (_netSettings.devices || {});
 
-    netListEl.innerHTML = list.map(d => {
+    const vswHtml = vswitches.map(sw => `
+        <div class="row dev clickable" data-vsw="${escape(sw.id)}" style="border-left:2px solid #38bdf8;">
+            <span class="dot" style="background:#38bdf8;box-shadow:0 0 4px #38bdf8;"></span>
+            <div style="flex:1;min-width:0;">
+                <div style="display:flex;justify-content:space-between;">
+                    <span class="name">${escape(sw.hostname)} <span style="color:#38bdf8;font-size:9px;font-weight:700;">[SW]</span></span>
+                    <span class="meta">${sw.ports}p</span>
+                </div>
+                <div class="ip">Virtual Switch · ${sw.ports} ports</div>
+            </div>
+        </div>`).join('');
+
+    const devHtml = list.length ? list.map(d => {
+        const cfg = devSettings[d.mac] || {};
+        const displayName = cfg.hostname || d.hostname;
+        const label = displayName
+            ? `${escape(displayName)} <span style="color:#4d7479;font-size:10px;">[${escape(d.ip)}]</span>`
+            : escape(d.ip);
         const seen = d.last_seen ? timeAgo(d.last_seen) : '—';
         const ports = (d.ports || '').split(',').filter(Boolean).map(p => {
             const cls = ({22:'ssh',80:'web',443:'web',8080:'web',3306:'db',5432:'db',6379:'db'}[+p]) || '';
             return `<span class="port ${cls}">${p}</span>`;
         }).join('');
-        const cfg = devSettings[d.mac] || {};
-        const notifyNew = cfg.notify_new !== false; // default ON
+        const notifyNew = cfg.notify_new !== false;
         const isNew = notifyNew && d.first_seen &&
                       (now - new Date(d.first_seen).getTime()) < newThreshold;
         const newBadge = isNew ? ' <span class="badge-new">(NEW)</span>' : '';
         return `
         <div class="row dev clickable ${d.is_online ? '' : 'offline'}" data-mac="${escape(d.mac)}">
             <span class="dot ${d.is_online ? 'on' : 'off'}"></span>
-            <div style="flex:1; min-width:0;">
-                <div style="display:flex; justify-content:space-between;">
-                    <span class="name">${escape(d.hostname || d.ip)}${newBadge}</span>
+            <div style="flex:1;min-width:0;">
+                <div style="display:flex;justify-content:space-between;">
+                    <span class="name">${label}${newBadge}</span>
                     <span class="meta">${seen}</span>
                 </div>
-                <div class="ip">${d.ip} · ${escape(d.vendor || '')}</div>
+                <div class="ip">${escape(d.vendor || d.ip)}</div>
                 ${ports ? `<div class="ports">${ports}</div>` : ''}
             </div>
         </div>`;
-    }).join('');
+    }).join('') : '<div class="empty">No devices.</div>';
 
-    // Add click handlers to show device details
-    netListEl.querySelectorAll('.dev.clickable').forEach(row => {
+    netListEl.innerHTML = vswHtml + devHtml;
+
+    netListEl.querySelectorAll('.dev[data-vsw]').forEach(row => {
+        row.addEventListener('click', () => openVswModal(row.dataset.vsw));
+    });
+    netListEl.querySelectorAll('.dev[data-mac]').forEach(row => {
         row.addEventListener('click', () => openDeviceModal(row.dataset.mac));
     });
 }
@@ -273,24 +293,33 @@ async function openDeviceModal(mac) {
     const parentMac  = cfg.parent_mac  || '';
     const parentPort = cfg.parent_port || '';
 
-    document.getElementById('detail-title').textContent = '◤ ' + (d.hostname || d.ip);
+    const effectiveName = cfg.hostname || d.hostname || d.ip;
+    document.getElementById('detail-title').textContent = '◤ ' + effectiveName;
 
-    // Parent selector options
-    const parentOpts = _allDevices
-        .filter(x => x.mac !== mac)
-        .map(x => `<option value="${escape(x.mac)}" ${x.mac === parentMac ? 'selected' : ''}>${escape(x.hostname || x.ip)} (${x.ip})</option>`)
-        .join('');
+    // Parent selector: real devices + virtual switches
+    const parentOpts = [
+        ..._allDevices.filter(x => x.mac !== mac).map(x => {
+            const n = ((netCfg.devices || {})[x.mac] || {}).hostname || x.hostname || x.ip;
+            return `<option value="${escape(x.mac)}" ${x.mac === parentMac ? 'selected' : ''}>${escape(n)} [${escape(x.ip)}]</option>`;
+        }),
+        ...(_netSettings.virtual_switches || []).map(s =>
+            `<option value="vsw:${escape(s.id)}" ${'vsw:'+s.id === parentMac ? 'selected' : ''}>${escape(s.hostname)} [SW]</option>`)
+    ].join('');
 
     document.getElementById('detail-body').innerHTML = `
-        <div style="display:grid;grid-template-columns:100px 1fr;gap:4px 12px;padding:4px 0;font-size:11px;margin-bottom:12px;">
-            <div style="color:#4d7479">HOSTNAME</div><div style="color:#cfe7ec">${escape(d.hostname||'—')}</div>
-            <div style="color:#4d7479">IP</div><div style="color:#cfe7ec">${escape(d.ip)}</div>
-            <div style="color:#4d7479">MAC</div><div style="color:#cfe7ec">${escape(d.mac)}</div>
-            <div style="color:#4d7479">VENDOR</div><div style="color:#cfe7ec">${escape(d.vendor||'—')}</div>
-            <div style="color:#4d7479">STATUS</div><div style="color:${d.is_online?'var(--green)':'#555'}">${d.is_online?'ONLINE':'OFFLINE'}</div>
-            <div style="color:#4d7479">FIRST SEEN</div><div style="color:#cfe7ec">${escape(d.first_seen||'—')}</div>
-            <div style="color:#4d7479">LAST SEEN</div><div style="color:#cfe7ec">${escape(d.last_seen||'—')}</div>
-            <div style="color:#4d7479">PORTS</div><div style="color:#cfe7ec">${escape(d.ports||'none')}</div>
+        <div style="margin-bottom:10px;">
+            <div style="font-size:9px;letter-spacing:1px;color:#4d7479;margin-bottom:3px;">HOSTNAME</div>
+            <input type="text" id="dd-hostname" value="${escape(cfg.hostname || d.hostname || '')}"
+                placeholder="${escape(d.ip)}"
+                style="width:100%;padding:5px 8px;background:#0a1418;color:var(--fg);border:1px solid #1a4046;font-family:inherit;font-size:12px;outline:none;">
+        </div>
+        <div style="display:grid;grid-template-columns:90px 1fr;gap:3px 10px;padding:4px 0;font-size:10px;margin-bottom:10px;color:#4d7479;">
+            <span>IP</span><span style="color:#cfe7ec">${escape(d.ip)}</span>
+            <span>MAC</span><span style="color:#cfe7ec">${escape(d.mac)}</span>
+            <span>VENDOR</span><span style="color:#cfe7ec">${escape(d.vendor||'—')}</span>
+            <span>STATUS</span><span style="color:${d.is_online?'var(--green)':'#555'}">${d.is_online?'ONLINE':'OFFLINE'}</span>
+            <span>FIRST SEEN</span><span style="color:#cfe7ec">${escape(d.first_seen||'—')}</span>
+            <span>PORTS</span><span style="color:#cfe7ec">${escape(d.ports||'none')}</span>
         </div>
 
         <div style="border-top:1px solid #14333a;padding-top:10px;display:flex;flex-direction:column;gap:8px;">
@@ -344,6 +373,7 @@ async function openDeviceModal(mac) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 mac,
+                hostname:          document.getElementById('dd-hostname').value.trim(),
                 type:              document.getElementById('dd-type').value,
                 parent_mac:        document.getElementById('dd-parent').value,
                 parent_port:       document.getElementById('dd-port').value,
@@ -352,8 +382,10 @@ async function openDeviceModal(mac) {
                 notify_new:        document.getElementById('dd-nn').checked,
             })
         });
+        _netSettings = await fetch('/api/network/settings').then(r => r.json()).catch(() => _netSettings);
         saveBtn.textContent = 'SAVED ✓';
         setTimeout(() => { saveBtn.textContent = 'SAVE'; }, 1500);
+        fetch('/api/devices').then(r => r.json()).then(renderDevices);
     });
 
     const copyIpBtn = document.createElement('button');
@@ -371,6 +403,41 @@ async function openDeviceModal(mac) {
     actionsDiv.appendChild(closeBtn);
     modal.classList.remove('hidden');
 }
+
+// Virtual switch modal
+let _vswEditing = null;
+function openVswModal(swId) {
+    _vswEditing = swId || null;
+    const sw = swId ? (_netSettings.virtual_switches || []).find(s => s.id === swId) : null;
+    document.getElementById('vsw-hostname').value = sw ? sw.hostname : '';
+    document.getElementById('vsw-ports').value = sw ? sw.ports : 8;
+    document.getElementById('vsw-del').style.display = swId ? '' : 'none';
+    document.getElementById('vsw-modal').classList.remove('hidden');
+}
+document.getElementById('add-switch-btn').addEventListener('click', () => openVswModal(null));
+document.getElementById('vsw-save').addEventListener('click', async () => {
+    const hostname = document.getElementById('vsw-hostname').value.trim();
+    if (!hostname) { alert('Hostname required'); return; }
+    const payload = {
+        id: _vswEditing || undefined,
+        hostname,
+        ports: parseInt(document.getElementById('vsw-ports').value) || 8,
+    };
+    await fetch('/api/virtual-switch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    _netSettings = await fetch('/api/network/settings').then(r => r.json()).catch(() => _netSettings);
+    document.getElementById('vsw-modal').classList.add('hidden');
+    fetch('/api/devices').then(r => r.json()).then(renderDevices);
+});
+document.getElementById('vsw-del').addEventListener('click', async () => {
+    if (!_vswEditing || !confirm('Delete this virtual switch?')) return;
+    await fetch(`/api/virtual-switch/${encodeURIComponent(_vswEditing)}`, { method: 'DELETE' });
+    _netSettings = await fetch('/api/network/settings').then(r => r.json()).catch(() => _netSettings);
+    document.getElementById('vsw-modal').classList.add('hidden');
+    fetch('/api/devices').then(r => r.json()).then(renderDevices);
+});
+document.getElementById('vsw-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('vsw-modal')) document.getElementById('vsw-modal').classList.add('hidden');
+});
 
 const _ATTACK_HIST_MAX_S = 24 * 3600;
 

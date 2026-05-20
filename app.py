@@ -481,6 +481,7 @@ async def net_settings_post(payload: dict = Body(...)):
     devices = data.setdefault("devices", {})
     existing = devices.get(mac, {})
     devices[mac] = {
+        "hostname":          payload.get("hostname",          existing.get("hostname",          "")),
         "notify_connect":    bool(payload.get("notify_connect",    existing.get("notify_connect",    True))),
         "notify_disconnect": bool(payload.get("notify_disconnect", existing.get("notify_disconnect", True))),
         "notify_new":        bool(payload.get("notify_new",        existing.get("notify_new",        True))),
@@ -490,6 +491,31 @@ async def net_settings_post(payload: dict = Body(...)):
     }
     _save_net_settings(data)
     return {"ok": True, "mac": mac, **devices[mac]}
+
+
+@app.post("/api/virtual-switch")
+async def virtual_switch_post(payload: dict = Body(...)):
+    """Create or update a virtual switch. Body: { id?, hostname, ports }"""
+    import time as _time
+    data = _load_net_settings()
+    switches = data.setdefault("virtual_switches", [])
+    sw_id = payload.get("id") or f"vsw-{int(_time.time())}"
+    sw = {"id": sw_id, "hostname": str(payload.get("hostname", "switch")), "ports": int(payload.get("ports", 8))}
+    idx = next((i for i, s in enumerate(switches) if s["id"] == sw_id), None)
+    if idx is not None:
+        switches[idx] = sw
+    else:
+        switches.append(sw)
+    _save_net_settings(data)
+    return {"ok": True, "switch": sw}
+
+
+@app.delete("/api/virtual-switch/{sw_id}")
+async def virtual_switch_delete(sw_id: str):
+    data = _load_net_settings()
+    data["virtual_switches"] = [s for s in data.get("virtual_switches", []) if s["id"] != sw_id]
+    _save_net_settings(data)
+    return {"ok": True}
 
 
 @app.websocket("/ws/live")

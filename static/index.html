@@ -80,6 +80,30 @@
     </div>
 </div>
 
+<!-- VIRTUAL SWITCH MODAL -->
+<div id="vsw-modal" class="modal hidden">
+    <div class="modal-box" style="width:320px;">
+        <div class="ph"><span>◤ VIRTUAL SWITCH</span>
+            <button class="btn ghost" onclick="document.getElementById('vsw-modal').classList.add('hidden')">✕</button>
+        </div>
+        <div style="margin-top:8px;">
+            <div style="font-size:9px;letter-spacing:1px;color:#4d7479;margin-bottom:3px;">HOSTNAME</div>
+            <input id="vsw-hostname" type="text" placeholder="sw-01"
+                style="width:100%;padding:5px 8px;background:#0a1418;color:var(--fg);border:1px solid #1a4046;font-family:inherit;font-size:12px;outline:none;">
+        </div>
+        <div style="margin-top:8px;">
+            <div style="font-size:9px;letter-spacing:1px;color:#4d7479;margin-bottom:3px;">PORTS</div>
+            <input id="vsw-ports" type="number" value="8" min="1" max="48"
+                style="width:100%;padding:5px 8px;background:#0a1418;color:var(--fg);border:1px solid #1a4046;font-family:inherit;font-size:12px;outline:none;">
+        </div>
+        <div class="modal-actions" style="margin-top:12px;">
+            <button class="btn" id="vsw-del" style="color:#ff2a5e;border-color:#ff2a5e;display:none;">DELETE</button>
+            <button class="btn ghost" onclick="document.getElementById('vsw-modal').classList.add('hidden')">CANCEL</button>
+            <button class="btn primary" id="vsw-save">SAVE</button>
+        </div>
+    </div>
+</div>
+
 <!-- TOPOLOGY MODAL -->
 <div id="topo-modal" class="modal hidden">
     <div class="modal-box" style="width:90%;height:80vh;">
@@ -118,7 +142,7 @@
 <!-- ================================================================ -->
 <main id="tab-threat" class="grid">
     <section class="panel red" id="lan-panel">
-        <div class="ph"><span>◤ LOCAL NETWORK</span><button class="btn-fullscreen" data-target="lan-panel" title="Fullscreen">⛶</button><span class="chip" id="net-count">0</span></div>
+        <div class="ph"><span>◤ LOCAL NETWORK</span><button class="btn-fullscreen" data-target="lan-panel" title="Fullscreen">⛶</button><button id="add-switch-btn" class="btn" style="font-size:9px;padding:2px 7px;margin-left:4px;">+ SW</button><span class="chip" id="net-count">0</span></div>
         <div id="net-list" class="scroll"></div>
     </section>
 
