@@ -60,10 +60,9 @@ const globe = Globe()(globeEl)
     .arcStartLat(d => d.startLat).arcStartLng(d => d.startLng)
     .arcEndLat(d => d.endLat).arcEndLng(d => d.endLng)
     .arcColor(d => d.color)
-    .arcStroke(0.9)
-    // Long bright dash, small gap, very fast = smooth flowing trail start→end
-    .arcDashLength(0.6).arcDashGap(0.4).arcDashInitialGap(() => Math.random())
-    .arcDashAnimateTime(2000)
+    .arcStroke(1.2)
+    .arcDashLength(1).arcDashGap(0).arcDashInitialGap(0)
+    .arcDashAnimateTime(0)
     .arcAltitudeAutoScale(0.7)
     .arcsTransitionDuration(0)
     .pointsData([...points, ...homePoints])
@@ -119,25 +118,27 @@ window.addEventListener('resize', () => {
 // Refresh texture every 15 min (covers day/night transition).
 setInterval(() => globe.globeImageUrl(pickTexture()), 15 * 60 * 1000);
 
-// Protocol hues (H in HSL) — start, end of arc gradient
-const PROTO_HUE = {
-    ssh:      [300, 320],   // purple (honeypot)
-    http:     [ 48,  58],   // yellow (port 80)
-    https:    [  0,  10],   // red (port 443)
-    fail2ban: [ 28,  42],   // orange → dark with age (port 22)
-    blocked:  [ 20,  32],   // deep orange
+// Protocol colors [r,g,b] at full brightness — age dims them
+const PROTO_RGB = {
+    ssh:      [180,  60, 255],  // purple
+    http:     [255, 200,   0],  // yellow
+    https:    [255,  42,  94],  // red
+    fail2ban: [255, 140,   0],  // orange
+    blocked:  [255,  80,   0],  // deep orange
 };
-const _DEFAULT_HUE = [160, 180];  // green-cyan fallback
+const _DEFAULT_RGB = [0, 220, 180];  // green-cyan fallback
 
-const MAX_AGE_S = 24 * 3600;  // only show attacks from last 24h
+const MAX_AGE_S = 24 * 3600;
 
 function getArcColor(protocol, ageSeconds) {
-    // Lightness varies 65% (new) → 22% (24h old)
     const ageFactor = Math.min(ageSeconds / MAX_AGE_S, 1.0);
-    const l1 = Math.round(65 - ageFactor * 43);
-    const l2 = Math.max(l1 - 12, 10);
-    const [h1, h2] = PROTO_HUE[protocol] || _DEFAULT_HUE;
-    return [`hsl(${h1},100%,${l1}%)`, `hsl(${h2},95%,${l2}%)`];
+    const alpha1 = Math.max(0.9 - ageFactor * 0.55, 0.15);
+    const alpha2 = Math.max(alpha1 - 0.2, 0.05);
+    const [r, g, b] = PROTO_RGB[protocol] || _DEFAULT_RGB;
+    return [
+        `rgba(${r},${g},${b},${alpha1.toFixed(2)})`,
+        `rgba(${r},${g},${b},${alpha2.toFixed(2)})`,
+    ];
 }
 
 function centerGlobeOn(lat, lon) {
@@ -519,11 +520,18 @@ function renderCountries(list) {
     if (!list.length) { countryListEl.innerHTML = '<div class="empty">No attacks yet.</div>'; return; }
     const max = Math.max(...list.map(c => c.hits));
     countryListEl.innerHTML = list.map(c => `
-        <div class="row cty">
+        <div class="row cty clickable" data-country="${escape(c.country)}">
             <span class="name">${escape(c.country)}</span>
             <span class="bar"><i style="width:${(c.hits/max*100)|0}%"></i></span>
             <span class="hits">${c.hits}</span>
         </div>`).join('');
+    countryListEl.querySelectorAll('.cty.clickable').forEach(row => {
+        row.addEventListener('click', () => {
+            const country = row.dataset.country;
+            const hit = _attackHistory.find(a => a.country === country && (a.lat || a.lon));
+            if (hit) centerGlobeOn(hit.lat, hit.lon);
+        });
+    });
 }
 
 function pushLog(l, prepend = true) {
@@ -611,9 +619,13 @@ function applyTabVisibility(cfg) {
     const btnSecurity = $('tab-btn-security');
     const btnProxy    = $('tab-btn-proxy');
     const btnNetwork  = $('tab-btn-network');
+    const lanPanel    = $('lan-panel');
     if (btnSecurity) btnSecurity.style.display = cfg.fsc_enabled === false ? 'none' : '';
     if (btnProxy)    btnProxy.style.display    = cfg.sniproxy_enabled     ? ''     : 'none';
     if (btnNetwork)  btnNetwork.style.display  = cfg.scanner_enabled      ? ''     : 'none';
+    if (lanPanel)    lanPanel.style.display    = cfg.scanner_enabled      ? ''     : 'none';
+    const mainGrid = document.querySelector('.grid');
+    if (mainGrid) mainGrid.classList.toggle('no-scanner', !cfg.scanner_enabled);
 }
 
 async function loadBlocklist() {

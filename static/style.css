@@ -67,9 +67,15 @@ html, body {
     display: grid; gap: 6px; padding: 6px;
     height: calc(100vh - 38px);
     grid-template-columns: 280px 1fr 280px;
-    grid-template-rows: 1fr 1fr;
+    grid-template-rows: 1fr 1.4fr;
     grid-template-areas:
         "red    yellow green"
+        "purple yellow grey";
+}
+.grid.no-scanner {
+    grid-template-rows: 1fr 1.4fr;
+    grid-template-areas:
+        "purple yellow green"
         "purple yellow grey";
 }
 

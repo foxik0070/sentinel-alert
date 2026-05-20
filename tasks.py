@@ -5,6 +5,7 @@ from datetime import datetime
 
 import bridge
 import collector
+import conf
 import scanner
 
 SCAN_INTERVAL = int(os.environ.get("SCAN_INTERVAL", "300"))
@@ -28,6 +29,8 @@ async def _publish(queue: asyncio.Queue, event: dict):
 
 
 async def periodic_scanner(queue: asyncio.Queue):
+    if not conf.SCANNER_ENABLED:
+        return
     while True:
         try:
             events = await scanner.scan_async()
@@ -54,9 +57,6 @@ async def periodic_collector(queue: asyncio.Queue):
     while True:
         try:
             hosts = collector.discover_hosts()
-            await _publish(queue, {"type": "log", "level": "info",
-                                   "source": "fail2ban",
-                                   "msg": f"polling {len(hosts)} host(s)…"})
             if hosts:
                 await asyncio.gather(*[_poll_one(h, sem, queue) for h in hosts])
         except Exception as e:
