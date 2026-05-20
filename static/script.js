@@ -4,7 +4,7 @@ const $ = id => document.getElementById(id);
 const globeEl    = $('globe-viz');
 const netListEl  = $('net-list');
 const netCountEl = $('net-count');
-const banListEl  = $('ban-list');
+const attackHistEl = $('attack-hist');
 const countryListEl = $('country-list');
 const ctyCountEl = $('cty-count');
 const logListEl  = $('log-list');
@@ -78,9 +78,31 @@ const globe = Globe()(globeEl)
     .ringColor(d => d.color || (t => `rgba(255,42,94,${1 - t})`))
     .ringMaxRadius(d => d.maxR ?? 4)
     .ringPropagationSpeed(d => d.speed ?? 2)
-    .ringRepeatPeriod(d => d.period ?? 800);
+    .ringRepeatPeriod(d => d.period ?? 800)
+    .onPointClick((pt) => {
+        if (!pt || pt.isHome) return;
+        acIp.textContent      = pt.src_ip || '?';
+        acCountry.textContent = pt.country || '?';
+        acIsp.textContent     = pt.isp || '—';
+        acVec.textContent     = `:${pt.dst_port}/${(pt.protocol||'').toUpperCase()}`;
+        card.classList.add('hot');
+        clearTimeout(pushAttack._t);
+        pushAttack._t = setTimeout(() => card.classList.remove('hot'), 10000);
+        centerGlobeOn(pt.lat, pt.lon);
+    })
+    .onArcClick((arc) => {
+        if (!arc) return;
+        acIp.textContent      = arc.src_ip || '?';
+        acCountry.textContent = arc.country || '?';
+        acIsp.textContent     = arc.isp || '—';
+        acVec.textContent     = `:${arc.dst_port}/${(arc.protocol||'').toUpperCase()}`;
+        card.classList.add('hot');
+        clearTimeout(pushAttack._t);
+        pushAttack._t = setTimeout(() => card.classList.remove('hot'), 10000);
+        centerGlobeOn(arc.startLat, arc.startLng);
+    });
 
-globe.controls().autoRotate = true;
+globe.controls().autoRotate = false;
 globe.controls().autoRotateSpeed = 1.6;
 globe.controls().enableDamping = true;
 
@@ -91,47 +113,54 @@ window.addEventListener('resize', () => {
 // Refresh texture every 15 min (covers day/night transition).
 setInterval(() => globe.globeImageUrl(pickTexture()), 15 * 60 * 1000);
 
-const PROTO_COLOR = {
-    ssh:      ['#ff2a5e', '#ffe83b'],
-    http:     ['#b878ff', '#00ffd5'],
-    fail2ban: ['#ffe83b', '#ff2a5e'],
+// Protocol hues (H in HSL) — start, end of arc gradient
+const PROTO_HUE = {
+    ssh:      [350,  10],   // red
+    http:     [220, 240],   // blue
+    https:    [190, 210],   // cyan-blue
+    fail2ban: [ 45,  55],   // yellow
+    blocked:  [ 25,  40],   // orange
 };
+const _DEFAULT_HUE = [160, 180];  // green-cyan fallback
+
+const MAX_AGE_S = 24 * 3600;  // only show attacks from last 24h
+
+function getArcColor(protocol, ageSeconds) {
+    // Lightness varies 65% (new) → 22% (24h old)
+    const ageFactor = Math.min(ageSeconds / MAX_AGE_S, 1.0);
+    const l1 = Math.round(65 - ageFactor * 43);
+    const l2 = Math.max(l1 - 12, 10);
+    const [h1, h2] = PROTO_HUE[protocol] || _DEFAULT_HUE;
+    return [`hsl(${h1},100%,${l1}%)`, `hsl(${h2},95%,${l2}%)`];
+}
 
 function centerGlobeOn(lat, lon) {
-    // Pause rotation for 5 seconds, then resume
     globe.controls().autoRotate = false;
     globe.pointOfView({ lat, lng: lon, altitude: 1.4 }, 900);
-    clearTimeout(centerGlobeOn._resumeTimer);
-    centerGlobeOn._resumeTimer = setTimeout(() => {
+    clearTimeout(centerGlobeOn._stopTimer);
+    centerGlobeOn._stopTimer = setTimeout(() => {
         globe.controls().autoRotate = true;
-    }, 5000);
+        clearTimeout(centerGlobeOn._offTimer);
+        centerGlobeOn._offTimer = setTimeout(() => {
+            globe.controls().autoRotate = false;
+        }, 8000);
+    }, 1000);
 }
 
-function getArcColor(ageSeconds) {
-    // Older attacks (>60s) are red, newer attacks fade through to cyan
-    // 0-10s: cyan, 10-30s: yellow, 30-60s: orange, >60s: red
-    if (ageSeconds < 10) return ['#00ffd5', '#ffe83b']; // cyan to yellow
-    if (ageSeconds < 30) return ['#ffaa00', '#ff6600']; // yellow to orange
-    if (ageSeconds < 60) return ['#ff6600', '#ff3300']; // orange to red-orange
-    return ['#ff2a5e', '#cc0000']; // red
-}
 
 function pushAttack(a, isNew = true) {
     if (!a.lat && !a.lon) return; // skip LAN/0,0
-    // Calculate age from timestamp if available; for new attacks, age is 0
-    let ageSeconds = 0;
-    if (a.ts && !isNew) {
-        // Old attack from history: calculate actual age from timestamp
-        ageSeconds = (Date.now() - new Date(a.ts).getTime()) / 1000;
-    }
-    // Use age-based color if we have age info, fallback to protocol color
-    const [c1, c2] = (ageSeconds !== 0 || a._ageSeconds !== undefined)
-        ? getArcColor(ageSeconds)
-        : PROTO_COLOR[a.protocol] || ['#00ffd5', '#ffe83b'];
+    const ageSeconds = a.ts ? (Date.now() - new Date(a.ts).getTime()) / 1000 : (isNew ? 0 : MAX_AGE_S);
+    if (!isNew && ageSeconds > MAX_AGE_S) return; // skip attacks older than 24h
+    const proto = a.protocol || 'ssh';
+    const [c1, c2] = getArcColor(proto, ageSeconds);
 
     // Arc: start (origin, dim) → end (HOME, hot). Persistent.
     // Store original attack timestamp for accurate age-based coloring
-    const arcObj = { startLat: a.lat, startLng: a.lon, endLat: HOME.lat, endLng: HOME.lon, color: [c1, c2], attackTime: a.ts ? new Date(a.ts).getTime() : Date.now() };
+    const arcObj = { startLat: a.lat, startLng: a.lon, endLat: HOME.lat, endLng: HOME.lon,
+                     color: [c1, c2], attackTime: a.ts ? new Date(a.ts).getTime() : Date.now(),
+                     src_ip: a.src_ip, country: a.country, isp: a.isp,
+                     dst_port: a.dst_port, protocol: a.protocol };
     arcs.push(arcObj);
     arcTimestamps.push(Date.now());
     while (arcs.length > MAX_ARCS) {
@@ -189,18 +218,27 @@ function renderDevices(list) {
     hudLan.textContent = `${online} / ${list.length}`;
     if (!list.length) { netListEl.innerHTML = '<div class="empty">No devices.</div>'; return; }
 
+    const now = Date.now();
+    const newThreshold = 48 * 3600 * 1000; // 48h = new device
+    const devSettings = (_netSettings.devices || {});
+
     netListEl.innerHTML = list.map(d => {
         const seen = d.last_seen ? timeAgo(d.last_seen) : '—';
         const ports = (d.ports || '').split(',').filter(Boolean).map(p => {
             const cls = ({22:'ssh',80:'web',443:'web',8080:'web',3306:'db',5432:'db',6379:'db'}[+p]) || '';
             return `<span class="port ${cls}">${p}</span>`;
         }).join('');
+        const cfg = devSettings[d.mac] || {};
+        const notifyNew = cfg.notify_new !== false; // default ON
+        const isNew = notifyNew && d.first_seen &&
+                      (now - new Date(d.first_seen).getTime()) < newThreshold;
+        const newBadge = isNew ? ' <span class="badge-new">(NEW)</span>' : '';
         return `
         <div class="row dev clickable ${d.is_online ? '' : 'offline'}" data-mac="${escape(d.mac)}">
             <span class="dot ${d.is_online ? 'on' : 'off'}"></span>
             <div style="flex:1; min-width:0;">
                 <div style="display:flex; justify-content:space-between;">
-                    <span class="name">${escape(d.hostname || d.ip)}</span>
+                    <span class="name">${escape(d.hostname || d.ip)}${newBadge}</span>
                     <span class="meta">${seen}</span>
                 </div>
                 <div class="ip">${d.ip} · ${escape(d.vendor || '')}</div>
@@ -211,80 +249,188 @@ function renderDevices(list) {
 
     // Add click handlers to show device details
     netListEl.querySelectorAll('.dev.clickable').forEach(row => {
-        row.addEventListener('click', async () => {
-            const mac = row.dataset.mac;
-            const d = await fetch(`/api/device/${encodeURIComponent(mac)}`).then(r => r.ok ? r.json() : null);
-            if (!d) return;
-            const modal = document.getElementById('detail-modal');
-            document.getElementById('detail-title').textContent = '◤ ' + (d.hostname || d.ip);
-            document.getElementById('detail-body').innerHTML = `
-                <div style="display: grid; grid-template-columns: 100px 1fr; gap: 4px 12px; padding: 4px 0; font-size: 11px;">
-                    <div style="color: #4d7479;">HOSTNAME</div><div style="color: #cfe7ec;">${escape(d.hostname || '—')}</div>
-                    <div style="color: #4d7479;">IP</div><div style="color: #cfe7ec;">${escape(d.ip)}</div>
-                    <div style="color: #4d7479;">MAC</div><div style="color: #cfe7ec;">${escape(d.mac)}</div>
-                    <div style="color: #4d7479;">VENDOR</div><div style="color: #cfe7ec;">${escape(d.vendor || '—')}</div>
-                    <div style="color: #4d7479;">STATUS</div><div style="color: #cfe7ec;">${d.is_online ? 'ONLINE' : 'OFFLINE'}</div>
-                    <div style="color: #4d7479;">FIRST SEEN</div><div style="color: #cfe7ec;">${escape(d.first_seen || '—')}</div>
-                    <div style="color: #4d7479;">LAST SEEN</div><div style="color: #cfe7ec;">${escape(d.last_seen || '—')}</div>
-                    <div style="color: #4d7479;">PORTS</div><div style="color: #cfe7ec;">${escape(d.ports || 'none')}</div>
-                </div>`;
-            const actionsDiv = document.getElementById('detail-actions');
-            actionsDiv.innerHTML = '';
-            const copyIpBtn = document.createElement('button');
-            copyIpBtn.className = 'btn';
-            copyIpBtn.textContent = 'COPY IP';
-            copyIpBtn.addEventListener('click', () => navigator.clipboard.writeText(d.ip));
-            const copyMacBtn = document.createElement('button');
-            copyMacBtn.className = 'btn';
-            copyMacBtn.textContent = 'COPY MAC';
-            copyMacBtn.addEventListener('click', () => navigator.clipboard.writeText(d.mac));
-            const closeBtn = document.createElement('button');
-            closeBtn.className = 'btn ghost';
-            closeBtn.textContent = 'CLOSE';
-            closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
-            actionsDiv.appendChild(copyIpBtn);
-            actionsDiv.appendChild(copyMacBtn);
-            actionsDiv.appendChild(closeBtn);
-            modal.classList.remove('hidden');
-        });
+        row.addEventListener('click', () => openDeviceModal(row.dataset.mac));
     });
 }
 
-function renderBans(list) {
-    if (!list.length) { banListEl.innerHTML = '<div class="empty">No fail2ban data yet.</div>'; return; }
-    banListEl.innerHTML = list.map(b => `
-        <div class="row ban clickable" data-lat="${b.lat}" data-lon="${b.lon}" data-ip="${b.src_ip || b.ip}"
-             data-country="${escape(b.country || '?')}" data-isp="${escape(b.isp || '—')}"
-             data-port="${b.dst_port || 22}" data-protocol="${b.protocol || 'fail2ban'}">
-            <span class="ip">${b.src_ip || b.ip}</span>
-            <span class="country">${b.country || '?'}</span>
-        </div>`).join('');
-    // Add click handlers to center globe and show details
-    banListEl.querySelectorAll('.ban.clickable').forEach(row => {
-        row.addEventListener('click', () => {
-            const lat = parseFloat(row.dataset.lat);
-            const lon = parseFloat(row.dataset.lon);
-            const ip = row.dataset.ip;
-            const country = row.dataset.country;
-            const isp = row.dataset.isp;
-            const port = row.dataset.port;
-            const protocol = row.dataset.protocol;
+let _allDevices = [];   // cache for parent selector
+let _netSettings = {}; // cache for device notification settings
+let _attackHistory = []; // combined fail2ban + proxy attacks, last 24h
 
-            if (lat && lon) {
-                globe.pointOfView({ lat, lng: lon, altitude: 1.4 }, 900);
-                globe.controls().autoRotate = false;
-                clearTimeout(focusOn._t = focusOn._t || {});
-                focusOn._t = setTimeout(() => { globe.controls().autoRotate = true; }, 8000);
-                // Show ban detail in attack card
-                card.classList.add('hot');
-                acIp.textContent = ip;
-                acCountry.textContent = country;
-                acIsp.textContent = isp;
-                acVec.textContent = `:${port}/${protocol.toUpperCase()}`;
-                clearTimeout(focusOn._t2 = focusOn._t2 || {});
-                focusOn._t2 = setTimeout(() => card.classList.remove('hot'), 10000);
-            }
+async function openDeviceModal(mac) {
+    const [d, netCfg] = await Promise.all([
+        fetch(`/api/device/${encodeURIComponent(mac)}`).then(r => r.ok ? r.json() : null),
+        fetch('/api/network/settings').then(r => r.json()),
+    ]);
+    if (!d) return;
+
+    _allDevices = await fetch('/api/devices').then(r => r.json()).catch(() => []);
+
+    const modal  = document.getElementById('detail-modal');
+    const cfg    = (netCfg.devices || {})[mac] || {};
+    const devType    = cfg.type        || 'host';
+    const parentMac  = cfg.parent_mac  || '';
+    const parentPort = cfg.parent_port || '';
+
+    document.getElementById('detail-title').textContent = '◤ ' + (d.hostname || d.ip);
+
+    // Parent selector options
+    const parentOpts = _allDevices
+        .filter(x => x.mac !== mac)
+        .map(x => `<option value="${escape(x.mac)}" ${x.mac === parentMac ? 'selected' : ''}>${escape(x.hostname || x.ip)} (${x.ip})</option>`)
+        .join('');
+
+    document.getElementById('detail-body').innerHTML = `
+        <div style="display:grid;grid-template-columns:100px 1fr;gap:4px 12px;padding:4px 0;font-size:11px;margin-bottom:12px;">
+            <div style="color:#4d7479">HOSTNAME</div><div style="color:#cfe7ec">${escape(d.hostname||'—')}</div>
+            <div style="color:#4d7479">IP</div><div style="color:#cfe7ec">${escape(d.ip)}</div>
+            <div style="color:#4d7479">MAC</div><div style="color:#cfe7ec">${escape(d.mac)}</div>
+            <div style="color:#4d7479">VENDOR</div><div style="color:#cfe7ec">${escape(d.vendor||'—')}</div>
+            <div style="color:#4d7479">STATUS</div><div style="color:${d.is_online?'var(--green)':'#555'}">${d.is_online?'ONLINE':'OFFLINE'}</div>
+            <div style="color:#4d7479">FIRST SEEN</div><div style="color:#cfe7ec">${escape(d.first_seen||'—')}</div>
+            <div style="color:#4d7479">LAST SEEN</div><div style="color:#cfe7ec">${escape(d.last_seen||'—')}</div>
+            <div style="color:#4d7479">PORTS</div><div style="color:#cfe7ec">${escape(d.ports||'none')}</div>
+        </div>
+
+        <div style="border-top:1px solid #14333a;padding-top:10px;display:flex;flex-direction:column;gap:8px;">
+            <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:#4d7479;">DEVICE ROLE</div>
+            <label style="font-size:10px;color:#4d7479;display:flex;flex-direction:column;gap:3px;">Type
+                <select id="dd-type" style="background:#02060a;border:1px solid #14333a;color:#cfe7ec;padding:4px 6px;font-family:inherit;font-size:11px;">
+                    <option value="host"    ${devType==='host'?'selected':''}>Host</option>
+                    <option value="router"  ${devType==='router'?'selected':''}>Router / Gateway</option>
+                    <option value="switch"  ${devType==='switch'?'selected':''}>Switch</option>
+                    <option value="ap"      ${devType==='ap'?'selected':''}>Access Point</option>
+                    <option value="gateway" ${devType==='gateway'?'selected':''}>Internet Gateway</option>
+                    <option value="printer" ${devType==='printer'?'selected':''}>Printer</option>
+                    <option value="iot"     ${devType==='iot'?'selected':''}>IoT Device</option>
+                </select>
+            </label>
+            <label style="font-size:10px;color:#4d7479;display:flex;flex-direction:column;gap:3px;">Connected to (parent)
+                <select id="dd-parent" style="background:#02060a;border:1px solid #14333a;color:#cfe7ec;padding:4px 6px;font-family:inherit;font-size:11px;">
+                    <option value="">— none —</option>
+                    ${parentOpts}
+                </select>
+            </label>
+            <label style="font-size:10px;color:#4d7479;display:flex;flex-direction:column;gap:3px;">Port on parent (e.g. 5)
+                <input type="text" id="dd-port" value="${escape(String(parentPort))}"
+                    style="background:#02060a;border:1px solid #14333a;color:#cfe7ec;padding:4px 6px;font-family:inherit;font-size:11px;width:80px;">
+            </label>
+
+            <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:#4d7479;margin-top:4px;">SENTINEL ALERTS</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;">
+                <span>Connected</span>
+                <label class="fsc-toggle"><input type="checkbox" id="dd-nc" ${cfg.notify_connect!==false?'checked':''}><span class="fsc-slider"></span></label>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;">
+                <span>Disconnected</span>
+                <label class="fsc-toggle"><input type="checkbox" id="dd-nd" ${cfg.notify_disconnect!==false?'checked':''}><span class="fsc-slider"></span></label>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;">
+                <span>New device</span>
+                <label class="fsc-toggle"><input type="checkbox" id="dd-nn" ${cfg.notify_new!==false?'checked':''}><span class="fsc-slider"></span></label>
+            </div>
+        </div>`;
+
+    const actionsDiv = document.getElementById('detail-actions');
+    actionsDiv.innerHTML = '';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn primary';
+    saveBtn.textContent = 'SAVE';
+    saveBtn.addEventListener('click', async () => {
+        await fetch('/api/network/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                mac,
+                type:              document.getElementById('dd-type').value,
+                parent_mac:        document.getElementById('dd-parent').value,
+                parent_port:       document.getElementById('dd-port').value,
+                notify_connect:    document.getElementById('dd-nc').checked,
+                notify_disconnect: document.getElementById('dd-nd').checked,
+                notify_new:        document.getElementById('dd-nn').checked,
+            })
         });
+        saveBtn.textContent = 'SAVED ✓';
+        setTimeout(() => { saveBtn.textContent = 'SAVE'; }, 1500);
+    });
+
+    const copyIpBtn = document.createElement('button');
+    copyIpBtn.className = 'btn';
+    copyIpBtn.textContent = 'COPY IP';
+    copyIpBtn.addEventListener('click', () => navigator.clipboard.writeText(d.ip));
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'btn ghost';
+    closeBtn.textContent = 'CLOSE';
+    closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
+
+    actionsDiv.appendChild(saveBtn);
+    actionsDiv.appendChild(copyIpBtn);
+    actionsDiv.appendChild(closeBtn);
+    modal.classList.remove('hidden');
+}
+
+const _ATTACK_HIST_MAX_S = 24 * 3600;
+
+function pushAttackHistory(entry) {
+    const ts = entry.ts || entry.timestamp || null;
+    const src_ip = entry.src_ip || entry.ip || '?';
+    if (!src_ip || src_ip === '?') return;
+    _attackHistory.unshift({
+        ts, src_ip,
+        country:  entry.country  || '?',
+        isp:      entry.isp      || '—',
+        dst_port: entry.dst_port || 22,
+        protocol: entry.protocol || 'fail2ban',
+        lat: entry.lat || 0,
+        lon: entry.lon || 0,
+    });
+    // Prune to 24h
+    if (ts) {
+        const cutoff = Date.now() - _ATTACK_HIST_MAX_S * 1000;
+        _attackHistory = _attackHistory.filter(e => !e.ts || new Date(e.ts).getTime() >= cutoff);
+    } else if (_attackHistory.length > 200) {
+        _attackHistory.length = 200;
+    }
+    renderAttackHistory();
+}
+
+function _attackHistClick(row) {
+    const lat = parseFloat(row.dataset.lat);
+    const lon = parseFloat(row.dataset.lon);
+    if (lat && lon) centerGlobeOn(lat, lon);
+    card.classList.add('hot');
+    acIp.textContent      = row.dataset.ip;
+    acCountry.textContent = unescape(row.dataset.country);
+    acIsp.textContent     = unescape(row.dataset.isp);
+    acVec.textContent     = `:${row.dataset.port}/${row.dataset.protocol.toUpperCase()}`;
+    clearTimeout(pushAttack._t);
+    pushAttack._t = setTimeout(() => card.classList.remove('hot'), 10000);
+}
+
+function renderAttackHistory() {
+    if (!_attackHistory.length) {
+        attackHistEl.innerHTML = '<div class="empty">No attack history yet.</div>';
+        return;
+    }
+    const _PROTO_LABEL = { fail2ban: 'F2B', ssh: 'SSH', http: 'HTTP', https: 'HTTPS' };
+    attackHistEl.innerHTML = _attackHistory.map(b => {
+        const timeStr = b.ts ? b.ts.replace('T', ' ').substring(0, 16) : '—';
+        const proto   = b.protocol || 'fail2ban';
+        const label   = _PROTO_LABEL[proto] || proto.toUpperCase();
+        const portCls = proto === 'fail2ban' ? 'port ssh' : proto === 'https' ? 'port web' : 'port';
+        return `<div class="row ban clickable" data-lat="${b.lat}" data-lon="${b.lon}"
+                     data-ip="${escape(b.src_ip)}" data-country="${escape(b.country)}"
+                     data-isp="${escape(b.isp)}" data-port="${b.dst_port}" data-protocol="${proto}">
+            <span class="${portCls}" style="min-width:38px;text-align:center;">${label}</span>
+            <span class="ip" style="flex:1">${escape(b.src_ip)}</span>
+            <span class="country" style="min-width:60px;">${escape(b.country)}</span>
+            <span class="meta" style="min-width:90px;text-align:right;">${timeStr}</span>
+        </div>`;
+    }).join('');
+    attackHistEl.querySelectorAll('.ban.clickable').forEach(row => {
+        row.addEventListener('click', () => _attackHistClick(row));
     });
 }
 
@@ -340,14 +486,14 @@ function installHomeMarker() {
 }
 
 async function loadStatic() {
+    let cfg = {};
     try {
-        const cfg = await fetch('/api/config').then(r => r.json());
+        cfg = await fetch('/api/config').then(r => r.json());
         HOME = { lat: cfg.home_lat, lon: cfg.home_lon,
                  ip: cfg.home_ip, country: cfg.home_country, isp: cfg.home_isp };
         hudHome.textContent = cfg.home_ip
             ? `${cfg.home_ip} · ${cfg.home_country || '?'}`
             : `${cfg.home_lat},${cfg.home_lon}`;
-        // Sentinel status: OFF (no config) → DISCONNECTED (configured but not linked) → LINKED (active)
         if (!cfg.sentinel_configured) {
             hudSentinel.textContent = 'OFF';
             hudSentinel.classList.remove('live', 'warn');
@@ -362,15 +508,43 @@ async function loadStatic() {
         }
         installHomeMarker();
         globe.pointOfView({ lat: HOME.lat, lng: HOME.lon, altitude: 2.2 }, 0);
+
+        // Tab visibility based on config flags
+        applyTabVisibility(cfg);
+
+        // Load blocklist onto globe
+        if (cfg.blocklist_enabled) loadBlocklist();
     } catch {}
-    const [devs, bans, ctys] = await Promise.all([
+    const [devs, bans, ctys, netCfgInit] = await Promise.all([
         fetch('/api/devices').then(r => r.json()),
         fetch('/api/bans').then(r => r.json()),
         fetch('/api/stats/countries').then(r => r.json()),
+        fetch('/api/network/settings').then(r => r.json()).catch(() => ({})),
     ]);
+    _netSettings = netCfgInit;
     renderDevices(devs);
-    renderBans(bans);
+    bans.forEach(b => pushAttackHistory(b));
     renderCountries(ctys);
+}
+
+function applyTabVisibility(cfg) {
+    const btnSecurity = $('tab-btn-security');
+    const btnProxy    = $('tab-btn-proxy');
+    const btnNetwork  = $('tab-btn-network');
+    if (btnSecurity) btnSecurity.style.display = cfg.fsc_enabled === false ? 'none' : '';
+    if (btnProxy)    btnProxy.style.display    = cfg.sniproxy_enabled     ? ''     : 'none';
+    if (btnNetwork)  btnNetwork.style.display  = cfg.scanner_enabled      ? ''     : 'none';
+}
+
+async function loadBlocklist() {
+    try {
+        const data = await fetch('/api/blocklist').then(r => r.json());
+        // Give blocklist entries a fixed 48h-old timestamp → orange-red color range
+        const ts48h = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
+        (data.entries || []).forEach(e => pushAttack({
+            ...e, src_ip: e.ip, protocol: 'fail2ban', dst_port: 22, ts: ts48h
+        }, false));
+    } catch {}
 }
 
 function connectWS() {
@@ -383,12 +557,13 @@ function connectWS() {
         const m = JSON.parse(ev.data);
         if (m.type === 'snapshot') {
             (m.attacks || []).forEach(a => pushAttack(a, false));
-            (m.bans    || []).forEach(b => pushAttack(b, false));
+            (m.bans    || []).forEach(b => { pushAttack(b, false); pushAttackHistory(b); });
             (m.logs    || []).forEach(l => pushLog(l, false));
         } else if (m.type === 'attack' || m.type === 'ban') {
             pushAttack(m, true);
-            pushLog({ level: m.type === 'ban' ? 'attack' : 'attack',
-                      source: m.type === 'ban' ? 'fail2ban' : 'honeypot',
+            if (m.type === 'ban' || m.source === 'proxy') pushAttackHistory(m);
+            pushLog({ level: 'attack',
+                      source: m.type === 'ban' ? 'fail2ban' : m.source || 'honeypot',
                       ts: m.ts,
                       msg: `${(m.protocol||'?').toUpperCase()} :${m.dst_port} ← ${m.src_ip} (${m.country})` });
             // refresh stats every few attacks
@@ -746,7 +921,7 @@ detailModal.addEventListener('click', (e) => {
 // ================================================================
 // TAB SWITCHING
 // ================================================================
-const TAB_IDS = { threat: 'tab-threat', security: 'tab-security', proxy: 'tab-proxy' };
+const TAB_IDS = { threat: 'tab-threat', security: 'tab-security', proxy: 'tab-proxy', network: 'tab-network' };
 let _activeTab = 'threat';
 
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -758,15 +933,9 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
         Object.entries(TAB_IDS).forEach(([k, id]) => {
             document.getElementById(id).classList.toggle('hidden', k !== tab);
         });
-        if (tab === 'security') {
-            fscInit();
-            fscUpdate();
-            fscLoadHosts();
-        }
-        if (tab === 'proxy') {
-            pscInit();
-            pscUpdate();
-        }
+        if (tab === 'security') { fscInit(); fscUpdate(); fscLoadHosts(); }
+        if (tab === 'proxy')    { pscInit(); pscUpdate(); }
+        if (tab === 'network')  { netInit(); }
     });
 });
 
@@ -1359,19 +1528,442 @@ async function pscUpdate() {
 // Periodically recolor arcs based on age (every 5 seconds)
 // ================================================================
 setInterval(() => {
-    let needsUpdate = false;
     const now = Date.now();
-    arcs.forEach((arc) => {
-        // Use original attack timestamp if available, fallback to visualization timestamp
-        const ageMs = arc.attackTime ? (now - arc.attackTime) : (now - arcTimestamps[arcs.indexOf(arc)]);
-        const ageSeconds = ageMs / 1000;
-        const [c1, c2] = getArcColor(ageSeconds);
-        if (arc.color[0] !== c1 || arc.color[1] !== c2) {
-            arc.color = [c1, c2];
-            needsUpdate = true;
+    const cutoff = now - MAX_AGE_S * 1000;
+    const before = arcs.length;
+    // Prune arcs older than 24h
+    for (let i = arcs.length - 1; i >= 0; i--) {
+        const attackTime = arcs[i].attackTime || arcTimestamps[i];
+        if (attackTime && attackTime < cutoff) {
+            arcs.splice(i, 1);
+            arcTimestamps.splice(i, 1);
         }
-    });
-    if (needsUpdate) {
-        globe.arcsData([...arcs]);
     }
+    // Recolor remaining arcs by age
+    arcs.forEach((arc, i) => {
+        const attackTime = arc.attackTime || arcTimestamps[i];
+        const ageSeconds = attackTime ? (now - attackTime) / 1000 : MAX_AGE_S;
+        const [c1, c2] = getArcColor(arc.protocol || 'ssh', ageSeconds);
+        arc.color = [c1, c2];
+    });
+    globe.arcsData([...arcs]);
 }, 5000);
+
+// ================================================================
+// NETWORK MAP (D3 force-directed topology)
+// ================================================================
+let _netInitDone = false;
+let _netData = { nodes: [], links: [] };
+let _netDevices = new Map();   // mac -> device (from /api/devices)
+let _netSettings = {};         // mac -> {connect, disconnect}
+let _netEdit = false;
+let _netLinkArm = null;        // null | 'armed' | source-node-id
+let _netSelected = null;       // selected node id
+let _netSim = null;
+let _netSvg = null, _netG = null;
+
+const NODE_TYPES = {
+    host:   { shape: 'circle', r: 10, color: '#2dffa1', stroke: '#00ffd5', icon: '⬤' },
+    switch: { shape: 'rect',   w: 28, h: 16, color: '#38bdf8', stroke: '#00b8ff', icon: '▬' },
+    router: { shape: 'diamond',r: 12, color: '#b878ff', stroke: '#9b5de5', icon: '◈' },
+};
+
+function netNodeColor(n) {
+    const dev = _netDevices.get(n.mac);
+    const base = (NODE_TYPES[n.type] || NODE_TYPES.host).color;
+    if (n.type === 'host' && dev && !dev.is_online) return '#555';
+    return base;
+}
+
+async function netInit() {
+    if (_netInitDone) { netRender(); return; }
+    _netInitDone = true;
+
+    const svg = d3.select('#net-svg');
+    _netSvg = svg;
+    const w = document.getElementById('net-svg').clientWidth  || 800;
+    const h = document.getElementById('net-svg').clientHeight || 500;
+
+    svg.append('defs').append('marker')
+        .attr('id', 'arrowhead')
+        .attr('viewBox', '-0 -5 10 10').attr('refX', 18).attr('refY', 0)
+        .attr('orient', 'auto').attr('markerWidth', 6).attr('markerHeight', 6)
+        .append('path').attr('d', 'M 0,-5 L 10,0 L 0,5').attr('fill', '#14333a');
+
+    _netG = svg.append('g');
+
+    // Zoom + pan
+    svg.call(d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => _netG.attr('transform', e.transform)));
+
+    // Load data
+    [_netData, _netSettings] = await Promise.all([
+        fetch('/api/topo-data').then(r => r.ok ? r.json() : { nodes: [], links: [] }),
+        fetch('/api/network/settings').then(r => r.json()),
+    ]);
+    const devList = await fetch('/api/devices').then(r => r.json()).catch(() => []);
+    _netDevices = new Map(devList.map(d => [d.mac, d]));
+
+    // D3 force simulation
+    _netSim = d3.forceSimulation(_netData.nodes)
+        .force('link', d3.forceLink(_netData.links).id(d => d.id).distance(120))
+        .force('charge', d3.forceManyBody().strength(-300))
+        .force('center', d3.forceCenter(w / 2, h / 2))
+        .force('collision', d3.forceCollide(30))
+        .on('tick', netTick);
+
+    netRender();
+    $('net-node-count').textContent = _netData.nodes.length;
+    $('net-link-count').textContent = _netData.links.length;
+}
+
+function netRender() {
+    if (!_netG) return;
+    _netG.selectAll('*').remove();
+
+    const linkSel = _netG.selectAll('.net-link')
+        .data(_netData.links).enter().append('line')
+        .attr('class', 'net-link')
+        .style('stroke', '#14333a').style('stroke-width', 1.5);
+
+    const linkLabelSel = _netG.selectAll('.net-link-label')
+        .data(_netData.links).enter().append('text')
+        .attr('class', 'net-link-label')
+        .style('font-size', '9px').style('fill', '#4d7479').style('pointer-events', 'none')
+        .style('text-anchor', 'middle');
+
+    const nodeSel = _netG.selectAll('.net-node')
+        .data(_netData.nodes).enter().append('g')
+        .attr('class', 'net-node')
+        .call(d3.drag()
+            .on('start', netDragStart)
+            .on('drag',  netDragged)
+            .on('end',   netDragEnd))
+        .on('click', (ev, d) => { ev.stopPropagation(); netClickNode(d); });
+
+    // Draw shapes
+    nodeSel.each(function(d) {
+        const g = d3.select(this);
+        const cfg = NODE_TYPES[d.type] || NODE_TYPES.host;
+        if (d.type === 'switch') {
+            g.append('rect')
+                .attr('x', -cfg.w/2).attr('y', -cfg.h/2)
+                .attr('width', cfg.w).attr('height', cfg.h)
+                .attr('rx', 2).style('fill', netNodeColor(d)).style('stroke', cfg.stroke).style('stroke-width', 1.5);
+        } else if (d.type === 'router') {
+            const r = cfg.r;
+            g.append('polygon')
+                .attr('points', `0,${-r} ${r},0 0,${r} ${-r},0`)
+                .style('fill', netNodeColor(d)).style('stroke', cfg.stroke).style('stroke-width', 1.5);
+        } else {
+            g.append('circle').attr('r', cfg.r)
+                .style('fill', netNodeColor(d)).style('stroke', cfg.stroke).style('stroke-width', 1.5);
+        }
+        g.append('text').attr('class', 'net-node-label')
+            .attr('y', (d.type === 'switch' ? 14 : 18))
+            .style('font-size', '10px').style('fill', '#cfe7ec').style('text-anchor', 'middle')
+            .style('pointer-events', 'none')
+            .text(d.label || d.hostname || d.ip || d.id);
+    });
+
+    // Click on canvas = deselect
+    _netSvg.on('click', () => { _netSelected = null; netHighlight(); netClosePanel(); });
+
+    _netSim.nodes(_netData.nodes);
+    _netSim.force('link').links(_netData.links);
+    _netSim.alpha(0.1).restart();
+
+    netHighlight();
+}
+
+function netTick() {
+    if (!_netG) return;
+    _netG.selectAll('.net-link')
+        .attr('x1', d => d.source.x || 0).attr('y1', d => d.source.y || 0)
+        .attr('x2', d => d.target.x || 0).attr('y2', d => d.target.y || 0);
+    _netG.selectAll('.net-link-label')
+        .attr('x', d => ((d.source.x||0) + (d.target.x||0)) / 2)
+        .attr('y', d => ((d.source.y||0) + (d.target.y||0)) / 2 - 4)
+        .text(d => {
+            const parts = [];
+            if (d.src_port) parts.push(`p${d.src_port}`);
+            if (d.tgt_port) parts.push(`p${d.tgt_port}`);
+            return parts.join('↔');
+        });
+    _netG.selectAll('.net-node')
+        .attr('transform', d => `translate(${d.x || 0},${d.y || 0})`);
+}
+
+function netHighlight() {
+    if (!_netG) return;
+    _netG.selectAll('.net-node').classed('selected', d => d.id === _netSelected);
+}
+
+function netDragStart(ev, d) {
+    if (!_netEdit) return;
+    if (!ev.active) _netSim.alphaTarget(0.3).restart();
+    d.fx = d.x; d.fy = d.y;
+}
+function netDragged(ev, d) {
+    if (!_netEdit) return;
+    d.fx = ev.x; d.fy = ev.y;
+}
+function netDragEnd(ev, d) {
+    if (!_netEdit) return;
+    if (!ev.active) _netSim.alphaTarget(0);
+    d.fx = null; d.fy = null;
+}
+
+function netClickNode(d) {
+    if (_netEdit && _netLinkArm === 'armed') {
+        _netLinkArm = d.id;
+        $('net-hint').textContent = 'Click second node to complete link...';
+        return;
+    }
+    if (_netEdit && _netLinkArm && _netLinkArm !== 'armed' && _netLinkArm !== d.id) {
+        const srcPort = prompt('Source port (leave blank if none):') || '';
+        const tgtPort = prompt('Target port (leave blank if none):') || '';
+        _netData.links.push({ source: _netLinkArm, target: d.id,
+                              src_port: srcPort ? +srcPort : null,
+                              tgt_port: tgtPort ? +tgtPort : null });
+        _netLinkArm = null;
+        $('net-hint').textContent = '';
+        $('net-link-count').textContent = _netData.links.length;
+        netRender();
+        return;
+    }
+    _netSelected = d.id;
+    netHighlight();
+    netOpenPanel(d);
+}
+
+function netOpenPanel(d) {
+    const panel = $('net-panel');
+    const body  = $('net-panel-body');
+    $('net-panel-title').textContent = `◤ ${(d.type || 'HOST').toUpperCase()} — ${d.label || d.id}`;
+    panel.classList.remove('hidden');
+
+    const dev = _netDevices.get(d.mac);
+    const notif = (_netSettings.notifications || {})[d.mac] || { connect: true, disconnect: true };
+
+    let html = `
+        <label>Label<input type="text" id="np-label" value="${escape(d.label || '')}"></label>`;
+
+    if (d.type === 'host' || !d.type) {
+        html += `
+        <label>IP<input type="text" id="np-ip" value="${escape(d.ip || '')}"></label>
+        <label>MAC<input type="text" id="np-mac" value="${escape(d.mac || '')}"></label>
+        ${dev ? `<div style="font-size:10px;color:var(--muted)">Status: <span style="color:${dev.is_online?'var(--green)':'#555'}">${dev.is_online?'ONLINE':'OFFLINE'}</span></div>` : ''}
+        <div class="net-section-title">Notifications</div>
+        <div class="net-notify-row"><span>Connect alert</span>
+            <label class="fsc-toggle"><input type="checkbox" id="np-notify-con" ${notif.connect?'checked':''}><span class="fsc-slider"></span></label></div>
+        <div class="net-notify-row"><span>Disconnect alert</span>
+            <label class="fsc-toggle"><input type="checkbox" id="np-notify-dis" ${notif.disconnect?'checked':''}><span class="fsc-slider"></span></label></div>`;
+    } else if (d.type === 'switch' || d.type === 'router') {
+        html += `
+        <label>Ports<input type="number" id="np-ports" value="${d.ports || 8}" min="1" max="48"></label>`;
+        // Show port assignments from links
+        const myLinks = _netData.links.filter(l => {
+            const srcId = (l.source.id || l.source);
+            const tgtId = (l.target.id || l.target);
+            return srcId === d.id || tgtId === d.id;
+        });
+        if (myLinks.length) {
+            html += `<div class="net-section-title">Port assignments</div><div class="net-port-list">`;
+            myLinks.forEach(l => {
+                const srcId = (l.source.id || l.source);
+                const tgtId = (l.target.id || l.target);
+                const isSource = srcId === d.id;
+                const otherId  = isSource ? tgtId : srcId;
+                const portNum  = isSource ? l.src_port : l.tgt_port;
+                const other = _netData.nodes.find(n => n.id === otherId);
+                const otherLabel = other ? (other.label || other.hostname || other.ip || otherId) : otherId;
+                html += `<div class="net-port-row"><span class="net-port-num">${portNum ?? '—'}</span><span class="net-port-host">${escape(otherLabel)}</span></div>`;
+            });
+            html += '</div>';
+        }
+    }
+
+    html += `
+        <div style="display:flex;gap:6px;margin-top:4px;">
+            <button class="btn primary" id="np-save" style="flex:1">SAVE</button>
+            <button class="btn" id="np-del" style="color:#ff2a5e;border-color:#ff2a5e;">DEL</button>
+        </div>`;
+    body.innerHTML = html;
+
+    $('np-save').addEventListener('click', () => netSaveNode(d));
+    $('np-del').addEventListener('click', () => netDeleteNode(d));
+}
+
+async function netSaveNode(d) {
+    d.label = $('np-label').value.trim() || d.label;
+    if (d.type === 'host' || !d.type) {
+        d.ip  = ($('np-ip')  || {}).value || d.ip;
+        d.mac = ($('np-mac') || {}).value || d.mac;
+        const mac = d.mac;
+        if (mac) {
+            const nc = !!($('np-notify-con')  || {}).checked;
+            const nd = !!($('np-notify-dis') || {}).checked;
+            await fetch('/api/network/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mac, notify_connect: nc, notify_disconnect: nd })
+            });
+            _netSettings.notifications = _netSettings.notifications || {};
+            _netSettings.notifications[mac] = { connect: nc, disconnect: nd };
+        }
+    } else {
+        const portsEl = $('np-ports');
+        if (portsEl) d.ports = +portsEl.value || d.ports;
+    }
+    netRender();
+    netOpenPanel(d);
+}
+
+function netDeleteNode(d) {
+    if (!confirm(`Delete node "${d.label || d.id}"?`)) return;
+    _netData.nodes = _netData.nodes.filter(n => n.id !== d.id);
+    _netData.links = _netData.links.filter(l => {
+        const s = l.source.id || l.source;
+        const t = l.target.id || l.target;
+        return s !== d.id && t !== d.id;
+    });
+    _netSelected = null;
+    netClosePanel();
+    $('net-node-count').textContent = _netData.nodes.length;
+    $('net-link-count').textContent = _netData.links.length;
+    netRender();
+}
+
+function netClosePanel() { $('net-panel').classList.add('hidden'); }
+
+// Toolbar buttons
+$('net-edit-btn').addEventListener('click', () => {
+    _netEdit = !_netEdit;
+    _netLinkArm = null;
+    $('net-edit-btn').classList.toggle('primary', _netEdit);
+    $('net-hint').textContent = _netEdit ? 'EDIT MODE — drag nodes, click to configure' : '';
+    if (_netSim) { _netEdit ? _netSim.alphaTarget(0.05).restart() : _netSim.alphaTarget(0); }
+});
+
+function _netAddHostFromPicker(dev) {
+    const w = document.getElementById('net-svg').clientWidth  || 800;
+    const h = document.getElementById('net-svg').clientHeight || 500;
+    const label = dev.hostname || dev.ip || 'host';
+    // Parent: pick from existing topology nodes
+    const topoNodes = _netData.nodes.filter(n => n.id !== `h-${dev.mac}`);
+    const parentId = topoNodes.length
+        ? topoNodes.find(n => n.type === 'router' || n.type === 'switch')?.id || ''
+        : '';
+    _netData.nodes.push({
+        id: `h-${dev.mac || Date.now()}`, type: dev.type || 'host',
+        label, hostname: dev.hostname, ip: dev.ip, mac: dev.mac || '',
+        parent: parentId,
+        x: w/2 + (Math.random()-0.5)*200, y: h/2 + (Math.random()-0.5)*200,
+    });
+    $('net-node-count').textContent = _netData.nodes.length;
+    netRender();
+}
+
+$('net-add-host').addEventListener('click', async () => {
+    if (!_netEdit) { $('net-hint').textContent = 'Enable EDIT first.'; return; }
+    const devices = await fetch('/api/devices').then(r => r.json()).catch(() => []);
+    const pickerModal = $('host-picker-modal');
+    const pickerList  = $('host-picker-list');
+
+    pickerList.innerHTML = devices.length
+        ? devices.map(d => `
+            <div class="row dev clickable host-pick-row" data-mac="${escape(d.mac)}"
+                 style="cursor:pointer;" title="Click to add">
+                <span class="dot ${d.is_online ? 'on' : 'off'}"></span>
+                <div style="flex:1;min-width:0;">
+                    <div style="display:flex;justify-content:space-between;">
+                        <span class="name">${escape(d.hostname || d.ip)}</span>
+                        <span class="meta">${d.is_online ? 'online' : 'offline'}</span>
+                    </div>
+                    <div class="ip">${d.ip} · ${escape(d.vendor || '')}</div>
+                </div>
+            </div>`).join('')
+        : '<div class="empty">No LAN devices found.</div>';
+
+    pickerList.querySelectorAll('.host-pick-row').forEach(row => {
+        row.addEventListener('click', () => {
+            const mac = unescape(row.dataset.mac);
+            const dev = devices.find(d => d.mac === mac) || { mac };
+            pickerModal.classList.add('hidden');
+            _netAddHostFromPicker(dev);
+        });
+    });
+
+    $('host-picker-custom').onclick = () => {
+        pickerModal.classList.add('hidden');
+        const label = prompt('Hostname / label:');
+        if (!label) return;
+        const ip  = prompt('IP address:') || '';
+        const mac = prompt('MAC address (leave blank for virtual):') || '';
+        _netAddHostFromPicker({ hostname: label, ip, mac, type: 'host' });
+    };
+
+    pickerModal.classList.remove('hidden');
+});
+
+$('net-add-switch').addEventListener('click', () => {
+    if (!_netEdit) { $('net-hint').textContent = 'Enable EDIT first.'; return; }
+    const label = prompt('Switch label:') || 'SW';
+    const ports = parseInt(prompt('Number of ports:', '24') || '24');
+    const w = document.getElementById('net-svg').clientWidth  || 800;
+    const h = document.getElementById('net-svg').clientHeight || 500;
+    _netData.nodes.push({ id: `sw-${Date.now()}`, type: 'switch', label, ports,
+                          x: w/2 + (Math.random()-0.5)*200, y: h/2 + (Math.random()-0.5)*200 });
+    $('net-node-count').textContent = _netData.nodes.length;
+    netRender();
+});
+
+$('net-add-router').addEventListener('click', () => {
+    if (!_netEdit) { $('net-hint').textContent = 'Enable EDIT first.'; return; }
+    const label = prompt('Router label:') || 'GW';
+    const ip    = prompt('IP / WAN address:') || '';
+    const w = document.getElementById('net-svg').clientWidth  || 800;
+    const h = document.getElementById('net-svg').clientHeight || 500;
+    _netData.nodes.push({ id: `rt-${Date.now()}`, type: 'router', label, ip,
+                          x: w/2 + (Math.random()-0.5)*200, y: h/2 + (Math.random()-0.5)*200 });
+    $('net-node-count').textContent = _netData.nodes.length;
+    netRender();
+});
+
+$('net-add-link').addEventListener('click', () => {
+    if (!_netEdit) { $('net-hint').textContent = 'Enable EDIT first.'; return; }
+    _netLinkArm = 'armed';
+    $('net-hint').textContent = 'Click first node...';
+});
+
+$('net-save-btn').addEventListener('click', async () => {
+    // Freeze positions before save
+    _netData.nodes.forEach(n => { n.x = Math.round(n.x || 0); n.y = Math.round(n.y || 0); });
+    try {
+        await fetch('/api/topo-data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(_netData)
+        });
+        $('net-hint').textContent = 'Saved.';
+        setTimeout(() => { $('net-hint').textContent = _netEdit ? 'EDIT MODE' : ''; }, 2000);
+    } catch { $('net-hint').textContent = 'Save failed.'; }
+});
+
+$('net-reseed-btn').addEventListener('click', async () => {
+    if (!confirm('Reseed from /api/devices? Current topology will be replaced.')) return;
+    const devs = await fetch('/api/devices').then(r => r.json()).catch(() => []);
+    const w = document.getElementById('net-svg').clientWidth  || 800;
+    const h = document.getElementById('net-svg').clientHeight || 500;
+    _netData.nodes = devs.map((d, i) => ({
+        id: `h-${d.mac}`, type: 'host', label: d.hostname || d.ip,
+        hostname: d.hostname, ip: d.ip, mac: d.mac,
+        x: 80 + (i % 6) * 130, y: 80 + Math.floor(i / 6) * 130
+    }));
+    _netData.links = [];
+    $('net-node-count').textContent = _netData.nodes.length;
+    $('net-link-count').textContent = 0;
+    netRender();
+});
+
+$('net-panel-close').addEventListener('click', () => { _netSelected = null; netHighlight(); netClosePanel(); });

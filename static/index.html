@@ -8,6 +8,7 @@
 <script src="https://unpkg.com/globe.gl"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
 </head>
 <body>
 <div class="scanlines"></div>
@@ -41,8 +42,9 @@
     <div class="hud-cell right">
         <div class="tab-group">
             <button class="tab-btn active" data-tab="threat">THREAT MAP</button>
-            <button class="tab-btn" data-tab="security">SECURITY CTR</button>
-            <button class="tab-btn" data-tab="proxy">PROXY MONITOR</button>
+            <button class="tab-btn" data-tab="security" id="tab-btn-security">SECURITY CTR</button>
+            <button class="tab-btn" data-tab="proxy" id="tab-btn-proxy">PROXY MONITOR</button>
+            <button class="tab-btn" data-tab="network" id="tab-btn-network">NETWORK MAP</button>
         </div>
         <button id="settings-btn" class="btn hud-hide-sm">⚙ SETTINGS</button>
         <button id="demo-btn" class="btn hud-hide-sm">INJECT DEMO</button>
@@ -104,6 +106,20 @@
     </div>
 </div>
 
+<!-- HOST PICKER MODAL (network map + HOST) -->
+<div id="host-picker-modal" class="modal hidden">
+    <div class="modal-box" style="width:420px;max-height:70vh;display:flex;flex-direction:column;">
+        <div class="ph"><span>◤ ADD HOST TO MAP</span>
+            <button class="btn ghost" onclick="document.getElementById('host-picker-modal').classList.add('hidden')">✕</button>
+        </div>
+        <div id="host-picker-list" class="scroll" style="flex:1;min-height:0;"></div>
+        <div style="padding:8px 0 0;display:flex;gap:6px;">
+            <button class="btn" id="host-picker-custom">+ CUSTOM</button>
+            <button class="btn ghost" onclick="document.getElementById('host-picker-modal').classList.add('hidden')">CANCEL</button>
+        </div>
+    </div>
+</div>
+
 <!-- ================================================================ -->
 <!-- TAB: THREAT MAP                                                    -->
 <!-- ================================================================ -->
@@ -135,8 +151,8 @@
     </section>
 
     <section class="panel grey">
-        <div class="ph"><span>◤ FAIL2BAN HISTORY</span></div>
-        <div id="ban-list" class="scroll"></div>
+        <div class="ph"><span>◤ ATTACK HISTORY</span></div>
+        <div id="attack-hist" class="scroll"></div>
     </section>
 </main>
 
@@ -324,6 +340,45 @@
                     <tbody id="psc-live"></tbody>
                 </table>
             </div>
+        </div>
+    </div>
+
+</main>
+
+<!-- ================================================================ -->
+<!-- TAB: NETWORK MAP                                                  -->
+<!-- ================================================================ -->
+<main id="tab-network" class="net-view hidden">
+
+    <!-- Toolbar -->
+    <div class="net-toolbar">
+        <div class="net-tb-left">
+            <button class="btn" id="net-edit-btn">EDIT</button>
+            <button class="btn" id="net-add-host">+ HOST</button>
+            <button class="btn" id="net-add-switch">+ SWITCH</button>
+            <button class="btn" id="net-add-router">+ ROUTER</button>
+            <button class="btn" id="net-add-link">+ LINK</button>
+            <button class="btn primary" id="net-save-btn">SAVE</button>
+            <button class="btn" id="net-reseed-btn">RESEED</button>
+            <span id="net-hint" style="color:#4d7479;font-size:10px;margin-left:8px;"></span>
+        </div>
+        <div class="net-tb-right">
+            <span class="lbl">NODES</span><span class="val" id="net-node-count">0</span>
+            <span class="lbl" style="margin-left:12px;">LINKS</span><span class="val" id="net-link-count">0</span>
+        </div>
+    </div>
+
+    <!-- Canvas + side panel -->
+    <div class="net-canvas-wrap">
+        <svg id="net-svg"></svg>
+
+        <!-- Node settings panel -->
+        <div class="net-panel hidden" id="net-panel">
+            <div class="ph">
+                <span id="net-panel-title">◤ NODE</span>
+                <button class="btn ghost" id="net-panel-close">✕</button>
+            </div>
+            <div class="net-panel-body" id="net-panel-body"></div>
         </div>
     </div>
 

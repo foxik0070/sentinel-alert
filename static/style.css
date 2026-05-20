@@ -149,6 +149,7 @@ html, body {
 .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
 .dot.on  { background: var(--green); box-shadow: 0 0 5px var(--green); }
 .dot.off { background: var(--muted); }
+.badge-new { color: var(--green); font-size: 9px; font-weight: 700; letter-spacing: 1px; animation: pulse 2s ease-in-out infinite; }
 
 /* Globe panel */
 .globe-panel { padding: 0; overflow: hidden; }
@@ -548,4 +549,82 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
 @media (min-width: 641px) and (max-width: 768px) {
     .hud-hide-md { display: none !important; }
     .fsc-stats { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* ================================================================ */
+/* NETWORK MAP TAB                                                    */
+/* ================================================================ */
+.net-view {
+    display: flex; flex-direction: column;
+    height: calc(100vh - 48px); overflow: hidden;
+    padding: 6px; gap: 6px;
+}
+
+.net-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; flex-shrink: 0; flex-wrap: wrap;
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 6px 10px;
+}
+.net-tb-left  { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.net-tb-right { display: flex; align-items: center; gap: 6px; }
+
+.net-canvas-wrap {
+    flex: 1; position: relative; min-height: 0;
+    display: flex; gap: 6px;
+}
+
+#net-svg {
+    flex: 1; min-width: 0; min-height: 0;
+    background: var(--panel); border: 1px solid var(--border);
+}
+
+/* Node shapes */
+.net-node { cursor: pointer; }
+.net-node circle, .net-node rect, .net-node polygon { transition: filter .15s; }
+.net-node:hover circle, .net-node:hover rect, .net-node:hover polygon {
+    filter: drop-shadow(0 0 6px #00ffd5);
+}
+.net-node.selected circle, .net-node.selected rect, .net-node.selected polygon {
+    filter: drop-shadow(0 0 8px #ffe83b); stroke: #ffe83b !important;
+}
+.net-link { stroke: #14333a; stroke-width: 1.5; }
+.net-link.armed { stroke: #00ffd5; stroke-dasharray: 4 2; }
+.net-link-label { font-size: 9px; fill: #4d7479; pointer-events: none; }
+.net-node-label { font-size: 10px; fill: #cfe7ec; pointer-events: none; text-anchor: middle; }
+
+/* Side panel */
+.net-panel {
+    width: 240px; flex-shrink: 0;
+    background: var(--panel); border: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+}
+.net-panel-body { padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+.net-panel-body label { display: flex; flex-direction: column; gap: 3px; font-size: 10px; color: var(--muted); }
+.net-panel-body input[type=text], .net-panel-body input[type=number] {
+    background: var(--bg); border: 1px solid var(--border); color: var(--fg);
+    padding: 4px 6px; font-family: inherit; font-size: 11px;
+}
+.net-notify-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 4px 0; font-size: 11px;
+}
+.net-section-title {
+    font-size: 9px; font-weight: 800; letter-spacing: 2px;
+    color: var(--muted); text-transform: uppercase; margin-top: 4px;
+}
+.net-port-list { font-size: 10px; }
+.net-port-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 2px 0; border-bottom: 1px dashed #0e2226;
+}
+.net-port-num { color: var(--muted); width: 20px; text-align: right; }
+.net-port-host { color: var(--accent); flex: 1; }
+
+@media (max-width: 640px) {
+    .net-view { height: auto; }
+    .net-canvas-wrap { flex-direction: column; }
+    #net-svg { height: 50vh; }
+    .net-panel { width: 100%; }
 }

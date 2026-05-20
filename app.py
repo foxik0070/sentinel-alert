@@ -11,6 +11,7 @@ from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+import blocklist
 import bridge
 import conf
 import db_init
@@ -108,12 +109,26 @@ async def lifespan(app: FastAPI):
                         ssh_port=conf.HONEYPOT_SSH_PORT,
                         http_port=conf.HONEYPOT_HTTP_PORT)
     fsc.start()
+    blocklist.start()
     sniproxy.start(
         server=conf.SNIPROXY_SERVER,
         ssh_user=conf.SNIPROXY_SSH_USER,
         log_files=conf.SNIPROXY_LOG_FILES,
         ssh_key=os.path.join(BASE_DIR, "conf", "id_ed25519"),
     )
+
+    def _sniproxy_attack(ev: dict):
+        try:
+            _broadcast_queue.put_nowait({**ev, "source": "proxy"})
+            _broadcast_queue.put_nowait({
+                "type": "log", "level": "attack", "source": "proxy",
+                "ts": ev["ts"],
+                "msg": f"{ev['protocol'].upper()} :{ev['dst_port']} ← {ev['src_ip']} ({ev.get('country','?')}) [{ev.get('domain','')}]",
+            })
+        except asyncio.QueueFull:
+            pass
+
+    sniproxy.set_attack_callback(_sniproxy_attack)
     bg = [
         asyncio.create_task(_broadcaster()),
         asyncio.create_task(_heartbeat_loop()),
@@ -149,6 +164,12 @@ def get_config():
         "sentinel_url": s["url"],
         "sentinel_hostname": s["hostname"],
         "sentinel_token_set": s["token_set"],
+        # Feature flags for tab visibility
+        "scanner_enabled": conf.SCANNER_ENABLED,
+        "fsc_enabled": conf.FSC_ENABLED,
+        "sniproxy_enabled": bool(conf.SNIPROXY_SERVER),
+        "blocklist_enabled": bool(conf.BLOCKLIST_FILE),
+        "blocklist_stats": blocklist.stats(),
     }
 
 
@@ -193,7 +214,7 @@ def sentinel_reset():
 @app.get("/api/devices")
 def get_devices():
     return _query(
-        "SELECT mac, ip, hostname, vendor, last_seen, is_online, ports "
+        "SELECT mac, ip, hostname, vendor, first_seen, last_seen, is_online, ports "
         "FROM devices ORDER BY is_online DESC, last_seen DESC"
     )
 
@@ -307,6 +328,58 @@ async def save_topo_data(data: dict = Body(...)):
         return {"ok": True}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/blocklist")
+def get_blocklist():
+    return {"entries": blocklist.get(), "stats": blocklist.stats()}
+
+
+_NET_SETTINGS_FILE = os.path.join(BASE_DIR, "data", "net_settings.json")
+
+
+def _load_net_settings() -> dict:
+    try:
+        import json
+        with open(_NET_SETTINGS_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {"notifications": {}}
+
+
+def _save_net_settings(data: dict):
+    import json
+    os.makedirs(os.path.join(BASE_DIR, "data"), exist_ok=True)
+    with open(_NET_SETTINGS_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+@app.get("/api/network/settings")
+def net_settings_get():
+    return _load_net_settings()
+
+
+@app.post("/api/network/settings")
+async def net_settings_post(payload: dict = Body(...)):
+    """Update device settings for a host MAC.
+    Body: { mac, notify_connect, notify_disconnect, notify_new, type, parent_mac, parent_port }
+    """
+    mac = payload.get("mac", "").lower()
+    if not mac:
+        return JSONResponse({"error": "mac required"}, status_code=400)
+    data = _load_net_settings()
+    devices = data.setdefault("devices", {})
+    existing = devices.get(mac, {})
+    devices[mac] = {
+        "notify_connect":    bool(payload.get("notify_connect",    existing.get("notify_connect",    True))),
+        "notify_disconnect": bool(payload.get("notify_disconnect", existing.get("notify_disconnect", True))),
+        "notify_new":        bool(payload.get("notify_new",        existing.get("notify_new",        False))),
+        "type":        payload.get("type",        existing.get("type",        "host")),
+        "parent_mac":  payload.get("parent_mac",  existing.get("parent_mac",  "")),
+        "parent_port": payload.get("parent_port", existing.get("parent_port", "")),
+    }
+    _save_net_settings(data)
+    return {"ok": True, "mac": mac, **devices[mac]}
 
 
 @app.websocket("/ws/live")
