@@ -1,31 +1,37 @@
 # Sentinel-Alert
 
-Network monitoring, honeypot visualization and LAN security scanner for home-labs and small networks. Runs on **Debian / Ubuntu / Raspbian** and **RHEL 8 / 9 / 10** (AlmaLinux, Rocky Linux).
+Real-time network monitoring, honeypot visualization and LAN security scanner for home-labs and small networks. Runs on **Debian / Ubuntu / Raspbian** and **RHEL 8 / 9 / 10** (AlmaLinux, Rocky Linux).
 
 ---
 
 ## Features
 
-| Tab | Description | Requires |
-|-----|-------------|---------|
-| **Threat Map** | Real-time 3D globe with live attack arcs, fail2ban bans, country stats | always on |
-| **Security Center** | SSH-based host security matrix (OS, CVEs, firewall, fail2ban) | `security_center.enabled = true` |
-| **Proxy Monitor** | Sniproxy log reader — throughput, top domains, live connection feed | `sniproxy.server` set |
-| **Network Map** | Interactive D3.js topology (drag & drop, switches, routers, ports) | `scanner.enabled = true` |
+| Tab / Feature | Description | Requires auth | Requires config |
+|---------------|-------------|:-------------:|-----------------|
+| **Threat Map** | 3D globe — live attack arcs, country heatmap, fail2ban bans, top countries, attack history | no | — |
+| **Security Center** | SSH-based host security matrix (OS, CVEs, firewall, fail2ban) | yes | `security_center.enabled = true` |
+| **Proxy Monitor** | Sniproxy log reader — throughput, top domains, live feed | yes | `sniproxy.server` set |
+| **Network Map** | Interactive D3.js topology (drag & drop, switches, routers, ports) | yes | `scanner.enabled = true` |
+| **Database Viewer** | Browse, search and delete records from attacks / bans / devices tables | yes | — |
+| **Settings** | Live config editor, system health status, export config | yes | — |
+| **Report** | Markdown report of last 24 h — attacks, bans, devices, logs (downloaded) | yes | — |
 
-Additional:
-- **Blocked IPs** visualization on the globe — load a file of banned IPs with GeoIP+ASN enrichment
+Additional capabilities:
+
+- **Globe solo mode** — open `/?solo=globe` in a new tab for a fullscreen globe-only view
+- **Blocked IPs** — load a static file of banned IPs onto the globe (geo-resolved with ISP)
 - **Sentinel Bridge** — forward events to a central Sentinel server
 - **Honeypot** — fake SSH (port 2222) and HTTP (port 8080) services that capture attacks
+- **ISP enrichment** — background task enriches existing records via ip-api.com
 
 ---
 
 ## Requirements
 
 - Python 3.9+
-- `openssh-client`, `nmap`
+- `openssh-client`, `nmap` (for Security Center and collector)
 - GeoLite2-City.mmdb (free from MaxMind — place in `data/`)
-- GeoLite2-ASN.mmdb (optional, for ISP lookup — place in `data/`)
+- GeoLite2-ASN.mmdb (optional — better ISP lookup; place in `data/`)
 
 ---
 
@@ -36,121 +42,189 @@ Additional:
 git clone https://github.com/youruser/sentinel-alert.git
 cd sentinel-alert
 
-# 2. Install system deps + Python venv
-sudo ./setup.sh --deps
-
-# 3. Configure + install systemd service
+# 2. Full install: system deps + venv + config + systemd service
 sudo ./setup.sh
+
+# — or — install deps only, configure later:
+sudo ./setup.sh --deps    # installs system packages + Python venv
+sudo ./setup.sh           # configure + install service
 ```
 
-### Manual venv setup
+The setup script:
+1. Detects distro (Debian/Ubuntu/RHEL/Fedora) and installs system packages
+2. Creates `.venv/` and installs Python dependencies
+3. Walks you through interactive configuration
+4. Writes `/etc/sentinel/sentinel-alert.conf`
+5. Initialises the SQLite database (`data/alerts.db`)
+6. Generates an ed25519 SSH key for the fail2ban collector
+7. Installs and enables a systemd unit
+
+### Reconfigure
+
+```bash
+sudo ./setup.sh --reconf   # overwrite existing config interactively
+```
+
+### Uninstall
+
+```bash
+sudo ./setup.sh --uninstall   # removes systemd service, keeps config
+sudo rm -rf /etc/sentinel     # remove config
+```
+
+### Manual / development setup
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-```
-
-### Running without systemd
-
-```bash
+python3 db_init.py
 SENTINEL_CONF=/etc/sentinel/sentinel-alert.conf .venv/bin/python app.py
 ```
+
+---
+
+## Authentication
+
+The dashboard is split into two access levels:
+
+| Without login | With login |
+|---------------|-----------|
+| Threat Map (globe, top countries, attack history) | All tabs |
+| — | Settings, Report, Database Viewer |
+| — | System Logs panel |
+| — | Local Network panel |
+
+Default credentials: **admin / admin** — change in `/etc/sentinel/sentinel-alert.conf` under `[auth]` before exposing to any network.
+
+Sessions use HMAC-SHA256 signed cookies (7-day TTL). The `secret` key is auto-generated on first start if not set.
 
 ---
 
 ## Configuration
 
 All settings live in `/etc/sentinel/sentinel-alert.conf` (INI format).
-Re-run `sudo ./setup.sh --reconf` to reconfigure interactively.
 
 ```ini
+[auth]
+# Dashboard login credentials — change before exposing to any network
+username = admin
+password = admin
+# HMAC secret for session tokens — leave blank to auto-generate on each start
+secret   =
+
 [server]
-host = 0.0.0.0
-port = 5056
+host     = 0.0.0.0
+port     = 5056
 
 [home]
-lat = 49.8209      # 0 = auto-detect from public IP
-lon = 18.2625
+# Geographic coordinates of this installation (0 = auto-detect from public IP)
+lat      = 49.8209
+lon      = 18.2625
+# Uncomment to pin your public IP:
+#ip      = 1.2.3.4
 
 [sentinel]
+# Central Sentinel server — leave url blank to disable
 url      = https://sentinel.example.com
 token    = <64-char-token>
 hostname = my-node
 
 [honeypot]
+# Ports the fake services listen on (must be > 1024 unless running as root)
 ssh_port  = 2222
 http_port = 8080
 
-[scanner]
-# Enables ARP LAN scan and the Network Map tab
-enabled = false
-
 [collector]
-# SSH-based fail2ban polling across hosts
+# SSH-based fail2ban polling
 ssh_user      = root
 hosts_file    = /etc/hosts
-monitor_hosts =          # empty = auto-discover from hosts_file
+# Explicit hosts to poll (comma-separated). Empty = auto-discover from hosts_file.
+monitor_hosts =
 
 [sniproxy]
-# Remote proxy running sniproxy - logs read via SSH
-# Leave server empty to hide the Proxy Monitor tab
+# Remote proxy running sniproxy — logs read via SSH
+# Leave server blank to hide the Proxy Monitor tab
 server    = 192.168.2.203
 ssh_user  = root
 log_files = /var/log/sniproxy/https_access.log,/var/log/sniproxy/http_access.log
 
+[scanner]
+# ARP-based LAN scanning — enables the Network Map tab
+enabled = false
+
 [security_center]
-enabled    = true         # false hides the Security Center tab
-ha_url     =              # Home Assistant URL for push notifications
+# enabled = false hides the Security Center tab
+enabled    = true
+ha_url     =          # Home Assistant URL for push notifications
 ha_token   =
 ignore_ips = 192.168.2.1,192.168.2.202
 
 [threat]
-# Visualize blocked IPs from a file on the globe (one IP per line)
-# IPs are geo-resolved with GeoIP+ASN; shown as fail2ban/port-22 arcs
+# File with one blocked IP per line — visualized on the globe as fail2ban arcs
 blocks_ips_file =
+```
+
+Config is read at startup. After editing, restart the service:
+
+```bash
+sudo systemctl restart sentinel-alert
 ```
 
 ---
 
 ## GeoIP databases
 
-Download free databases from [maxmind.com](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data) (account required):
+Required for geographic attack visualization:
 
 ```bash
-# Place in data/
-data/GeoLite2-City.mmdb   # required for country + coordinates
-data/GeoLite2-ASN.mmdb    # optional - ISP / org name lookup
+# Download from maxmind.com (free account required)
+# Place both files in data/
+data/GeoLite2-City.mmdb   # required — country, coordinates
+data/GeoLite2-ASN.mmdb    # optional — ISP / org name
 ```
+
+Without `GeoLite2-City.mmdb` the globe will not display attacks. ISP is also looked up via [ip-api.com](http://ip-api.com) as a fallback (free, 45 req/min, no key). Existing records with unknown ISP are enriched in a background task on startup.
 
 ---
 
 ## SSH key setup
 
-The collector and sniproxy reader use `conf/id_ed25519` to SSH into remote hosts.
+The collector and sniproxy reader use `conf/id_ed25519` (generated by setup.sh).
 
 ```bash
-# Generated automatically by setup.sh
 # Distribute public key to all monitored hosts:
 ssh-copy-id -i conf/id_ed25519.pub root@<HOST>
+
+# Test connection:
+ssh -i conf/id_ed25519 root@<HOST> 'fail2ban-client status'
 ```
 
 ---
 
-## Tabs in detail
+## Threat Map — Globe
 
-### Threat Map
+| Control | Action |
+|---------|--------|
+| Drag | Rotate globe |
+| Scroll | Zoom |
+| Click arc or point | Show attack card (IP, country, ISP, port/protocol) |
+| Click country (polygon) | Centre globe on that country |
+| Click row in Top Countries | Centre globe on that country |
+| `⟳ ROT` button | Toggle auto-rotation on/off |
+| `⛶` button | Panel fullscreen |
+| `⧉` button | Open globe solo in new tab (`/?solo=globe`) |
 
-- **Globe** — arcs represent attacks; age-based coloring (cyan to yellow to orange to red)
-- **LOCAL NETWORK** — ARP scan results with online/offline status and open ports
-- **FAIL2BAN HISTORY** — recent ban events from all monitored hosts
-- **TOP COUNTRIES** — hit count bar chart
-- **SYSTEM LOGS** — live event feed
+Country polygons are colored:
+- **Red fill + red border** — countries from which attacks were detected (fill intensity scales with hit count)
+- **Green fill + green border** — no attacks detected
 
-**Blocked IPs file**: set `threat.blocks_ips_file` to load a static list of blocked IPs onto the globe. Each IP is geo-resolved once and rendered as a fail2ban arc.
+Attack arcs use age-based coloring (bright and thick when fresh, fading over 24 h). Each new attack triggers a 3-wave shockwave ring at the origin and a 2-wave shield-hit ring at home.
 
-### Security Center
+---
 
-SSH-based host scanner. For each host in `/etc/hosts` (excluding `ignore_ips`):
+## Security Center
+
+SSH-based scanner. For each host in `/etc/hosts` (excluding `ignore_ips`):
 
 - OS / kernel / distro / EOL status
 - CPU, RAM, disk usage
@@ -161,58 +235,79 @@ SSH-based host scanner. For each host in `/etc/hosts` (excluding `ignore_ips`):
 
 Hosts can be enabled/disabled individually from the UI.
 
-### Proxy Monitor
+---
 
-Reads sniproxy access logs from a remote server via SSH every 5 seconds.
+## Proxy Monitor
+
+Reads sniproxy access logs from a remote server via SSH every 5 seconds:
 
 - Live TX/RX throughput (KB/s)
 - Top domains by data transfer
 - Top clients by data transfer
 - Live connection feed
-- fail2ban bans forwarded from the collector
-
-### Network Map
-
-Interactive D3.js force-directed topology.
-
-**Node types:**
-- `host` — circle, green if online / grey if offline
-- `switch` — rectangle (blue), define port count
-- `router` — diamond (purple)
-
-**Edit mode** (click EDIT):
-- Drag nodes to reposition
-- Click node to open side panel: edit label, IP, MAC; set connect/disconnect notification per host
-- Add nodes with `+ HOST`, `+ SWITCH`, `+ ROUTER`
-- Add links with `+ LINK`, then click two nodes (optionally assign port numbers)
-- RESEED: auto-populate from current LAN devices
-- SAVE: persists to `data/topo.json`
-
-**Per-host notifications** (connect/disconnect) are stored in `data/net_settings.json`.
 
 ---
 
-## API endpoints
+## Network Map
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/config` | Feature flags, home geo, sentinel status |
-| GET | `/api/devices` | LAN devices |
-| GET | `/api/attacks` | Recent honeypot attacks |
-| GET | `/api/bans` | fail2ban ban history |
-| GET | `/api/stats/countries` | Country hit counts |
-| GET | `/api/blocklist` | Blocked IPs with geo data |
-| GET | `/api/topo-data` | Network topology |
-| POST | `/api/topo-data` | Save topology |
-| GET | `/api/network/settings` | Host notification settings |
-| POST | `/api/network/settings` | Update host notification settings |
-| GET | `/api/fsc/data` | Security Center scan data |
-| POST | `/api/fsc/scan` | Trigger manual scan |
-| GET | `/api/fsc/hosts` | Host list with enabled/disabled status |
-| POST | `/api/fsc/hosts/toggle` | Toggle host scan enable/disable |
-| GET | `/api/sniproxy/data` | Proxy monitor metrics |
-| GET | `/api/sniproxy/debug` | SSH diagnostic for sniproxy |
-| WS | `/ws/live` | Live event stream |
+Interactive D3.js force-directed topology.
+
+**Node types:** `host` (circle), `switch` (rectangle), `router` (diamond)
+
+**Edit mode** (click EDIT):
+- Drag nodes to reposition
+- Click node → side panel: edit label, IP, MAC; set connect/disconnect notifications
+- `+ HOST`, `+ SWITCH`, `+ ROUTER` — add nodes
+- `+ LINK` → click two nodes to connect (optionally assign port numbers)
+- RESEED — auto-populate from current LAN scan
+- SAVE — persists to `data/topo.json`
+
+---
+
+## Database Viewer
+
+Open via **⊞ DB** button (requires login). Supports:
+
+- Tables: **ATTACKS**, **BAN HISTORY**, **DEVICES**
+- Fulltext search (debounced)
+- Checkbox row selection + "Select all"
+- Paginated (100 rows/page)
+- `DELETE SELECTED` — with confirmation dialog
+
+---
+
+## API reference
+
+All endpoints returning sensitive data require authentication (session cookie).
+
+| Method | Path | Auth | Description |
+|--------|------|:----:|-------------|
+| GET | `/api/config` | no | Feature flags, home geo, sentinel status |
+| GET | `/api/auth/status` | no | `{ authenticated: bool }` |
+| POST | `/api/login` | no | `{ username, password }` → sets cookie |
+| POST | `/api/logout` | no | Clears session cookie |
+| GET | `/api/status` | yes | System health — GeoIP, modules, DB stats |
+| GET | `/api/config/full` | yes | Full INI config as JSON |
+| POST | `/api/config/update` | yes | Update config file |
+| GET | `/api/config/export` | yes | Download raw `.conf` file |
+| GET | `/api/devices` | no | LAN devices |
+| GET | `/api/attacks` | no | Recent honeypot attacks |
+| GET | `/api/bans` | no | fail2ban ban history |
+| GET | `/api/stats/countries` | no | Country hit counts |
+| GET | `/api/blocklist` | no | Blocked IPs with geo data |
+| GET | `/api/db/{table}` | yes | Browse DB table (attacks/ban_history/devices) |
+| DELETE | `/api/db/{table}` | yes | Delete records by PK list |
+| GET | `/api/report/data` | no | Aggregate data for report generation |
+| GET | `/api/topo-data` | no | Network topology |
+| POST | `/api/topo-data` | no | Save topology |
+| GET | `/api/network/settings` | no | Host notification settings |
+| POST | `/api/network/settings` | no | Update host notification settings |
+| GET | `/api/fsc/data` | no | Security Center scan data |
+| POST | `/api/fsc/scan` | no | Trigger manual scan |
+| GET | `/api/fsc/hosts` | no | Host list with enabled/disabled status |
+| POST | `/api/fsc/hosts/toggle` | no | Toggle host scan |
+| GET | `/api/sniproxy/data` | no | Proxy monitor metrics |
+| WS | `/ws/live` | no | Live event stream |
 
 ---
 
@@ -220,21 +315,32 @@ Interactive D3.js force-directed topology.
 
 | Path | Description |
 |------|-------------|
-| `data/alerts.db` | SQLite - attacks, bans, devices |
+| `data/alerts.db` | SQLite — attacks, bans, devices |
 | `data/topo.json` | Network topology |
 | `data/net_settings.json` | Host notification settings |
 | `data/fsc_hosts.json` | Security Center host enable/disable |
 | `data/sniproxy_stats.json` | Proxy monitor persisted stats |
-| `data/settings.json` | Sentinel bridge credentials |
-| `data/GeoLite2-City.mmdb` | GeoIP city database |
-| `data/GeoLite2-ASN.mmdb` | GeoIP ASN/ISP database |
+| `data/GeoLite2-City.mmdb` | GeoIP city database (required) |
+| `data/GeoLite2-ASN.mmdb` | GeoIP ASN/ISP database (optional) |
 | `conf/id_ed25519` | SSH private key for remote access |
+| `/etc/sentinel/sentinel-alert.conf` | Main configuration |
 
 ---
 
-## Uninstall
+## Logs & diagnostics
 
 ```bash
-sudo ./setup.sh --uninstall   # removes service, keeps config
-sudo rm -rf /etc/sentinel     # remove config
+# Live logs
+journalctl -u sentinel-alert -f
+
+# Last 100 lines
+journalctl -u sentinel-alert -n 100 --no-pager
+
+# Service status
+systemctl status sentinel-alert
+
+# Restart
+sudo systemctl restart sentinel-alert
 ```
+
+System logs are also visible in the dashboard **SYSTEM LOGS** panel (requires login).

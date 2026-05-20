@@ -25,6 +25,16 @@ MODE="install"
 [[ "${1:-}" == "--uninstall" ]] && MODE="uninstall"
 [[ "${1:-}" == "--deps" ]]      && MODE="deps"
 
+# ── paths ──────────────────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="$SCRIPT_DIR"
+CONF_DIR="/etc/sentinel"
+CONF_FILE="$CONF_DIR/sentinel-alert.conf"
+SERVICE_FILE="/etc/systemd/system/sentinel-alert.service"
+SSH_KEY_PATH="$APP_DIR/conf/id_ed25519"
+VENV_DIR="$APP_DIR/.venv"
+VENV_PYTHON="$VENV_DIR/bin/python"
+
 # ── distro detection ───────────────────────────────────────────────────────
 detect_distro() {
     if [[ -f /etc/os-release ]]; then
@@ -50,7 +60,6 @@ install_system_deps() {
                                openssh-client nmap curl
             ;;
         rhel|centos|almalinux|rocky)
-            # EPEL needed for some packages on RHEL
             if ! rpm -q epel-release &>/dev/null; then
                 dnf install -y epel-release 2>/dev/null || \
                 yum install -y epel-release 2>/dev/null || true
@@ -59,6 +68,9 @@ install_system_deps() {
                            openssh-clients nmap curl 2>/dev/null || \
             yum install -y python3 python3-pip python3-devel \
                            openssh-clients nmap curl
+            # python3-venv is part of python3 on RHEL 8+; virtualenv as fallback
+            python3 -m venv --help &>/dev/null || \
+                dnf install -y python3-virtualenv 2>/dev/null || true
             ;;
         fedora)
             dnf install -y python3 python3-pip python3-devel openssh-clients nmap curl
@@ -71,32 +83,23 @@ install_system_deps() {
     ok "System dependencies installed."
 }
 
-# ── paths ──────────────────────────────────────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_DIR="$SCRIPT_DIR"
-CONF_DIR="/etc/sentinel"
-CONF_FILE="$CONF_DIR/sentinel-alert.conf"
-SERVICE_FILE="/etc/systemd/system/sentinel-alert.service"
-SSH_KEY_PATH="$APP_DIR/conf/id_ed25519"
+# ── venv setup ─────────────────────────────────────────────────────────────
+setup_venv() {
+    info "Setting up Python virtual environment..."
+    if [[ ! -d "$VENV_DIR" ]]; then
+        python3 -m venv "$VENV_DIR" || die "Failed to create venv. Install python3-venv first."
+    fi
+    "$VENV_DIR/bin/pip" install --quiet --upgrade pip
+    "$VENV_DIR/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
+    ok "Python venv ready: $VENV_DIR"
+}
 
 # ── deps-only mode ─────────────────────────────────────────────────────────
 if [[ "$MODE" == "deps" ]]; then
     install_system_deps
-    info "Creating Python venv..."
-    python3 -m venv "$APP_DIR/.venv"
-    "$APP_DIR/.venv/bin/pip" install --quiet --upgrade pip
-    "$APP_DIR/.venv/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
+    setup_venv
     ok "Done. Run setup.sh without --deps to configure and install."
     exit 0
-fi
-
-# Detect Python (prefer venv)
-if [[ -x "$APP_DIR/.venv/bin/python" ]]; then
-    PYTHON="$APP_DIR/.venv/bin/python"
-elif command -v python3 &>/dev/null; then
-    PYTHON="$(command -v python3)"
-else
-    die "Python not found. Run: sudo $0 --deps"
 fi
 
 # ── uninstall ──────────────────────────────────────────────────────────────
@@ -118,14 +121,27 @@ echo -e "${CYN}║      SENTINEL-ALERT  —  Setup & Install       ║${NC}"
 echo -e "${CYN}╚═══════════════════════════════════════════════╝${NC}"
 echo ""
 echo "  App dir : $APP_DIR"
-echo "  Python  : $PYTHON"
 echo "  Config  : $CONF_FILE"
 echo "  Service : $SERVICE_FILE"
 echo ""
 
+# ── ensure system deps + venv ──────────────────────────────────────────────
+if [[ ! -x "$VENV_PYTHON" ]]; then
+    info "Virtual environment not found — installing dependencies first..."
+    install_system_deps
+    setup_venv
+else
+    info "Updating Python dependencies..."
+    "$VENV_DIR/bin/pip" install --quiet --upgrade pip
+    "$VENV_DIR/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
+    ok "Dependencies up to date."
+fi
+
+echo "  Python  : $VENV_PYTHON"
+echo ""
+
 # ── helpers ────────────────────────────────────────────────────────────────
 ask() {
-    # ask VAR "Prompt" "default"
     local var="$1" prompt="$2" default="${3:-}"
     local label="$prompt"
     [[ -n "$default" ]] && label="$prompt [${default}]"
@@ -135,9 +151,12 @@ ask() {
 }
 
 ask_secret() {
-    local var="$1" prompt="$2"
-    read -rsp "  $prompt: " val
+    local var="$1" prompt="$2" default="${3:-}"
+    local label="$prompt"
+    [[ -n "$default" ]] && label="$prompt [leave blank = keep '${default}']"
+    read -rsp "  $label: " val
     echo ""
+    val="${val:-$default}"
     printf -v "$var" '%s' "$val"
 }
 
@@ -152,6 +171,15 @@ fi
 
 # ── interactive config ──────────────────────────────────────────────────────
 if [[ "$SKIP_CONF" == "false" ]]; then
+
+    echo -e "${CYN}── Authentication ───────────────────────────────${NC}"
+    warn "Dashboard login credentials (default: admin / admin)."
+    warn "Change before exposing to any network!"
+    ask        AUTH_USER   "Username" "admin"
+    ask_secret AUTH_PASS   "Password" "admin"
+    AUTH_SECRET=""   # generated randomly at runtime if empty
+
+    echo ""
     echo -e "${CYN}── Server ──────────────────────────────────────${NC}"
     ask SERVER_HOST "Listen address" "0.0.0.0"
     ask SERVER_PORT "Web UI port"    "5056"
@@ -166,7 +194,7 @@ if [[ "$SKIP_CONF" == "false" ]]; then
     echo -e "${CYN}── Sentinel Central (optional) ─────────────────${NC}"
     ask SENTINEL_URL      "Sentinel URL (empty to skip)" ""
     if [[ -n "$SENTINEL_URL" ]]; then
-        ask_secret SENTINEL_TOKEN    "Sentinel token"
+        ask_secret SENTINEL_TOKEN    "Sentinel token" ""
         ask SENTINEL_HOSTNAME "Agent hostname" "$(hostname -s)"
     else
         SENTINEL_TOKEN=""; SENTINEL_HOSTNAME="$(hostname -s)"
@@ -211,7 +239,7 @@ if [[ "$SKIP_CONF" == "false" ]]; then
 
     ask FSC_HA_URL "Home Assistant URL (empty to disable)" ""
     if [[ -n "$FSC_HA_URL" ]]; then
-        ask_secret FSC_HA_TOKEN "HA long-lived token"
+        ask_secret FSC_HA_TOKEN "HA long-lived token" ""
     else
         FSC_HA_TOKEN=""
     fi
@@ -220,12 +248,11 @@ if [[ "$SKIP_CONF" == "false" ]]; then
     echo -e "${CYN}── Security Center — Ignored IPs ───────────────${NC}"
     warn "Enter IPs to exclude from SSH security scan (comma-separated)."
     warn "Typically: gateway, switches, printers, HA."
-    ask FSC_IGNORE_IPS "Ignore IPs" "192.168.2.1,192.168.2.202"
+    ask FSC_IGNORE_IPS "Ignore IPs" "192.168.2.1"
 
     echo ""
     echo -e "${CYN}── Blocked IPs Visualization ────────────────────${NC}"
     warn "Path to a file with one IP per line to visualize on the globe."
-    warn "Each IP gets geo-resolved and shown as a fail2ban attack."
     ask BLOCKS_IPS_FILE "Blocked IPs file (empty to disable)" ""
 
     # ── write config ───────────────────────────────────────────────────────
@@ -244,6 +271,14 @@ if [[ "$SKIP_CONF" == "false" ]]; then
 # Re-run setup:   sudo $APP_DIR/setup.sh --reconf
 # Uninstall:      sudo $APP_DIR/setup.sh --uninstall
 
+[auth]
+# Dashboard login credentials
+# Change before exposing to any network!
+username = ${AUTH_USER}
+password = ${AUTH_PASS}
+# HMAC secret for session tokens — leave blank to auto-generate on each start
+secret   =
+
 [server]
 # Address and port for the web UI
 host     = ${SERVER_HOST}
@@ -253,11 +288,11 @@ port     = ${SERVER_PORT}
 # Geographic coordinates of this installation (0 = auto-detect from public IP)
 lat      = ${HOME_LAT}
 lon      = ${HOME_LON}
-# Uncomment to pin your public IP instead of auto-detecting:
+# Pin your public IP instead of auto-detecting (optional):
 #ip      = ${HOME_IP}
 
 [sentinel]
-# Sentinel central server (leave blank to disable forwarding)
+# Sentinel central server — leave url blank to disable forwarding
 url      = ${SENTINEL_URL}
 token    = ${SENTINEL_TOKEN}
 hostname = ${SENTINEL_HOSTNAME}
@@ -304,13 +339,19 @@ CONF
     ok "Config written to $CONF_FILE"
 fi
 
+# ── initialise database ────────────────────────────────────────────────────
+echo ""
+echo -e "${CYN}── Database ──────────────────────────────────────${NC}"
+info "Initialising SQLite database..."
+SENTINEL_CONF="$CONF_FILE" "$VENV_PYTHON" "$APP_DIR/db_init.py"
+ok "Database ready."
+
 # ── SSH key for collector ──────────────────────────────────────────────────
 echo ""
 echo -e "${CYN}── SSH Key (fail2ban collector) ─────────────────${NC}"
 mkdir -p "$APP_DIR/conf"
 if [[ -f "$SSH_KEY_PATH" ]]; then
     ok "SSH key already exists: $SSH_KEY_PATH"
-    # Recover missing .pub from private key (happens when only private key was committed)
     if [[ ! -f "${SSH_KEY_PATH}.pub" ]]; then
         info "Public key missing — regenerating from private key..."
         ssh-keygen -y -f "$SSH_KEY_PATH" > "${SSH_KEY_PATH}.pub" \
@@ -335,16 +376,17 @@ echo ""
 
 # ── detect run user ─────────────────────────────────────────────────────────
 echo -e "${CYN}── Service User ─────────────────────────────────${NC}"
-# Suggest the owner of the app directory as the run user
-SUGGESTED_USER=$(stat -c '%U' "$APP_DIR" 2>/dev/null || echo "$(logname 2>/dev/null || echo root)")
+SUGGESTED_USER=$(stat -c '%U' "$APP_DIR" 2>/dev/null || logname 2>/dev/null || echo root)
 ask RUN_USER "User to run the service as" "$SUGGESTED_USER"
 
-# Verify user exists
 id "$RUN_USER" &>/dev/null || die "User '$RUN_USER' does not exist."
 RUN_GROUP=$(id -gn "$RUN_USER")
 
-# Make sure config is readable by that user
+# Config readable by the run user
 chown root:"$RUN_GROUP" "$CONF_DIR" "$CONF_FILE" 2>/dev/null || true
+
+# Data dir writable by the run user
+chown -R "$RUN_USER":"$RUN_GROUP" "$APP_DIR/data" 2>/dev/null || true
 
 # ── write systemd unit ─────────────────────────────────────────────────────
 echo ""
@@ -364,7 +406,7 @@ User=${RUN_USER}
 Group=${RUN_GROUP}
 WorkingDirectory=${APP_DIR}
 Environment=SENTINEL_CONF=${CONF_FILE}
-ExecStart=${PYTHON} ${APP_DIR}/app.py
+ExecStart=${VENV_PYTHON} ${APP_DIR}/app.py
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
@@ -406,14 +448,25 @@ else
 fi
 
 # ── summary ────────────────────────────────────────────────────────────────
+# Read port from config if available, fallback to what was configured
+_PORT="${SERVER_PORT:-5056}"
+if [[ -f "$CONF_FILE" ]]; then
+    _PORT=$(awk -F'=' '/^\[server\]/,/^\[/ { if (/^port/) print $2 }' "$CONF_FILE" | tr -d ' ' | head -1)
+    _PORT="${_PORT:-5056}"
+fi
+
 echo ""
 echo -e "${CYN}╔═══════════════════════════════════════════════╗${NC}"
 echo -e "${CYN}║              Setup complete!                  ║${NC}"
 echo -e "${CYN}╚═══════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "  Web UI   : ${GRN}http://$(hostname -I | awk '{print $1}'):${SERVER_PORT:-5056}${NC}"
+echo -e "  Web UI   : ${GRN}http://$(hostname -I | awk '{print $1}'):${_PORT}${NC}"
+echo -e "  Login    : ${GRN}${AUTH_USER:-admin} / (your password)${NC}"
 echo -e "  Config   : ${CYN}$CONF_FILE${NC}"
 echo -e "  Logs     : ${CYN}journalctl -u sentinel-alert -f${NC}"
 echo -e "  Status   : ${CYN}systemctl status sentinel-alert${NC}"
 echo -e "  Restart  : ${CYN}sudo systemctl restart sentinel-alert${NC}"
+echo ""
+echo -e "  GeoIP    : ${YLW}Place GeoLite2-City.mmdb in $APP_DIR/data/${NC}"
+echo -e "             ${YLW}(free download from maxmind.com — account required)${NC}"
 echo ""

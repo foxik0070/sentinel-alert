@@ -1,6 +1,21 @@
 // Sentinel-Alert dashboard
 
 const $ = id => document.getElementById(id);
+
+// Solo globe mode: ?solo=globe hides everything except the globe panel
+const _SOLO_GLOBE = new URLSearchParams(location.search).get('solo') === 'globe';
+if (_SOLO_GLOBE) {
+    const style = document.createElement('style');
+    style.textContent = `
+        header, .grid > :not(#globe-panel) { display: none !important; }
+        body { overflow: hidden; background: #000; }
+        .grid { display: block !important; height: 100vh !important; }
+        #globe-panel { height: 100vh !important; width: 100vw !important;
+                       border: none !important; border-radius: 0 !important; }
+        #globe-panel .ph { background: rgba(2,10,14,0.7) !important; }
+    `;
+    document.head.appendChild(style);
+}
 const globeEl    = $('globe-viz');
 const netListEl  = $('net-list');
 const netCountEl = $('net-count');
@@ -39,7 +54,8 @@ const homeRings = [];   // permanent target indicator
 const homePoints = [];  // permanent target dot
 
 let _countriesGeo = null;
-let _countryAttackMap = {}; // normalized country name -> [{src_ip, protocol, dst_port, ts}]
+let _countryAttackMap = {};
+let _lastCfg = {};
 
 const TX_NIGHT = '//unpkg.com/three-globe/example/img/earth-night.jpg';
 const TX_DAY   = '//unpkg.com/three-globe/example/img/earth-blue-marble.jpg';
@@ -63,10 +79,10 @@ const globe = Globe()(globeEl)
     .arcStartLat(d => d.startLat).arcStartLng(d => d.startLng)
     .arcEndLat(d => d.endLat).arcEndLng(d => d.endLng)
     .arcColor(d => d.color)
-    .arcStroke(1.2)
-    .arcDashLength(0.6).arcDashGap(0.4).arcDashInitialGap(d => d.phase)
-    .arcDashAnimateTime(1800)
-    .arcAltitudeAutoScale(0.7)
+    .arcStroke(d => d.fresh ? 2.2 : 1.4)
+    .arcDashLength(0.3).arcDashGap(0.7).arcDashInitialGap(d => d.phase)
+    .arcDashAnimateTime(d => d.fresh ? 900 : 1400)
+    .arcAltitudeAutoScale(0.75)
     .arcsTransitionDuration(0)
     .pointsData([...points, ...homePoints])
     .pointLat(d => d.lat).pointLng(d => d.lon)
@@ -117,6 +133,7 @@ globe.controls().enableDamping = true;
 window.addEventListener('resize', () => {
     globe.width(globeEl.clientWidth).height(globeEl.clientHeight);
 });
+if (_SOLO_GLOBE) setTimeout(() => globe.width(globeEl.clientWidth).height(globeEl.clientHeight), 50);
 
 // Refresh texture every 15 min (covers day/night transition).
 setInterval(() => globe.globeImageUrl(pickTexture()), 15 * 60 * 1000);
@@ -144,12 +161,26 @@ function getArcColor(protocol, ageSeconds) {
     ];
 }
 
+let _rotationLocked = false; // true = user manually stopped rotation
+
+function _setRotation(on) {
+    _rotationLocked = !on;
+    globe.controls().autoRotate = on;
+    const btn = $('globe-rotate-btn');
+    if (btn) {
+        btn.textContent = on ? '⟳ ROT' : '⏸ ROT';
+        btn.style.background = on ? 'var(--accent)' : '#4d7479';
+        btn.style.color = '#0a1a1e';
+    }
+}
+
 function centerGlobeOn(lat, lon) {
     globe.controls().autoRotate = false;
     globe.pointOfView({ lat, lng: lon, altitude: 1.4 }, 900);
     clearTimeout(centerGlobeOn._resumeTimer);
+    // Only auto-resume if user hasn't manually locked rotation off
     centerGlobeOn._resumeTimer = setTimeout(() => {
-        globe.controls().autoRotate = true;
+        if (!_rotationLocked) globe.controls().autoRotate = true;
     }, 6000);
 }
 
@@ -158,14 +189,28 @@ function _polyName(d) {
     return p.ADMIN || p.NAME || p.name || '';
 }
 
+// GeoIP DB names → Natural Earth GeoJSON ADMIN names
+const COUNTRY_NORM = {
+    'United States':   'United States of America',
+    'The Netherlands': 'Netherlands',
+    'Russia':          'Russia',
+};
+
+let _polyRefreshTimer = null;
 function refreshCountryPolygons() {
     _countryAttackMap = {};
     _attackHistory.forEach(a => {
         if (!a.country || a.country === '?' || a.country === 'Unknown') return;
-        if (!_countryAttackMap[a.country]) _countryAttackMap[a.country] = [];
-        _countryAttackMap[a.country].push(a);
+        const key = COUNTRY_NORM[a.country] || a.country;
+        if (!_countryAttackMap[key]) _countryAttackMap[key] = [];
+        _countryAttackMap[key].push(a);
     });
-    if (_countriesGeo) globe.polygonsData([..._countriesGeo]);
+    // Debounce — each polygonsData() call rebuilds all meshes, causing a flash.
+    // Long delay keeps it rare; color functions read from _countryAttackMap live.
+    clearTimeout(_polyRefreshTimer);
+    _polyRefreshTimer = setTimeout(() => {
+        if (_countriesGeo) globe.polygonsData(_countriesGeo);
+    }, 2000);
 }
 
 async function loadCountryPolygons() {
@@ -175,15 +220,17 @@ async function loadCountryPolygons() {
         globe
             .polygonsData(_countriesGeo)
             .polygonGeoJsonGeometry(d => d.geometry)
-            .polygonAltitude(0.001)
+            .polygonAltitude(0.02)
             .polygonCapColor(d => {
                 const hits = _countryAttackMap[_polyName(d)];
-                return hits ? 'rgba(255,42,94,0.05)' : 'rgba(0,0,0,0)';
+                if (!hits) return 'rgba(0,160,70,0.12)';
+                const intensity = Math.min(0.75, 0.35 + hits.length * 0.05);
+                return `rgba(210,25,55,${intensity.toFixed(2)})`;
             })
             .polygonSideColor(() => 'rgba(0,0,0,0)')
             .polygonStrokeColor(d => {
                 const hits = _countryAttackMap[_polyName(d)];
-                return hits ? 'rgba(255,80,40,0.85)' : 'rgba(20,60,70,0.5)';
+                return hits ? 'rgba(255,50,30,0.9)' : 'rgba(0,200,90,0.5)';
             })
             .polygonLabel(d => {
                 const name = _polyName(d);
@@ -216,14 +263,14 @@ function pushAttack(a, isNew = true) {
     const [c1, c2] = getArcColor(proto, ageSeconds);
 
     // Arc: start (origin, dim) → end (HOME, hot). Persistent.
-    // Store original attack timestamp for accurate age-based coloring
     const arcObj = { startLat: a.lat, startLng: a.lon, endLat: HOME.lat, endLng: HOME.lon,
-                     color: [c1, c2], phase: Math.random(),
+                     color: [c1, c2], phase: Math.random(), fresh: isNew,
                      attackTime: a.ts ? new Date(a.ts).getTime() : Date.now(),
                      src_ip: a.src_ip, country: a.country, isp: a.isp,
                      dst_port: a.dst_port, protocol: a.protocol };
     arcs.push(arcObj);
     arcTimestamps.push(Date.now());
+    if (isNew) setTimeout(() => { arcObj.fresh = false; }, 8000);
     while (arcs.length > MAX_ARCS) { arcs.shift(); arcTimestamps.shift(); }
 
     points.push({ ...a, color: c1, radius: 0.3, alt: 0.01 });
@@ -237,19 +284,32 @@ function pushAttack(a, isNew = true) {
     if (!_globePaused) _globeFlush();
 
     if (isNew) {
-        // Impact ring at origin
-        const originRing = { lat: a.lat, lon: a.lon, maxR: 3, speed: 2, period: 600,
-                             color: t => `rgba(255,42,94,${1 - t})` };
-        // Hit ring at HOME (target flash)
-        const hitRing = { lat: HOME.lat, lon: HOME.lon, maxR: 2.2, speed: 3, period: 500,
-                          color: t => `rgba(255,232,59,${1 - t})` };
-        rings.push(originRing, hitRing);
-        globe.ringsData([...rings, ...homeRings]);
-        setTimeout(() => {
-            rings.splice(rings.indexOf(originRing), 1);
-            rings.splice(rings.indexOf(hitRing), 1);
+        const [r, g, b] = PROTO_RGB[proto] || _DEFAULT_RGB;
+        const addRing = (ring, ttl) => {
+            rings.push(ring);
             globe.ringsData([...rings, ...homeRings]);
-        }, 2400);
+            setTimeout(() => {
+                const i = rings.indexOf(ring); if (i >= 0) rings.splice(i, 1);
+                globe.ringsData([...rings, ...homeRings]);
+            }, ttl);
+        };
+        // 3-wave shockwave burst at attack origin
+        [
+            { delay:   0, maxR: 2.0, speed: 5.0, period: 380, ttl: 1600 },
+            { delay: 160, maxR: 3.8, speed: 3.2, period: 560, ttl: 2400 },
+            { delay: 340, maxR: 5.5, speed: 2.0, period: 800, ttl: 3500 },
+        ].forEach(({ delay, maxR, speed, period, ttl }) => setTimeout(() => addRing(
+            { lat: a.lat, lon: a.lon, maxR, speed, period,
+              color: t => `rgba(${r},${g},${b},${((1 - t) * 0.92).toFixed(2)})` }, ttl
+        ), delay));
+        // 2-wave shield-hit at HOME
+        [
+            { delay:   0, maxR: 1.8, speed: 6.0, period: 320, ttl: 1400 },
+            { delay: 280, maxR: 3.2, speed: 3.5, period: 550, ttl: 2200 },
+        ].forEach(({ delay, maxR, speed, period, ttl }) => setTimeout(() => addRing(
+            { lat: HOME.lat, lon: HOME.lon, maxR, speed, period,
+              color: t => `rgba(255,232,59,${((1 - t) * 0.95).toFixed(2)})` }, ttl
+        ), delay));
 
         acIp.textContent = a.src_ip;
         acCountry.textContent = a.country || '?';
@@ -635,6 +695,7 @@ async function loadStatic() {
     let cfg = {};
     try {
         cfg = await fetch('/api/config').then(r => r.json());
+        _lastCfg = cfg;
         HOME = { lat: cfg.home_lat, lon: cfg.home_lon,
                  ip: cfg.home_ip, country: cfg.home_country, isp: cfg.home_isp };
         hudHome.textContent = cfg.home_ip
@@ -679,12 +740,15 @@ function applyTabVisibility(cfg) {
     const btnProxy    = $('tab-btn-proxy');
     const btnNetwork  = $('tab-btn-network');
     const lanPanel    = $('lan-panel');
-    if (btnSecurity) btnSecurity.style.display = cfg.fsc_enabled === false ? 'none' : '';
-    if (btnProxy)    btnProxy.style.display    = cfg.sniproxy_enabled     ? ''     : 'none';
-    if (btnNetwork)  btnNetwork.style.display  = cfg.scanner_enabled      ? ''     : 'none';
-    if (lanPanel)    lanPanel.style.display    = cfg.scanner_enabled      ? ''     : 'none';
+    const logPanel    = $('log-panel');
+    // Auth gates all protected elements; config flags further restrict them
+    if (btnSecurity) btnSecurity.style.display = (_isAuthenticated && cfg.fsc_enabled !== false) ? '' : 'none';
+    if (btnProxy)    btnProxy.style.display    = (_isAuthenticated && cfg.sniproxy_enabled)      ? '' : 'none';
+    if (btnNetwork)  btnNetwork.style.display  = (_isAuthenticated && cfg.scanner_enabled)       ? '' : 'none';
+    if (lanPanel)    lanPanel.style.display    = (_isAuthenticated && cfg.scanner_enabled)       ? '' : 'none';
+    if (logPanel)    logPanel.style.display    = _isAuthenticated                                ? '' : 'none';
     const mainGrid = document.querySelector('.grid');
-    if (mainGrid) mainGrid.classList.toggle('no-scanner', !cfg.scanner_enabled);
+    if (mainGrid) mainGrid.classList.toggle('no-scanner', !cfg.scanner_enabled || !_isAuthenticated);
 }
 
 async function loadBlocklist() {
@@ -808,21 +872,62 @@ function showResult(ok, msg) {
     el.className = 'cfg-result ' + (ok ? 'ok' : 'err');
 }
 
+function _statusDot(ok, labelOn, labelOff) {
+    const color = ok ? 'var(--green)' : '#ff2a5e';
+    const label = ok ? labelOn : labelOff;
+    return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:10px;color:${color};">
+        <span style="width:7px;height:7px;border-radius:50%;background:${color};display:inline-block;"></span>${label}</span>`;
+}
+
 async function openSettings() {
     const cfgBody = $('cfg-body');
     const cfgResult = $('cfg-result');
     cfgBody.innerHTML = '<div style="padding:16px;color:#4d7479;">Loading…</div>';
     cfgResult.textContent = ''; cfgResult.className = 'cfg-result';
     _settingsModal.classList.remove('hidden');
-    let data = {};
-    try { data = await fetch('/api/config/full').then(r => r.json()); } catch(e) {
-        cfgBody.innerHTML = `<div style="color:var(--red)">Failed to load config: ${e.message}</div>`; return;
+
+    const [data, status] = await Promise.all([
+        fetch('/api/config/full').then(r => r.json()).catch(() => null),
+        fetch('/api/status').then(r => r.json()).catch(() => null),
+    ]);
+
+    if (!data) {
+        cfgBody.innerHTML = `<div style="color:#ff2a5e;padding:16px;">Failed to load config.</div>`; return;
     }
+
+    // Status section
+    let statusHtml = '';
+    if (status && !status.error) {
+        const m = status.modules || {}, g = status.geoip || {}, db = status.database || {}, cf = status.config_file || {};
+        statusHtml = `
+        <div style="margin-bottom:16px;">
+            <div style="font-size:9px;font-weight:800;letter-spacing:3px;color:#4d7479;border-bottom:1px solid #14333a;padding-bottom:3px;margin-bottom:10px;">SYSTEM STATUS</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;">
+                <div>${_statusDot(g.city_db==='ok',  'GeoIP DB OK',        'GeoIP DB MISSING')}</div>
+                <div>${_statusDot(g.asn_db==='ok',   'ASN DB OK',          'ASN DB MISSING')}</div>
+                <div>${_statusDot(m.scanner,          'Scanner ON',         'Scanner OFF')}</div>
+                <div>${_statusDot(m.security_center,  'Security Center ON', 'Security Center OFF')}</div>
+                <div>${_statusDot(m.sniproxy,         'SNIProxy ON',        'SNIProxy OFF')}</div>
+                <div>${_statusDot(m.sentinel,         'Sentinel ON',        'Sentinel OFF')}</div>
+                <div>${_statusDot(m.blocklist,        'Blocklist ON',       'Blocklist OFF')}</div>
+                <div>${_statusDot(cf.exists,          'Config file found',  'Config file missing — using defaults')}</div>
+            </div>
+            <div style="margin-top:10px;font-size:10px;color:#4d7479;display:flex;gap:16px;flex-wrap:wrap;">
+                <span>DB: <b style="color:var(--fg)">${db.size_kb} KB</b></span>
+                <span>Attacks: <b style="color:var(--fg)">${db.attacks}</b></span>
+                <span>Bans: <b style="color:var(--fg)">${db.bans}</b></span>
+                <span>Devices: <b style="color:var(--fg)">${db.devices}</b></span>
+                <span>ISP cache: <b style="color:var(--fg)">${g.isp_cache}</b></span>
+                ${g.unknown_isp_records > 0 ? `<span style="color:#ffb347;">⚠ ${g.unknown_isp_records} records missing ISP</span>` : ''}
+            </div>
+        </div>`;
+    }
+
     const SENSITIVE = new Set(['token', 'ha_token', 'password', 'api_key', 'key']);
     const LABELS = { server:'SERVER', home:'HOME LOCATION', sentinel:'SENTINEL LINK',
         honeypot:'HONEYPOT', collector:'COLLECTOR', sniproxy:'SNIPROXY PROXY',
         scanner:'SCANNER', security_center:'SECURITY CENTER', threat:'THREAT INTEL' };
-    cfgBody.innerHTML = Object.entries(data).map(([section, keys]) => `
+    const configHtml = Object.entries(data).map(([section, keys]) => `
         <div style="margin-bottom:14px;">
             <div style="font-size:9px;font-weight:800;letter-spacing:3px;color:#4d7479;border-bottom:1px solid #14333a;padding-bottom:3px;margin-bottom:8px;">${LABELS[section]||section.toUpperCase()}</div>
             ${Object.entries(keys).map(([key, val]) => `
@@ -833,6 +938,8 @@ async function openSettings() {
                         style="width:100%;padding:4px 7px;background:#0a1418;color:var(--fg);border:1px solid #1a4046;font-family:inherit;font-size:11px;outline:none;">
                 </div>`).join('')}
         </div>`).join('');
+
+    cfgBody.innerHTML = statusHtml + configHtml;
 }
 
 $('settings-btn').addEventListener('click', openSettings);
@@ -874,13 +981,23 @@ const _loginOverlay = $('login-overlay');
 const _loginErr     = $('login-err');
 const _loginSubmit  = $('login-submit');
 
+let _isAuthenticated = false;
+
 function applyAuthState(authenticated) {
+    _isAuthenticated = authenticated;
     document.querySelectorAll('.auth-only').forEach(el => {
         el.style.display = authenticated ? '' : 'none';
     });
     document.querySelectorAll('.tab-btn:not([data-tab="threat"])').forEach(btn => {
         btn.style.display = authenticated ? '' : 'none';
     });
+    // Always hide auth-gated panels when logged out
+    const lanPanel = $('lan-panel');
+    const logPanel = $('log-panel');
+    if (!authenticated) {
+        if (lanPanel) lanPanel.style.display = 'none';
+        if (logPanel) logPanel.style.display = 'none';
+    }
     // Show LOGIN button only when logged out
     const loginHeaderBtn = $('login-btn');
     if (loginHeaderBtn) loginHeaderBtn.style.display = authenticated ? 'none' : '';
@@ -917,6 +1034,7 @@ _loginSubmit.addEventListener('click', async () => {
     _loginSubmit.textContent = 'LOGIN';
     if (r.ok) {
         applyAuthState(true);
+        applyTabVisibility(_lastCfg);
     } else {
         _loginErr.textContent = r.error || 'Invalid credentials';
     }
@@ -929,6 +1047,9 @@ $('logout-btn').addEventListener('click', async () => {
 });
 
 checkAuth().then(() => loadStatic().then(connectWS));
+
+// Globe rotation toggle
+$('globe-rotate-btn').addEventListener('click', () => _setRotation(_rotationLocked));
 
 // Fullscreen button handlers
 document.querySelectorAll('.btn-fullscreen').forEach(btn => {
@@ -2192,5 +2313,107 @@ $('net-reseed-btn').addEventListener('click', async () => {
     $('net-link-count').textContent = 0;
     netRender();
 });
+
+// ── DB Viewer ─────────────────────────────────────────────────────────────────
+const _dbv = { table: 'attacks', page: 0, pageSize: 100, total: 0, cols: [], selected: new Set(), q: '' };
+
+function dbvOpen() { $('db-viewer').classList.remove('hidden'); dbvLoad(); }
+function dbvClose() { $('db-viewer').classList.add('hidden'); }
+
+function dbvSwitch(table) {
+    _dbv.table = table; _dbv.page = 0; _dbv.selected.clear(); _dbv.q = '';
+    $('dbv-search').value = '';
+    ['attacks','ban_history','devices'].forEach(t => {
+        const btn = $('dbv-tab-' + t);
+        if (btn) btn.style.background = t === table ? 'var(--accent)' : '';
+        if (btn) btn.style.color = t === table ? '#0a1a1e' : '';
+    });
+    dbvLoad();
+}
+
+async function dbvLoad() {
+    const params = new URLSearchParams({ limit: _dbv.pageSize, offset: _dbv.page * _dbv.pageSize });
+    if (_dbv.q) params.set('q', _dbv.q);
+    const data = await fetch(`/api/db/${_dbv.table}?${params}`).then(r => r.json()).catch(() => null);
+    if (!data || data.error) return;
+    _dbv.cols = data.columns; _dbv.total = data.total; _dbv.pk = data.pk;
+
+    // Header
+    const thead = $('dbv-thead');
+    thead.innerHTML = '<tr><th><input type="checkbox" id="dbv-chk-all" title="Select all"></th>'
+        + data.columns.map(c => `<th>${c.toUpperCase()}</th>`).join('') + '</tr>';
+    $('dbv-chk-all').addEventListener('change', e => {
+        document.querySelectorAll('#dbv-tbody .dbv-chk').forEach(chk => {
+            chk.checked = e.target.checked;
+            const id = chk.dataset.id;
+            e.target.checked ? _dbv.selected.add(id) : _dbv.selected.delete(id);
+            chk.closest('tr').classList.toggle('selected', e.target.checked);
+        });
+        dbvUpdateDeleteBtn();
+    });
+
+    // Rows
+    const tbody = $('dbv-tbody');
+    tbody.innerHTML = '';
+    data.rows.forEach(row => {
+        const id = String(row[_dbv.pk]);
+        const sel = _dbv.selected.has(id);
+        const tr = document.createElement('tr');
+        if (sel) tr.classList.add('selected');
+        tr.innerHTML = `<td><input type="checkbox" class="dbv-chk" data-id="${id}" ${sel ? 'checked' : ''}></td>`
+            + data.columns.map(c => {
+                const v = row[c] ?? '';
+                const cls = c === _dbv.pk ? ' class="dbv-pk"' : '';
+                return `<td${cls} title="${v}">${v}</td>`;
+            }).join('');
+        tr.querySelector('.dbv-chk').addEventListener('change', e => {
+            const rid = e.target.dataset.id;
+            e.target.checked ? _dbv.selected.add(rid) : _dbv.selected.delete(rid);
+            tr.classList.toggle('selected', e.target.checked);
+            dbvUpdateDeleteBtn();
+        });
+        tbody.appendChild(tr);
+    });
+
+    const pages = Math.max(1, Math.ceil(_dbv.total / _dbv.pageSize));
+    $('dbv-page-info').textContent = `Page ${_dbv.page + 1} / ${pages}  (${_dbv.total} rows)`;
+    $('dbv-count').textContent = `${_dbv.total} rows`;
+    $('dbv-prev').disabled = _dbv.page === 0;
+    $('dbv-next').disabled = (_dbv.page + 1) >= pages;
+    dbvUpdateDeleteBtn();
+}
+
+function dbvUpdateDeleteBtn() {
+    const btn = $('dbv-delete-btn');
+    btn.style.display = _dbv.selected.size ? '' : 'none';
+    btn.textContent = `DELETE SELECTED (${_dbv.selected.size})`;
+}
+
+function dbvPage(dir) { _dbv.page = Math.max(0, _dbv.page + dir); dbvLoad(); }
+
+async function dbvDeleteSelected() {
+    if (!_dbv.selected.size) return;
+    if (!confirm(`Delete ${_dbv.selected.size} record(s)?`)) return;
+    const ids = [..._dbv.selected];
+    const r = await fetch(`/api/db/${_dbv.table}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ids),
+    }).then(x => x.json()).catch(() => null);
+    if (r?.deleted != null) {
+        _dbv.selected.clear();
+        _dbv.page = 0;
+        dbvLoad();
+    }
+}
+
+let _dbvSearchTimer = null;
+$('dbv-search').addEventListener('input', e => {
+    clearTimeout(_dbvSearchTimer);
+    _dbvSearchTimer = setTimeout(() => { _dbv.q = e.target.value; _dbv.page = 0; dbvLoad(); }, 350);
+});
+$('db-viewer-btn').addEventListener('click', () => { dbvOpen(); dbvSwitch('attacks'); });
+$('db-viewer-close').addEventListener('click', dbvClose);
+$('db-viewer').addEventListener('click', e => { if (e.target === $('db-viewer')) dbvClose(); });
 
 $('net-panel-close').addEventListener('click', () => { _netSelected = null; netHighlight(); netClosePanel(); });

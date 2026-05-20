@@ -216,6 +216,17 @@ html, body {
 .btn:hover { background: rgba(0,255,213,0.15); box-shadow: 0 0 10px var(--accent); }
 .btn.primary { background: rgba(0,255,213,0.2); }
 .btn.ghost   { color: var(--muted); border-color: #2a4044; }
+.btn.danger  { background: rgba(255,42,94,0.18); color: #ff2a5e; border-color: #7a1530; }
+.btn.danger:hover { background: rgba(255,42,94,0.35); }
+
+#dbv-table th { position: sticky; top: 0; background: #0a1a1e; color: var(--muted);
+                text-align: left; padding: 5px 8px; font-size: 10px; letter-spacing: 1px;
+                border-bottom: 1px solid #163338; white-space: nowrap; }
+#dbv-table td { padding: 4px 8px; border-bottom: 1px solid #0e2228; color: var(--accent);
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+#dbv-table tr:hover td { background: #0e2228; }
+#dbv-table tr.selected td { background: rgba(255,42,94,0.08); }
+#dbv-table td.dbv-pk { color: var(--muted); font-size: 10px; }
 
 .modal {
     position: fixed; inset: 0; z-index: 200; display: flex;
@@ -225,7 +236,7 @@ html, body {
 .hidden { display: none !important; }
 .modal.hidden { display: none; }
 .modal-box {
-    width: 460px; padding: 16px 18px;
+    width: 460px; max-width: 98vw; padding: 16px 18px;
     background: linear-gradient(180deg, rgba(10,20,24,0.97), rgba(2,6,10,0.97));
     border: 1px solid var(--accent);
     box-shadow: 0 0 30px rgba(0,255,213,0.25);

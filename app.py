@@ -145,6 +145,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_heartbeat_loop()),
         asyncio.create_task(tasks.periodic_scanner(_broadcast_queue)),
         asyncio.create_task(tasks.periodic_collector(_broadcast_queue)),
+        asyncio.create_task(tasks.enrich_unknown_isp(_broadcast_queue)),
     ]
     _log_buffer.append({"type": "log", "level": "good", "source": "system",
                         "ts": datetime.now().isoformat(), "msg": "Sentinel-Alert online"})
@@ -327,8 +328,9 @@ def get_logs(limit: int = 200):
 
 
 @app.get("/api/config/full")
-def config_full():
-    """Return all editable config sections."""
+def config_full(request: Request):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
     import configparser
     c = configparser.ConfigParser(interpolation=None)
     c.read(conf.CONF_PATH)
@@ -339,8 +341,9 @@ def config_full():
 
 
 @app.post("/api/config/update")
-async def config_update(payload: dict = Body(...)):
-    """Update config file. Body: { section: { key: value } }"""
+async def config_update(request: Request, payload: dict = Body(...)):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
     import configparser
     c = configparser.ConfigParser(interpolation=None)
     c.read(conf.CONF_PATH)
@@ -359,13 +362,68 @@ async def config_update(payload: dict = Body(...)):
 
 
 @app.get("/api/config/export")
-def config_export():
-    """Download the raw config file."""
+def config_export(request: Request):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
     from fastapi.responses import FileResponse as FR
     if os.path.exists(conf.CONF_PATH):
         return FR(conf.CONF_PATH, media_type="text/plain",
                   filename="sentinel-alert.conf")
     return JSONResponse({"error": "config file not found"}, status_code=404)
+
+
+@app.get("/api/status")
+def system_status(request: Request):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    import os as _os
+    geoip_ok  = _os.path.exists(geoip.GEOIP_PATH)
+    asn_ok    = _os.path.exists(geoip.ASN_PATH)
+    db_size   = _os.path.getsize(DB_PATH) if _os.path.exists(DB_PATH) else 0
+    counts    = {}
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        counts["attacks"]     = conn.execute("SELECT COUNT(*) FROM attacks").fetchone()[0]
+        counts["bans"]        = conn.execute("SELECT COUNT(*) FROM ban_history").fetchone()[0]
+        counts["devices"]     = conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
+        counts["unknown_isp"] = conn.execute(
+            "SELECT COUNT(*) FROM attacks WHERE isp='Unknown'"
+            " UNION ALL SELECT COUNT(*) FROM ban_history WHERE isp='Unknown'"
+        ).fetchall()
+        counts["unknown_isp"] = sum(r[0] for r in counts["unknown_isp"])
+        conn.close()
+    except Exception:
+        pass
+    sentinel = bridge.get_status() if hasattr(bridge, "get_status") else {}
+    conf_path_exists = _os.path.exists(conf.CONF_PATH)
+    isp_cache_size = len(geoip._isp_cache)
+    return {
+        "geoip": {
+            "city_db":  "ok" if geoip_ok  else "missing",
+            "asn_db":   "ok" if asn_ok    else "missing",
+            "isp_cache": isp_cache_size,
+            "unknown_isp_records": counts.get("unknown_isp", 0),
+        },
+        "database": {
+            "path":    DB_PATH,
+            "size_kb": round(db_size / 1024, 1),
+            "attacks": counts.get("attacks", 0),
+            "bans":    counts.get("bans", 0),
+            "devices": counts.get("devices", 0),
+        },
+        "modules": {
+            "scanner":         conf.SCANNER_ENABLED,
+            "security_center": conf.FSC_ENABLED,
+            "sniproxy":        bool(conf.SNIPROXY_SERVER),
+            "blocklist":       bool(conf.BLOCKLIST_FILE),
+            "sentinel":        bool(conf.SENTINEL_URL),
+        },
+        "config_file": {
+            "path":   conf.CONF_PATH,
+            "exists": conf_path_exists,
+        },
+        "sentinel": sentinel,
+    }
 
 
 # Demo IPs for visual testing (real public ranges, geo-resolvable).
@@ -599,6 +657,53 @@ async def ws_live(ws: WebSocket):
         pass
     finally:
         _clients.discard(ws)
+
+
+_DB_TABLES = {
+    "attacks":     ("id",    ["id","ts","src_ip","dst_port","protocol","country","isp","lat","lon"]),
+    "ban_history": ("rowid", ["rowid","ip","country","isp","timestamp","lat","lon"]),
+    "devices":     ("mac",   ["mac","ip","hostname","vendor","first_seen","last_seen","is_online"]),
+}
+
+@app.get("/api/db/{table}")
+def db_table(table: str, request: Request, limit: int = 500, offset: int = 0, q: str = ""):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    if table not in _DB_TABLES:
+        return JSONResponse({"error": "unknown table"}, 400)
+    pk, cols = _DB_TABLES[table]
+    col_list = ", ".join(cols)
+    where = ""
+    params: list = []
+    if q:
+        text_cols = [c for c in cols if c not in ("lat","lon","is_online","dst_port","id","rowid")]
+        where = "WHERE " + " OR ".join(f"{c} LIKE ?" for c in text_cols)
+        params = [f"%{q}%" for _ in text_cols]
+    order = f"ORDER BY {pk} DESC"
+    rows = _query(
+        f"SELECT {col_list} FROM {table} {where} {order} LIMIT ? OFFSET ?",
+        (*params, limit, offset)
+    )
+    total = _query(f"SELECT COUNT(*) AS n FROM {table} {where}", params)[0]["n"]
+    return {"columns": cols, "rows": rows, "total": total, "pk": pk}
+
+
+@app.delete("/api/db/{table}")
+async def db_delete(table: str, request: Request, ids: list = Body(...)):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    if table not in _DB_TABLES:
+        return JSONResponse({"error": "unknown table"}, 400)
+    pk, _ = _DB_TABLES[table]
+    if not ids:
+        return {"deleted": 0}
+    placeholders = ",".join("?" * len(ids))
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.execute(f"DELETE FROM {table} WHERE {pk} IN ({placeholders})", ids)
+    conn.commit()
+    deleted = cur.rowcount
+    conn.close()
+    return {"deleted": deleted}
 
 
 @app.get("/api/fsc/data")

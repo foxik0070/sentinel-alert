@@ -44,8 +44,9 @@ def _get_asn_reader():
         return None
 
 
-def _lookup_isp_api(ip: str) -> str:
-    """Cached ISP lookup via ip-api.com (free, 45 req/min, no key needed)."""
+def _lookup_isp_api(ip: str) -> str | None:
+    """Cached ISP lookup via ip-api.com (free, 45 req/min, no key needed).
+    Returns None on failure so callers can retry later."""
     with _isp_lock:
         if ip in _isp_cache:
             return _isp_cache[ip]
@@ -53,13 +54,14 @@ def _lookup_isp_api(ip: str) -> str:
         url = f"http://ip-api.com/json/{ip}?fields=isp,org"
         with urllib.request.urlopen(url, timeout=4) as resp:
             d = json.loads(resp.read())
-        isp = d.get("isp") or d.get("org") or "Unknown"
+        isp = d.get("isp") or d.get("org") or None
     except Exception:
-        isp = "Unknown"
-    with _isp_lock:
-        if len(_isp_cache) > 5000:
-            _isp_cache.clear()
-        _isp_cache[ip] = isp
+        isp = None
+    if isp:
+        with _isp_lock:
+            if len(_isp_cache) > 5000:
+                _isp_cache.clear()
+            _isp_cache[ip] = isp
     return isp
 
 
@@ -84,18 +86,22 @@ def lookup(ip):
     except ValueError:
         return 0.0, 0.0, "Invalid", "Invalid"
 
+    lat, lon, country, isp = 0.0, 0.0, "Unknown", None
+
     reader = _get_reader()
-    if reader is None:
-        return 0.0, 0.0, "NoDB", "NoDB"
-    try:
-        res = reader.city(ip)
-        lat = float(res.location.latitude or 0.0)
-        lon = float(res.location.longitude or 0.0)
-        country = res.country.name or "Unknown"
-        isp = (getattr(res.traits, "isp", None)
-               or getattr(res.traits, "organization", None)
-               or lookup_asn(ip)
-               or _lookup_isp_api(ip))
-        return lat, lon, country, isp or "Unknown"
-    except Exception:
-        return 0.0, 0.0, "Unknown", "Unknown"
+    if reader is not None:
+        try:
+            res = reader.city(ip)
+            lat = float(res.location.latitude or 0.0)
+            lon = float(res.location.longitude or 0.0)
+            country = res.country.name or "Unknown"
+            isp = (getattr(res.traits, "isp", None)
+                   or getattr(res.traits, "organization", None)
+                   or lookup_asn(ip))
+        except Exception:
+            pass
+
+    if not isp:
+        isp = _lookup_isp_api(ip)
+
+    return lat, lon, country, isp or "Unknown"
