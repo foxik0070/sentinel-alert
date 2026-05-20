@@ -4,6 +4,7 @@ Runs two daemon threads:
   - _poll_worker: every 5 s fetches new log lines via SSH, deduplicates, updates stats
   - _speed_worker: every 2 s computes KB/s metrics and appends to speed_history
 """
+import ipaddress
 import json
 import os
 import re
@@ -11,7 +12,24 @@ import subprocess
 import threading
 import time
 
+import geoip
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+_on_attack = None   # callback(dict) — set by app.py to push to WebSocket
+
+
+def set_attack_callback(fn):
+    global _on_attack
+    _on_attack = fn
+
+
+def _is_external(ip: str) -> bool:
+    try:
+        a = ipaddress.ip_address(ip)
+        return not (a.is_private or a.is_loopback or a.is_link_local)
+    except ValueError:
+        return False
 _STATS_FILE = os.path.join(BASE_DIR, "data", "sniproxy_stats.json")
 
 _PATTERN = re.compile(
@@ -100,6 +118,8 @@ def _process_lines(lines: list[str]) -> int:
         domain = d["domain"] or d.get("dest_ip") or "unknown"
         src_ip = d["src_ip"]
         dest = f"{d['dest_ip']}:{d['dest_port']}" if d.get("dest_ip") else "NONE"
+        proxy_port = int(d.get("proxy_port") or 0)
+        proto = "https" if proxy_port == 443 else "http"
 
         with _lock:
             data_store["total_tx"] += tx
@@ -116,15 +136,38 @@ def _process_lines(lines: list[str]) -> int:
 
             conn = {
                 "time": d["time"],
+                "date": d["date"],
                 "src_ip": src_ip,
                 "src_port": d["src_port"],
+                "proxy_port": proxy_port,
                 "dest": dest,
                 "domain": domain,
                 "tx": tx,
                 "rx": rx,
                 "duration": d["duration"],
+                "protocol": proto,
             }
             data_store["recent_connections"].insert(0, conn)
+
+        # Push external connections as attack events for globe + log
+        if _on_attack and _is_external(src_ip):
+            try:
+                lat, lon, country, isp = geoip.lookup(src_ip)
+                if lat or lon:
+                    ts = f"{d['date']}T{d['time']}"
+                    _on_attack({
+                        "type": "attack",
+                        "ts": ts,
+                        "src_ip": src_ip,
+                        "dst_port": proxy_port,
+                        "protocol": proto,
+                        "country": country,
+                        "lat": lat, "lon": lon,
+                        "isp": isp,
+                        "domain": domain,
+                    })
+            except Exception:
+                pass
             if len(data_store["recent_connections"]) > 100:
                 data_store["recent_connections"].pop()
         count += 1

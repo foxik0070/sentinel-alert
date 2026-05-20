@@ -61,7 +61,11 @@ SNIPROXY_LOG_FILES = [
     ).split(",") if f.strip()
 ]
 
+# [scanner]
+SCANNER_ENABLED = _c.getboolean("scanner", "enabled", fallback=False)
+
 # [security_center]
+FSC_ENABLED   = _c.getboolean("security_center", "enabled", fallback=True)
 FSC_HA_URL    = _s("security_center", "ha_url",    "")
 FSC_HA_TOKEN  = _s("security_center", "ha_token",  "")
 FSC_IGNORE_IPS = [
@@ -69,3 +73,6 @@ FSC_IGNORE_IPS = [
     for ip in _s("security_center", "ignore_ips", "").split(",")
     if ip.strip()
 ]
+
+# [threat]
+BLOCKLIST_FILE = _s("threat", "blocks_ips_file", "")

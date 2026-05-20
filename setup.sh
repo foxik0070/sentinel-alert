@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Sentinel-Alert — installer / configurator
-# Creates /etc/sentinel/sentinel-alert.conf and systemd service.
+# Supports: Debian/Ubuntu/Raspbian, RHEL 8/9/10, AlmaLinux, Rocky Linux
 #
 # Usage:
-#   sudo ./setup.sh          — first install
-#   sudo ./setup.sh --reconf — overwrite existing config
+#   sudo ./setup.sh            — first install
+#   sudo ./setup.sh --reconf   — overwrite existing config
 #   sudo ./setup.sh --uninstall
+#   sudo ./setup.sh --deps     — install system dependencies only
 
 set -euo pipefail
 
@@ -22,6 +23,53 @@ die()  { echo -e "${RED}[ERR]${NC} $*" >&2; exit 1; }
 MODE="install"
 [[ "${1:-}" == "--reconf" ]]    && MODE="reconf"
 [[ "${1:-}" == "--uninstall" ]] && MODE="uninstall"
+[[ "${1:-}" == "--deps" ]]      && MODE="deps"
+
+# ── distro detection ───────────────────────────────────────────────────────
+detect_distro() {
+    if [[ -f /etc/os-release ]]; then
+        # shellcheck source=/dev/null
+        source /etc/os-release
+        echo "${ID:-unknown}"
+    elif command -v apt-get &>/dev/null; then echo "debian"
+    elif command -v dnf     &>/dev/null; then echo "fedora"
+    elif command -v yum     &>/dev/null; then echo "rhel"
+    else echo "unknown"; fi
+}
+
+DISTRO="$(detect_distro)"
+info "Detected distro: $DISTRO"
+
+# ── system dependency installer ────────────────────────────────────────────
+install_system_deps() {
+    info "Installing system dependencies..."
+    case "$DISTRO" in
+        ubuntu|debian|raspbian|linuxmint)
+            apt-get update -qq
+            apt-get install -y python3 python3-pip python3-venv python3-dev \
+                               openssh-client nmap curl
+            ;;
+        rhel|centos|almalinux|rocky)
+            # EPEL needed for some packages on RHEL
+            if ! rpm -q epel-release &>/dev/null; then
+                dnf install -y epel-release 2>/dev/null || \
+                yum install -y epel-release 2>/dev/null || true
+            fi
+            dnf install -y python3 python3-pip python3-devel \
+                           openssh-clients nmap curl 2>/dev/null || \
+            yum install -y python3 python3-pip python3-devel \
+                           openssh-clients nmap curl
+            ;;
+        fedora)
+            dnf install -y python3 python3-pip python3-devel openssh-clients nmap curl
+            ;;
+        *)
+            warn "Unknown distro '$DISTRO' — skipping system dep install."
+            warn "Ensure python3, pip, venv, openssh-client, nmap are installed."
+            ;;
+    esac
+    ok "System dependencies installed."
+}
 
 # ── paths ──────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,13 +79,24 @@ CONF_FILE="$CONF_DIR/sentinel-alert.conf"
 SERVICE_FILE="/etc/systemd/system/sentinel-alert.service"
 SSH_KEY_PATH="$APP_DIR/conf/id_ed25519"
 
+# ── deps-only mode ─────────────────────────────────────────────────────────
+if [[ "$MODE" == "deps" ]]; then
+    install_system_deps
+    info "Creating Python venv..."
+    python3 -m venv "$APP_DIR/.venv"
+    "$APP_DIR/.venv/bin/pip" install --quiet --upgrade pip
+    "$APP_DIR/.venv/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
+    ok "Done. Run setup.sh without --deps to configure and install."
+    exit 0
+fi
+
 # Detect Python (prefer venv)
 if [[ -x "$APP_DIR/.venv/bin/python" ]]; then
     PYTHON="$APP_DIR/.venv/bin/python"
 elif command -v python3 &>/dev/null; then
     PYTHON="$(command -v python3)"
 else
-    die "Python not found. Run: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+    die "Python not found. Run: sudo $0 --deps"
 fi
 
 # ── uninstall ──────────────────────────────────────────────────────────────
@@ -140,8 +199,17 @@ if [[ "$SKIP_CONF" == "false" ]]; then
     fi
 
     echo ""
-    echo -e "${CYN}── Security Center — Home Assistant (optional) ──${NC}"
-    ask FSC_HA_URL "HA URL (empty to disable)" ""
+    echo -e "${CYN}── LAN Scanner (Network Map tab) ────────────────${NC}"
+    warn "Enable ARP-based LAN scanning and the Network Map tab."
+    read -rp "  Enable LAN scanner? [y/N]: " _scan
+    [[ "${_scan,,}" == "y" ]] && SCANNER_ENABLED=true || SCANNER_ENABLED=false
+
+    echo ""
+    echo -e "${CYN}── Security Center ──────────────────────────────${NC}"
+    read -rp "  Enable Security Center tab? [Y/n]: " _fsc
+    [[ "${_fsc,,}" == "n" ]] && FSC_ENABLED=false || FSC_ENABLED=true
+
+    ask FSC_HA_URL "Home Assistant URL (empty to disable)" ""
     if [[ -n "$FSC_HA_URL" ]]; then
         ask_secret FSC_HA_TOKEN "HA long-lived token"
     else
@@ -153,6 +221,12 @@ if [[ "$SKIP_CONF" == "false" ]]; then
     warn "Enter IPs to exclude from SSH security scan (comma-separated)."
     warn "Typically: gateway, switches, printers, HA."
     ask FSC_IGNORE_IPS "Ignore IPs" "192.168.2.1,192.168.2.202"
+
+    echo ""
+    echo -e "${CYN}── Blocked IPs Visualization ────────────────────${NC}"
+    warn "Path to a file with one IP per line to visualize on the globe."
+    warn "Each IP gets geo-resolved and shown as a fail2ban attack."
+    ask BLOCKS_IPS_FILE "Blocked IPs file (empty to disable)" ""
 
     # ── write config ───────────────────────────────────────────────────────
     info "Creating $CONF_DIR ..."
@@ -208,12 +282,22 @@ server    = ${SNIPROXY_SERVER}
 ssh_user  = ${SNIPROXY_SSH_USER}
 log_files = ${SNIPROXY_LOG_FILES}
 
+[scanner]
+# Enable ARP-based LAN scanning and the Network Map tab
+enabled = ${SCANNER_ENABLED}
+
 [security_center]
+# Set enabled = false to hide the Security Center tab
+enabled  = ${FSC_ENABLED}
 # Home Assistant notifications (leave blank to disable)
 ha_url   = ${FSC_HA_URL}
 ha_token = ${FSC_HA_TOKEN}
 # IPs excluded from the SSH security scan (comma-separated)
 ignore_ips = ${FSC_IGNORE_IPS}
+
+[threat]
+# Optional: path to a file with one blocked IP per line (visualized on the globe)
+blocks_ips_file = ${BLOCKS_IPS_FILE}
 CONF
 
     chmod 640 "$CONF_FILE"

@@ -1,189 +1,240 @@
 # Sentinel-Alert
 
-Single-process LAN monitor + honeypot s živým 3D globusem.
-Vše (ARP scan, fail2ban poller, honeypot, REST + WebSocket API) běží
-v jednom Python procesu — stačí jeden příkaz.
+Network monitoring, honeypot visualization and LAN security scanner for home-labs and small networks. Runs on **Debian / Ubuntu / Raspbian** and **RHEL 8 / 9 / 10** (AlmaLinux, Rocky Linux).
 
 ---
 
-## TL;DR — Spuštění
+## Features
+
+| Tab | Description | Requires |
+|-----|-------------|---------|
+| **Threat Map** | Real-time 3D globe with live attack arcs, fail2ban bans, country stats | always on |
+| **Security Center** | SSH-based host security matrix (OS, CVEs, firewall, fail2ban) | `security_center.enabled = true` |
+| **Proxy Monitor** | Sniproxy log reader — throughput, top domains, live connection feed | `sniproxy.server` set |
+| **Network Map** | Interactive D3.js topology (drag & drop, switches, routers, ports) | `scanner.enabled = true` |
+
+Additional:
+- **Blocked IPs** visualization on the globe — load a file of banned IPs with GeoIP+ASN enrichment
+- **Sentinel Bridge** — forward events to a central Sentinel server
+- **Honeypot** — fake SSH (port 2222) and HTTP (port 8080) services that capture attacks
+
+---
+
+## Requirements
+
+- Python 3.9+
+- `openssh-client`, `nmap`
+- GeoLite2-City.mmdb (free from MaxMind — place in `data/`)
+- GeoLite2-ASN.mmdb (optional, for ISP lookup — place in `data/`)
+
+---
+
+## Installation
 
 ```bash
-cd ~/git/sentinel-alert-claude
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-sudo -v                       # nahrát sudo cache pro arp-scan
-python3 app.py
+# 1. Clone
+git clone https://github.com/youruser/sentinel-alert.git
+cd sentinel-alert
+
+# 2. Install system deps + Python venv
+sudo ./setup.sh --deps
+
+# 3. Configure + install systemd service
+sudo ./setup.sh
 ```
 
-Dashboard:  <http://localhost:5056>
-
-Honeypot poslouchá na `:2222` (fake SSH) a `:8080` (fake HTTP).
-
----
-
-## Prerekvizity
-
-| Co | Proč | Jak ověřit |
-|---|---|---|
-| Python 3.10+ | FastAPI lifespan, asyncio | `python3 --version` |
-| `arp-scan` | LAN scan | `which arp-scan` |
-| Passwordless `sudo arp-scan` | Scanner běží jako neroot | `sudo -n arp-scan --localnet` |
-| SSH klíč `conf/id_ed25519` | Sběr fail2ban z hostů | `ls conf/id_ed25519` |
-| GeoIP DB `data/GeoLite2-City.mmdb` | Obohacení útoků o stát/ISP | `ls -lh data/GeoLite2-City.mmdb` |
-| `/etc/hosts` se servery | Auto-discovery cílů pro fail2ban | `cat /etc/hosts` |
-
-### Passwordless sudo pro arp-scan
-
-Pokud nemáš, scanner každých 5 min vyplivne warning a pokračuje.
-Pro povolení (volitelné):
+### Manual venv setup
 
 ```bash
-echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/arp-scan" | sudo tee /etc/sudoers.d/sentinel-alert
-sudo chmod 440 /etc/sudoers.d/sentinel-alert
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
 
----
-
-## Architektura
-
-```
-            ┌───────────── python3 app.py ─────────────┐
-            │                                          │
-WS klient ──┤  FastAPI :5056   ◄── broadcast queue ◄── │
-            │     │                                    │
-            │     ├─ /  (static dashboard)             │
-            │     ├─ /api/devices, /api/attacks, …     │
-            │     └─ /ws/live  (živý stream)           │
-            │                                          │
-            │  Honeypot       :2222 SSH, :8080 HTTP    │
-            │  Scanner loop   sudo arp-scan --localnet │
-            │  Collector loop ssh root@<host> fail2ban │
-            │  Sentinel bridge → SENTINEL_URL (POST)   │
-            │                                          │
-            │  SQLite: data/alerts.db                  │
-            └──────────────────────────────────────────┘
-```
-
-Žádné cron joby, žádné systemd unity, žádné samostatné workery —
-periodické úlohy jsou `asyncio` smyčky v lifespanu FastAPI.
-
----
-
-## Konfigurace (env proměnné)
-
-| Proměnná | Default | Význam |
-|---|---|---|
-| `SCAN_INTERVAL` | `300` | ARP scan každých N sekund |
-| `FAIL2BAN_INTERVAL` | `300` | fail2ban poll každých N sekund |
-| `FAIL2BAN_CONCURRENCY` | `5` | Souběžné SSH spojení |
-| `SENTINEL_SSH_USER` | `root` | SSH uživatel pro fail2ban-client |
-| `SENTINEL_HOSTS_FILE` | `/etc/hosts` | Zdroj seznamu hostů |
-| `SENTINEL_HOME_LAT` | `49.8209` | Cíl atakových oblouků (lat) |
-| `SENTINEL_HOME_LON` | `18.2625` | Cíl atakových oblouků (lon) |
-| `SENTINEL_URL` | _(nenastaveno)_ | Sentinel bridge — kam POST eventy |
-| `SENTINEL_TOKEN` | _(nenastaveno)_ | Bearer token pro bridge |
-
-Příklad:
+### Running without systemd
 
 ```bash
-SCAN_INTERVAL=600 FAIL2BAN_INTERVAL=900 python3 app.py
+SENTINEL_CONF=/etc/sentinel/sentinel-alert.conf .venv/bin/python app.py
 ```
 
 ---
 
-## API
+## Configuration
 
-REST:
+All settings live in `/etc/sentinel/sentinel-alert.conf` (INI format).
+Re-run `sudo ./setup.sh --reconf` to reconfigure interactively.
 
-| Endpoint | Popis |
-|---|---|
-| `GET /` | Dashboard (statická HTML) |
-| `GET /api/config` | Globe home coords |
-| `GET /api/devices` | LAN inventář (online/offline) |
-| `GET /api/attacks?limit=200` | Honeypot zásahy |
-| `GET /api/bans?limit=200` | fail2ban historie |
-| `GET /api/stats/countries` | Top 20 zemí (počet útoků) |
+```ini
+[server]
+host = 0.0.0.0
+port = 5056
 
-WebSocket `GET /ws/live`:
+[home]
+lat = 49.8209      # 0 = auto-detect from public IP
+lon = 18.2625
 
-- po připojení pošle `{"type":"snapshot","attacks":[…50…]}`
-- pak streamuje:
-  - `{"type":"attack", src_ip, dst_port, protocol, country, lat, lon, isp, ts}` — honeypot
-  - `{"type":"ban",    …stejná pole…, source_host}` — nový fail2ban ban
-  - `{"type":"device", state, mac, ip, hostname, vendor}` — změna stavu hosta
+[sentinel]
+url      = https://sentinel.example.com
+token    = <64-char-token>
+hostname = my-node
+
+[honeypot]
+ssh_port  = 2222
+http_port = 8080
+
+[scanner]
+# Enables ARP LAN scan and the Network Map tab
+enabled = false
+
+[collector]
+# SSH-based fail2ban polling across hosts
+ssh_user      = root
+hosts_file    = /etc/hosts
+monitor_hosts =          # empty = auto-discover from hosts_file
+
+[sniproxy]
+# Remote proxy running sniproxy - logs read via SSH
+# Leave server empty to hide the Proxy Monitor tab
+server    = 192.168.2.203
+ssh_user  = root
+log_files = /var/log/sniproxy/https_access.log,/var/log/sniproxy/http_access.log
+
+[security_center]
+enabled    = true         # false hides the Security Center tab
+ha_url     =              # Home Assistant URL for push notifications
+ha_token   =
+ignore_ips = 192.168.2.1,192.168.2.202
+
+[threat]
+# Visualize blocked IPs from a file on the globe (one IP per line)
+# IPs are geo-resolved with GeoIP+ASN; shown as fail2ban/port-22 arcs
+blocks_ips_file =
+```
 
 ---
 
-## Otestování za běhu
+## GeoIP databases
 
-V druhém terminálu:
+Download free databases from [maxmind.com](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data) (account required):
 
 ```bash
-# Honeypot — měl by se objevit v dashboardu i v DB
-nc localhost 2222
-curl http://localhost:8080/admin
-
-# Co je v DB
-sqlite3 data/alerts.db "SELECT ts, src_ip, protocol, country FROM attacks ORDER BY id DESC LIMIT 10;"
-sqlite3 data/alerts.db "SELECT hostname, ip, is_online FROM devices ORDER BY is_online DESC;"
+# Place in data/
+data/GeoLite2-City.mmdb   # required for country + coordinates
+data/GeoLite2-ASN.mmdb    # optional - ISP / org name lookup
 ```
 
 ---
 
-## Soubory
+## SSH key setup
 
-```
-app.py            FastAPI server, WS hub, lifespan starter
-tasks.py          Periodické asyncio smyčky (scanner + collector)
-honeypot.py       Fake SSH/HTTP listenery
-scanner.py        arp-scan + hostname resolution
-collector.py      SSH → fail2ban-client status sshd, discovery z /etc/hosts
-bridge.py         HTTP forwarder do hlavního Sentinelu
-geoip.py          Shared MaxMind helper
-db_init.py        Schema (volá se i ze startu app.py)
-requirements.txt  fastapi, uvicorn, geoip2, httpx
-conf/id_ed25519   SSH klíč (musíš mít na cílových hostech)
-data/             alerts.db (vytvoří se), GeoLite2-City.mmdb
-static/           index.html, style.css, script.js (globe.gl)
-```
-
----
-
-## Troubleshooting
-
-**`arp-scan failed: ... a password is required`**
-→ Bez passwordless sudo. Buď ho povol (viz výše), nebo ignoruj —
-ostatní funkce běží.
-
-**`Address already in use` na 2222/8080**
-→ Něco už na portu visí. `ss -ltnp | grep -E '2222|8080'`.
-
-**Žádné fail2ban bany**
-→ Buď cíle nemají fail2ban (`ssh root@gitea fail2ban-client status sshd`),
-nebo SSH klíč není autorizovaný (`ssh -i conf/id_ed25519 root@gitea`).
-
-**Dashboard se nepřipojí na WS**
-→ Browser console (`F12`). Při nginx/proxy: musí mít WebSocket upgrade.
-
-**Honeypot nezachytává**
-→ Test lokálně: `nc localhost 2222`. Pokud i to selže, zkontroluj logy v
-terminálu, kde běží `app.py`.
-
----
-
-## Vývoj
-
-Jednorázové spuštění bez smyčky:
+The collector and sniproxy reader use `conf/id_ed25519` to SSH into remote hosts.
 
 ```bash
-python3 db_init.py      # jen schema
-python3 scanner.py      # jeden ARP sweep
-python3 collector.py    # jeden fail2ban poll přes všechny hosty z /etc/hosts
+# Generated automatically by setup.sh
+# Distribute public key to all monitored hosts:
+ssh-copy-id -i conf/id_ed25519.pub root@<HOST>
 ```
 
-Restart při změně kódu — `uvicorn` s `--reload`:
+---
+
+## Tabs in detail
+
+### Threat Map
+
+- **Globe** — arcs represent attacks; age-based coloring (cyan to yellow to orange to red)
+- **LOCAL NETWORK** — ARP scan results with online/offline status and open ports
+- **FAIL2BAN HISTORY** — recent ban events from all monitored hosts
+- **TOP COUNTRIES** — hit count bar chart
+- **SYSTEM LOGS** — live event feed
+
+**Blocked IPs file**: set `threat.blocks_ips_file` to load a static list of blocked IPs onto the globe. Each IP is geo-resolved once and rendered as a fail2ban arc.
+
+### Security Center
+
+SSH-based host scanner. For each host in `/etc/hosts` (excluding `ignore_ips`):
+
+- OS / kernel / distro / EOL status
+- CPU, RAM, disk usage
+- Pending updates split by CVE severity
+- fail2ban status, firewall status
+- Root SSH login allowed / passwordless users
+- LXC / VM container detection
+
+Hosts can be enabled/disabled individually from the UI.
+
+### Proxy Monitor
+
+Reads sniproxy access logs from a remote server via SSH every 5 seconds.
+
+- Live TX/RX throughput (KB/s)
+- Top domains by data transfer
+- Top clients by data transfer
+- Live connection feed
+- fail2ban bans forwarded from the collector
+
+### Network Map
+
+Interactive D3.js force-directed topology.
+
+**Node types:**
+- `host` — circle, green if online / grey if offline
+- `switch` — rectangle (blue), define port count
+- `router` — diamond (purple)
+
+**Edit mode** (click EDIT):
+- Drag nodes to reposition
+- Click node to open side panel: edit label, IP, MAC; set connect/disconnect notification per host
+- Add nodes with `+ HOST`, `+ SWITCH`, `+ ROUTER`
+- Add links with `+ LINK`, then click two nodes (optionally assign port numbers)
+- RESEED: auto-populate from current LAN devices
+- SAVE: persists to `data/topo.json`
+
+**Per-host notifications** (connect/disconnect) are stored in `data/net_settings.json`.
+
+---
+
+## API endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/config` | Feature flags, home geo, sentinel status |
+| GET | `/api/devices` | LAN devices |
+| GET | `/api/attacks` | Recent honeypot attacks |
+| GET | `/api/bans` | fail2ban ban history |
+| GET | `/api/stats/countries` | Country hit counts |
+| GET | `/api/blocklist` | Blocked IPs with geo data |
+| GET | `/api/topo-data` | Network topology |
+| POST | `/api/topo-data` | Save topology |
+| GET | `/api/network/settings` | Host notification settings |
+| POST | `/api/network/settings` | Update host notification settings |
+| GET | `/api/fsc/data` | Security Center scan data |
+| POST | `/api/fsc/scan` | Trigger manual scan |
+| GET | `/api/fsc/hosts` | Host list with enabled/disabled status |
+| POST | `/api/fsc/hosts/toggle` | Toggle host scan enable/disable |
+| GET | `/api/sniproxy/data` | Proxy monitor metrics |
+| GET | `/api/sniproxy/debug` | SSH diagnostic for sniproxy |
+| WS | `/ws/live` | Live event stream |
+
+---
+
+## Data files
+
+| Path | Description |
+|------|-------------|
+| `data/alerts.db` | SQLite - attacks, bans, devices |
+| `data/topo.json` | Network topology |
+| `data/net_settings.json` | Host notification settings |
+| `data/fsc_hosts.json` | Security Center host enable/disable |
+| `data/sniproxy_stats.json` | Proxy monitor persisted stats |
+| `data/settings.json` | Sentinel bridge credentials |
+| `data/GeoLite2-City.mmdb` | GeoIP city database |
+| `data/GeoLite2-ASN.mmdb` | GeoIP ASN/ISP database |
+| `conf/id_ed25519` | SSH private key for remote access |
+
+---
+
+## Uninstall
 
 ```bash
-uvicorn app:app --host 0.0.0.0 --port 5056 --reload
+sudo ./setup.sh --uninstall   # removes service, keeps config
+sudo rm -rf /etc/sentinel     # remove config
 ```

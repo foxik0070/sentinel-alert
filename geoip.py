@@ -3,8 +3,10 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 GEOIP_PATH = os.path.join(BASE_DIR, "data", "GeoLite2-City.mmdb")
+ASN_PATH   = os.path.join(BASE_DIR, "data", "GeoLite2-ASN.mmdb")
 
-_reader = None
+_reader     = None
+_asn_reader = None
 
 
 def _get_reader():
@@ -22,6 +24,33 @@ def _get_reader():
         return None
 
 
+def _get_asn_reader():
+    global _asn_reader
+    if _asn_reader is not None:
+        return _asn_reader
+    if not os.path.exists(ASN_PATH):
+        return None
+    try:
+        import geoip2.database
+        _asn_reader = geoip2.database.Reader(ASN_PATH)
+        return _asn_reader
+    except Exception as e:
+        print(f"GeoIP ASN reader init failed: {e}")
+        return None
+
+
+def lookup_asn(ip: str) -> str:
+    """Return ISP/org name from ASN database, or 'Unknown'."""
+    asn = _get_asn_reader()
+    if asn is None:
+        return "Unknown"
+    try:
+        r = asn.asn(ip)
+        return r.autonomous_system_organization or "Unknown"
+    except Exception:
+        return "Unknown"
+
+
 def lookup(ip):
     """Return (lat, lon, country, isp). Safe for private/invalid IPs."""
     try:
@@ -36,11 +65,12 @@ def lookup(ip):
         return 0.0, 0.0, "NoDB", "NoDB"
     try:
         res = reader.city(ip)
-        return (
-            float(res.location.latitude or 0.0),
-            float(res.location.longitude or 0.0),
-            res.country.name or "Unknown",
-            res.traits.isp or "Unknown",
-        )
+        lat = float(res.location.latitude or 0.0)
+        lon = float(res.location.longitude or 0.0)
+        country = res.country.name or "Unknown"
+        isp = (getattr(res.traits, "isp", None)
+               or getattr(res.traits, "organization", None)
+               or lookup_asn(ip))
+        return lat, lon, country, isp
     except Exception:
         return 0.0, 0.0, "Unknown", "Unknown"

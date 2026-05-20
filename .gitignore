@@ -13,6 +13,7 @@ data/fsc_hosts.json
 data/topo.json
 data/topology.json
 data/settings.json
+data/net_settings.json
 
 # Sentinel credentials (configured via UI or setup.sh)
 data/sentinel.json
