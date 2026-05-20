@@ -1,5 +1,8 @@
 import ipaddress
 import os
+import urllib.request
+import json
+import threading
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 GEOIP_PATH = os.path.join(BASE_DIR, "data", "GeoLite2-City.mmdb")
@@ -7,6 +10,8 @@ ASN_PATH   = os.path.join(BASE_DIR, "data", "GeoLite2-ASN.mmdb")
 
 _reader     = None
 _asn_reader = None
+_isp_cache: dict = {}   # ip -> isp string
+_isp_lock = threading.Lock()
 
 
 def _get_reader():
@@ -39,16 +44,35 @@ def _get_asn_reader():
         return None
 
 
-def lookup_asn(ip: str) -> str:
-    """Return ISP/org name from ASN database, or 'Unknown'."""
+def _lookup_isp_api(ip: str) -> str:
+    """Cached ISP lookup via ip-api.com (free, 45 req/min, no key needed)."""
+    with _isp_lock:
+        if ip in _isp_cache:
+            return _isp_cache[ip]
+    try:
+        url = f"http://ip-api.com/json/{ip}?fields=isp,org"
+        with urllib.request.urlopen(url, timeout=4) as resp:
+            d = json.loads(resp.read())
+        isp = d.get("isp") or d.get("org") or "Unknown"
+    except Exception:
+        isp = "Unknown"
+    with _isp_lock:
+        if len(_isp_cache) > 5000:
+            _isp_cache.clear()
+        _isp_cache[ip] = isp
+    return isp
+
+
+def lookup_asn(ip: str) -> str | None:
+    """Return ISP/org from ASN database, or None if unavailable."""
     asn = _get_asn_reader()
     if asn is None:
-        return "Unknown"
+        return None
     try:
         r = asn.asn(ip)
-        return r.autonomous_system_organization or "Unknown"
+        return r.autonomous_system_organization or None
     except Exception:
-        return "Unknown"
+        return None
 
 
 def lookup(ip):
@@ -70,7 +94,8 @@ def lookup(ip):
         country = res.country.name or "Unknown"
         isp = (getattr(res.traits, "isp", None)
                or getattr(res.traits, "organization", None)
-               or lookup_asn(ip))
-        return lat, lon, country, isp
+               or lookup_asn(ip)
+               or _lookup_isp_api(ip))
+        return lat, lon, country, isp or "Unknown"
     except Exception:
         return 0.0, 0.0, "Unknown", "Unknown"
