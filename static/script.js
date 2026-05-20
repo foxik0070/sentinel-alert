@@ -108,9 +108,9 @@ const globe = Globe()(globeEl)
         centerGlobeOn(arc.startLat, arc.startLng);
     });
 
-globe.controls().autoRotate = false;
-globe.controls().autoRotateSpeed = 1.2;
-globe.controls().enableDamping = false;
+globe.controls().autoRotate = true;
+globe.controls().autoRotateSpeed = 0.8;
+globe.controls().enableDamping = true;
 
 window.addEventListener('resize', () => {
     globe.width(globeEl.clientWidth).height(globeEl.clientHeight);
@@ -143,14 +143,10 @@ function getArcColor(protocol, ageSeconds) {
 function centerGlobeOn(lat, lon) {
     globe.controls().autoRotate = false;
     globe.pointOfView({ lat, lng: lon, altitude: 1.4 }, 900);
-    clearTimeout(centerGlobeOn._stopTimer);
-    centerGlobeOn._stopTimer = setTimeout(() => {
+    clearTimeout(centerGlobeOn._resumeTimer);
+    centerGlobeOn._resumeTimer = setTimeout(() => {
         globe.controls().autoRotate = true;
-        clearTimeout(centerGlobeOn._offTimer);
-        centerGlobeOn._offTimer = setTimeout(() => {
-            globe.controls().autoRotate = false;
-        }, 8000);
-    }, 1000);
+    }, 6000);
 }
 
 
@@ -479,11 +475,10 @@ function _attackHistClick(row) {
 
 function _fmtLocalTs(ts) {
     if (!ts) return { time: '—', date: '' };
-    const d = new Date(ts);
-    if (isNaN(d)) return { time: ts.substring(11, 16), date: ts.substring(0, 10) };
+    // ts stored as local time "YYYY-MM-DDTHH:MM:SS..." — extract directly, no timezone confusion
     return {
-        time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        date: d.toLocaleDateString([], { month: '2-digit', day: '2-digit' }),
+        time: ts.length > 15 ? ts.substring(11, 16) : '—',
+        date: ts.length > 9  ? ts.substring(5, 10).replace('-', '/') : '',
     };
 }
 
