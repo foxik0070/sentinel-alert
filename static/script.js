@@ -593,85 +593,53 @@ function connectWS() {
     };
 }
 
-// Demo injection no longer on main UI — kept as hidden debug route
-// $('demo-btn') removed; REPORT replaces it
+$('demo-btn').addEventListener('click', () => {
+    fetch('/api/demo/attack?count=8', { method: 'POST' });
+});
 
 // --- Settings modal ---
-// ================================================================
-// SETTINGS MODAL (tabbed)
-// ================================================================
-const settingsModal = $('settings-modal');
+const modal = $('settings-modal');
 const cfgUrl = $('cfg-url'), cfgToken = $('cfg-token'), cfgHost = $('cfg-hostname');
 const cfgResult = $('cfg-result'), settingsStatus = $('settings-status');
 
-// Tab switching
-document.querySelectorAll('.cfg-tab').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.cfg-tab').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.cfg-pane').forEach(p => p.classList.add('hidden'));
-        btn.classList.add('active');
-        $('cfg-pane-' + btn.dataset.cfgTab).classList.remove('hidden');
-        if (btn.dataset.cfgTab === 'hosts') _cfgLoadHosts();
-    });
-});
-
-function _cfgShowResult(elId, ok, msg) {
-    const el = $(elId);
-    if (!el) return;
-    el.textContent = msg;
-    el.className = 'cfg-result ' + (ok ? 'ok' : 'err');
-}
-function showResult(ok, msg) { _cfgShowResult('cfg-result', ok, msg); }
-
+let _lastKnownToken = ''; // Track last valid token
 async function openSettings() {
-    // Load sentinel config
     const cfg = await fetch('/api/config').then(r => r.json());
-    cfgUrl.value   = cfg.sentinel_url || '';
+    cfgUrl.value = cfg.sentinel_url || '';
+    // If token_set is true, show placeholder; if not, show empty for new entry
     cfgToken.value = cfg.sentinel_token_set ? '••••••••' : '';
-    cfgHost.value  = cfg.sentinel_hostname  || '';
+    cfgToken.placeholder = 'Paste 64-char token here';
+    cfgHost.value = cfg.sentinel_hostname || '';
     settingsStatus.textContent = cfg.sentinel_enabled ? 'CONNECTED' : 'DISCONNECTED';
     settingsStatus.classList.toggle('live', !!cfg.sentinel_enabled);
     cfgResult.textContent = '';
     cfgResult.className = 'cfg-result';
-
-    // Load full config for system/modules tabs
-    try {
-        const full = await fetch('/api/config/full').then(r => r.json());
-        const sv = (sec, key, def = '') => (full[sec] || {})[key] ?? def;
-        $('cfg-srv-host').value  = sv('server',  'host',  '0.0.0.0');
-        $('cfg-srv-port').value  = sv('server',  'port',  '5056');
-        $('cfg-home-lat').value  = sv('home',    'lat',   '0');
-        $('cfg-home-lon').value  = sv('home',    'lon',   '0');
-        $('cfg-hp-ssh').value    = sv('honeypot','ssh_port',  '2222');
-        $('cfg-hp-http').value   = sv('honeypot','http_port', '8080');
-        $('cfg-scanner-en').checked = sv('scanner','enabled','false') === 'true';
-        $('cfg-sni-server').value = sv('sniproxy','server','');
-        $('cfg-sni-user').value   = sv('sniproxy','ssh_user','root');
-        $('cfg-sni-logs').value   = sv('sniproxy','log_files','');
-        $('cfg-fsc-en').checked   = sv('security_center','enabled','true') !== 'false';
-        $('cfg-fsc-ha-url').value = sv('security_center','ha_url','');
-        $('cfg-fsc-ha-token').value = sv('security_center','ha_token','') ? '••••••••' : '';
-        $('cfg-fsc-ignore').value = sv('security_center','ignore_ips','');
-        $('cfg-col-user').value   = sv('collector','ssh_user','root');
-        $('cfg-col-hosts').value  = sv('collector','hosts_file','/etc/hosts');
-        $('cfg-col-monitor').value= sv('collector','monitor_hosts','');
-        $('cfg-threat-file').value= sv('threat','blocks_ips_file','');
-    } catch {}
-
-    settingsModal.classList.remove('hidden');
+    modal.classList.remove('hidden');
 }
-
+function showResult(ok, msg) {
+    cfgResult.textContent = msg;
+    cfgResult.className = 'cfg-result ' + (ok ? 'ok' : 'err');
+}
 $('settings-btn').addEventListener('click', openSettings);
-$('cfg-close').addEventListener('click', () => settingsModal.classList.add('hidden'));
-settingsModal.addEventListener('click', e => { if (e.target === settingsModal) settingsModal.classList.add('hidden'); });
-
-// Sentinel tab
+$('cfg-close').addEventListener('click', () => modal.classList.add('hidden'));
 $('cfg-save').addEventListener('click', async () => {
     const tokenValue = cfgToken.value.trim();
+    // If token is the placeholder "••••••••", don't send it (keep existing)
+    // If token looks like new/real token (64+ chars), send it
+    // If token is empty or short, send as null (clear it)
     let token = undefined;
-    if (tokenValue && tokenValue !== '••••••••') token = tokenValue;
-    else if (tokenValue === '') token = null;
-    const body = { url: cfgUrl.value.trim(), token, hostname: cfgHost.value.trim() || undefined };
+    if (tokenValue && tokenValue !== '••••••••') {
+        // User entered new token
+        token = tokenValue;
+    } else if (tokenValue === '') {
+        // User cleared it
+        token = null;
+    }
+    // else: token stays undefined = keep existing
+
+    const body = { url: cfgUrl.value.trim(),
+                   token: token,
+                   hostname: cfgHost.value.trim() || undefined };
     const res = await fetch('/api/sentinel/configure', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -679,328 +647,77 @@ $('cfg-save').addEventListener('click', async () => {
     showResult(res.ok, res.ok ? `OK · HTTP ${res.status}` : `FAIL · ${res.detail}`);
     settingsStatus.textContent = res.ok ? 'CONNECTED' : 'ERROR';
     settingsStatus.classList.toggle('live', !!res.ok);
+
+    // Update Sentinel status from response
+    if (res.config) {
+        if (!res.config.configured) {
+            hudSentinel.textContent = 'OFF';
+            hudSentinel.classList.remove('live', 'warn');
+        } else if (res.config.enabled) {
+            hudSentinel.textContent = res.ok ? 'LINKED' : 'DISCONNECTED';
+            hudSentinel.classList.toggle('live', !!res.ok);
+            if (!res.ok) hudSentinel.classList.add('warn');
+        }
+    }
+
+    // Re-fetch config to ensure HUD is updated with actual disk state
     setTimeout(async () => {
         const cfg = await fetch('/api/config').then(r => r.json()).catch(() => ({}));
-        hudSentinel.textContent = cfg.sentinel_enabled ? 'LINKED' : (cfg.sentinel_url ? 'DISCONNECTED' : 'OFF');
-        hudSentinel.className = cfg.sentinel_enabled ? 'val live' : (cfg.sentinel_url ? 'val warn' : 'val');
+        if (cfg.sentinel_enabled) {
+            hudSentinel.textContent = 'LINKED';
+            hudSentinel.classList.add('live');
+            hudSentinel.classList.remove('warn');
+        } else if (cfg.sentinel_url) {
+            hudSentinel.textContent = 'DISCONNECTED';
+            hudSentinel.classList.remove('live');
+            hudSentinel.classList.add('warn');
+        }
     }, 500);
 });
 $('cfg-reset').addEventListener('click', async () => {
     if (!confirm('Reset all Sentinel configuration?')) return;
     const res = await fetch('/api/sentinel/reset', { method: 'POST' }).then(r => r.json());
     if (res.ok) {
-        cfgUrl.value = ''; cfgToken.value = ''; cfgHost.value = '';
+        cfgUrl.value = '';
+        cfgToken.value = '';
+        cfgHost.value = '';
         showResult(true, 'Configuration reset');
         hudSentinel.textContent = 'OFF';
-        hudSentinel.className = 'val';
+        hudSentinel.classList.remove('live', 'warn');
         settingsStatus.textContent = 'DISCONNECTED';
         settingsStatus.classList.remove('live');
     }
 });
+
 $('cfg-test').addEventListener('click', async () => {
     showResult(true, 'testing…');
     try {
+        // First show debug info
+        const debug = await fetch('/api/sentinel/debug').then(r => r.json());
+        const debugMsg = `[DEBUG] URL: ${debug.url_len} chars, Hostname: "${debug.hostname}" (${debug.hostname_len} chars), Token: ${debug.token_len} chars`;
+        console.log(debugMsg);
+
         const res = await fetch('/api/sentinel/test', { method: 'POST' }).then(r => r.json());
-        showResult(res.ok, res.ok ? `✓ Connected · HTTP ${res.status}` : `FAIL · ${res.detail || 'check URL/token'}`);
-    } catch (e) { showResult(false, `ERROR · ${e.message}`); }
-});
-
-// System tab save
-$('cfg-system-save').addEventListener('click', async () => {
-    const payload = {
-        server:  { host: $('cfg-srv-host').value.trim(), port: $('cfg-srv-port').value.trim() },
-        home:    { lat:  $('cfg-home-lat').value.trim(), lon:  $('cfg-home-lon').value.trim() },
-        honeypot:{ ssh_port: $('cfg-hp-ssh').value.trim(), http_port: $('cfg-hp-http').value.trim() },
-    };
-    const res = await fetch('/api/config/update', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-    }).then(r => r.json());
-    _cfgShowResult('cfg-system-result', res.ok, res.ok ? 'Saved — restart to apply' : res.error);
-});
-
-// Modules tab save
-$('cfg-modules-save').addEventListener('click', async () => {
-    const haToken = $('cfg-fsc-ha-token').value.trim();
-    const payload = {
-        scanner: { enabled: $('cfg-scanner-en').checked ? 'true' : 'false' },
-        sniproxy: { server: $('cfg-sni-server').value.trim(), ssh_user: $('cfg-sni-user').value.trim(),
-                    log_files: $('cfg-sni-logs').value.trim() },
-        security_center: { enabled: $('cfg-fsc-en').checked ? 'true' : 'false',
-                           ha_url: $('cfg-fsc-ha-url').value.trim(),
-                           ignore_ips: $('cfg-fsc-ignore').value.trim() },
-        collector: { ssh_user: $('cfg-col-user').value.trim(), hosts_file: $('cfg-col-hosts').value.trim(),
-                     monitor_hosts: $('cfg-col-monitor').value.trim() },
-        threat: { blocks_ips_file: $('cfg-threat-file').value.trim() },
-    };
-    if (haToken && haToken !== '••••••••') payload.security_center.ha_token = haToken;
-    const res = await fetch('/api/config/update', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-    }).then(r => r.json());
-    _cfgShowResult('cfg-modules-result', res.ok, res.ok ? 'Saved — restart to apply' : res.error);
-});
-
-// Export config
-$('cfg-export').addEventListener('click', () => {
-    const a = document.createElement('a');
-    a.href = '/api/config/export';
-    a.download = 'sentinel-alert.conf';
-    a.click();
-});
-
-// Hosts tab
-async function _cfgLoadHosts() {
-    const [devs, ns] = await Promise.all([
-        fetch('/api/devices').then(r => r.json()),
-        fetch('/api/network/settings').then(r => r.json()),
-    ]);
-    const dMap = (_netSettings.devices || ns.devices || {});
-    const el = $('cfg-hosts-list');
-    if (!devs.length) { el.innerHTML = '<div class="empty">No devices scanned yet.</div>'; return; }
-    el.innerHTML = devs.map(d => {
-        const cfg = dMap[d.mac] || {};
-        const nc = cfg.notify_connect    !== false;
-        const nd = cfg.notify_disconnect !== false;
-        const nn = cfg.notify_new        !== false;
-        return `<div class="row" style="flex-direction:column;gap:4px;padding:6px 0;border-bottom:1px solid #0e2228;">
-            <div style="display:flex;align-items:center;gap:6px;">
-                <span class="dot ${d.is_online?'on':'off'}"></span>
-                <span style="color:#cfe7ec;font-size:11px;flex:1">${escape(d.hostname||d.ip)}</span>
-                <span style="color:#4d7479;font-size:10px;">${d.ip}</span>
-                <button class="btn" style="font-size:9px;padding:2px 6px;" onclick="openDeviceModal('${escape(d.mac)}')">EDIT</button>
-            </div>
-            <div style="display:flex;gap:12px;font-size:10px;color:#4d7479;padding-left:14px;">
-                <span>Connect: <b style="color:${nc?'var(--green)':'#555'}">${nc?'ON':'OFF'}</b></span>
-                <span>Disconnect: <b style="color:${nd?'var(--green)':'#555'}">${nd?'ON':'OFF'}</b></span>
-                <span>New: <b style="color:${nn?'var(--green)':'#555'}">${nn?'ON':'OFF'}</b></span>
-            </div>
-        </div>`;
-    }).join('');
-}
-
-// ================================================================
-// PDF REPORT
-// ================================================================
-$('report-btn').addEventListener('click', generateReport);
-
-async function generateReport() {
-    const btn = $('report-btn');
-    btn.textContent = 'LOADING…';
-    btn.disabled = true;
-    try {
-        if (!window.jspdf) {
-            await new Promise((resolve, reject) => {
-                const s = document.createElement('script');
-                s.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js';
-                s.onload = resolve; s.onerror = reject;
-                document.head.appendChild(s);
-            });
+        if (res.ok) {
+            showResult(true, `✓ Connected · HTTP ${res.status}`);
+        } else {
+            // Provide detailed error info
+            let msg = res.detail || 'Unknown error';
+            if (res.status === 401) msg = 'Unauthorized - check hostname and token';
+            if (res.status === 400) msg = 'Bad request - check URL format';
+            if (res.status === 0) msg = 'Connection failed - check URL and port';
+            showResult(false, `FAIL · ${msg}\n\nDEBUG: ${debugMsg}`);
         }
-        btn.textContent = 'GENERATING…';
-        await _doGenerateReport();
-    } catch(e) {
-        alert('Report generation failed: ' + e.message);
+    } catch (e) {
+        showResult(false, `ERROR · ${e.message}`);
     }
-    btn.textContent = 'PDF REPORT';
-    btn.disabled = false;
-}
-
-async function _doGenerateReport() {
-    const data = await fetch('/api/report/data').then(r => r.json());
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    const W = 210, M = 14;
-    const now = new Date();
-    const dateStr = now.toLocaleDateString([], { year:'numeric', month:'long', day:'numeric' });
-    const timeStr = now.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-    let y = 0;
-
-    function newPage() { doc.addPage(); y = M; }
-    function h1(txt) {
-        doc.setFontSize(16); doc.setTextColor(0, 220, 180);
-        doc.text(txt, M, y += 10); y += 2;
-        doc.setDrawColor(0, 220, 180); doc.setLineWidth(0.3);
-        doc.line(M, y, W - M, y); y += 5;
-        doc.setTextColor(200, 230, 235);
-    }
-    function h2(txt) {
-        doc.setFontSize(10); doc.setTextColor(77, 116, 121);
-        doc.text(txt.toUpperCase(), M, y += 7); y += 1;
-        doc.setTextColor(200, 230, 235);
-    }
-    function row(label, val, indent = M) {
-        doc.setFontSize(9);
-        doc.setTextColor(77, 116, 121); doc.text(label, indent, y += 5);
-        doc.setTextColor(200, 230, 235); doc.text(String(val ?? '—'), indent + 52, y);
-    }
-    function para(txt, maxW = W - 2*M) {
-        doc.setFontSize(9); doc.setTextColor(170, 200, 210);
-        const lines = doc.splitTextToSize(txt, maxW);
-        lines.forEach(l => { doc.text(l, M, y += 5); });
-        y += 2;
-    }
-    function tableHeader(cols, widths) {
-        doc.setFontSize(8); doc.setTextColor(0, 220, 180);
-        let x = M;
-        cols.forEach((c, i) => { doc.text(c, x, y += 5); x += widths[i]; });
-        doc.setDrawColor(0, 220, 180); doc.setLineWidth(0.2); doc.line(M, y + 1, W - M, y + 1);
-        y += 2; doc.setTextColor(200, 230, 235);
-    }
-    function tableRow(vals, widths) {
-        if (y > 270) newPage();
-        doc.setFontSize(8);
-        let x = M;
-        vals.forEach((v, i) => {
-            const s = String(v ?? '—');
-            doc.text(s.length > 28 ? s.substring(0, 26) + '…' : s, x, y += 5);
-            x += widths[i];
-        });
-        y -= 5; y += 5;
-    }
-
-    // --- Cover page ---
-    doc.setFillColor(2, 6, 10); doc.rect(0, 0, W, 297, 'F');
-    doc.setFontSize(28); doc.setTextColor(0, 255, 213);
-    doc.text('SENTINEL-ALERT', M, 40);
-    doc.setFontSize(14); doc.setTextColor(200, 230, 235);
-    doc.text('Daily Security Report', M, 52);
-    doc.setFontSize(10); doc.setTextColor(77, 116, 121);
-    doc.text(`Generated: ${dateStr} at ${timeStr}`, M, 62);
-
-    const a24 = data.attacks_24h || [], b24 = data.bans_24h || [], p24 = data.proxy_attacks_24h || [];
-    const totalEvents = a24.length + b24.length + p24.length;
-    y = 80;
-    doc.setFontSize(11); doc.setTextColor(0, 220, 180);
-    doc.text('24-HOUR SUMMARY', M, y); y += 8;
-    [
-        ['Honeypot attacks',   a24.length],
-        ['Fail2ban bans',      b24.length],
-        ['Proxy attacks (80/443)', p24.length],
-        ['Total events',       totalEvents],
-        ['Countries seen',     (data.countries||[]).length],
-        ['LAN devices online', (data.devices||[]).filter(d => d.is_online).length + ' / ' + (data.devices||[]).length],
-    ].forEach(([l, v]) => row(l, v));
-
-    // Globe screenshot
-    try {
-        const canvas = globe.renderer().domElement;
-        const img = canvas.toDataURL('image/jpeg', 0.85);
-        const iH = 80, iW = W - 2*M;
-        y += 10;
-        doc.setTextColor(77, 116, 121); doc.setFontSize(8);
-        doc.text('GLOBE SNAPSHOT', M, y); y += 3;
-        doc.addImage(img, 'JPEG', M, y, iW, iH);
-        y += iH + 5;
-    } catch { para('[Globe screenshot unavailable]'); }
-
-    // Top countries
-    if ((data.countries||[]).length) {
-        h2('Top attack sources');
-        data.countries.slice(0, 8).forEach(c => row(c.country, c.hits + ' hits'));
-    }
-
-    // --- Attacks page ---
-    newPage();
-    doc.setFillColor(2, 6, 10); doc.rect(0, 0, W, 297, 'F');
-    y = M;
-    h1('Honeypot Attacks (last 24h)');
-    para(`${a24.length} attack events recorded from honeypot services. These are connection attempts to emulated services (SSH/HTTP) designed to attract attackers.`);
-    if (a24.length) {
-        tableHeader(['TIME', 'IP', 'PORT', 'PROTO', 'COUNTRY'], [28, 45, 20, 20, 45]);
-        a24.slice(0, 40).forEach(a => {
-            const t = a.ts ? _fmtLocalTs(a.ts).time + ' ' + _fmtLocalTs(a.ts).date : '—';
-            tableRow([t, a.src_ip, a.dst_port, a.protocol, a.country], [28, 45, 20, 20, 45]);
-        });
-        if (a24.length > 40) para(`... and ${a24.length - 40} more events.`);
-    } else { para('No honeypot attacks in the last 24 hours.'); }
-
-    // --- Bans + Proxy attacks page ---
-    newPage();
-    doc.setFillColor(2, 6, 10); doc.rect(0, 0, W, 297, 'F');
-    y = M;
-    h1('Fail2ban Bans (last 24h)');
-    para(`${b24.length} IPs were banned by fail2ban. These are IP addresses that made repeated unauthorized connection attempts.`);
-    if (b24.length) {
-        tableHeader(['TIME', 'IP', 'COUNTRY', 'ISP'], [28, 45, 45, 60]);
-        b24.slice(0, 25).forEach(b => {
-            const t = b.ts ? _fmtLocalTs(b.ts).time + ' ' + _fmtLocalTs(b.ts).date : '—';
-            tableRow([t, b.src_ip, b.country, b.isp], [28, 45, 45, 60]);
-        });
-    } else { para('No fail2ban bans in the last 24 hours.'); }
-
-    h1('Proxy Attacks 80/443 (last 24h)');
-    para(`${p24.length} external connections via the proxy server on ports 80/443 were detected from public IP addresses.`);
-    if (p24.length) {
-        tableHeader(['TIME', 'IP', 'PORT', 'COUNTRY', 'DOMAIN'], [28, 38, 16, 38, 58]);
-        p24.slice(0, 20).forEach(a => {
-            const t = a.ts ? _fmtLocalTs(a.ts).time : '—';
-            tableRow([t, a.src_ip, a.dst_port, a.country, a.domain||''], [28, 38, 16, 38, 58]);
-        });
-    } else { para('No proxy attacks in the last 24 hours.'); }
-
-    // --- LAN hosts page ---
-    newPage();
-    doc.setFillColor(2, 6, 10); doc.rect(0, 0, W, 297, 'F');
-    y = M;
-    h1('LAN Device Inventory');
-    const devs = data.devices || [];
-    const online = devs.filter(d => d.is_online).length;
-    para(`${online} of ${devs.length} known LAN devices are currently online.`);
-    if (devs.length) {
-        tableHeader(['HOST', 'IP', 'STATUS', 'PORTS', 'LAST SEEN'], [48, 35, 20, 35, 44]);
-        devs.slice(0, 35).forEach(d => {
-            tableRow([
-                (d.hostname||d.mac||'').substring(0,20),
-                d.ip, d.is_online ? 'ONLINE' : 'offline',
-                (d.ports||'').substring(0,18),
-                d.last_seen ? _fmtLocalTs(d.last_seen).date : '—',
-            ], [48, 35, 20, 35, 44]);
-        });
-    }
-
-    // --- Recommendations page ---
-    newPage();
-    doc.setFillColor(2, 6, 10); doc.rect(0, 0, W, 297, 'F');
-    y = M;
-    h1('Security Recommendations');
-    const recs = [];
-    if (b24.length > 20) recs.push('High fail2ban activity detected (' + b24.length + ' bans). Consider tightening connection rate limits or enabling geoblocking.');
-    if (a24.length > 50) recs.push('Elevated honeypot traffic. Review firewall rules to limit exposure of sensitive ports.');
-    if (devs.filter(d => !d.is_online).length > devs.length * 0.3) recs.push('More than 30% of known LAN devices are offline. Verify connectivity and device health.');
-    const byCountry = {};
-    [...a24, ...b24].forEach(e => { byCountry[e.country] = (byCountry[e.country]||0)+1; });
-    const topAttacker = Object.entries(byCountry).sort((a,b)=>b[1]-a[1])[0];
-    if (topAttacker && topAttacker[1] > 10) recs.push(`Heavy attack traffic from ${topAttacker[0]} (${topAttacker[1]} events). Consider country-level blocking if this traffic is not expected.`);
-    if (!recs.length) recs.push('No critical issues detected in the last 24 hours. Continue monitoring regularly.');
-    recs.push('Ensure GeoLite2 databases are updated monthly for accurate geolocation.');
-    recs.push('Regularly review fail2ban jail configuration and ban durations.');
-    recs.push('Keep system packages updated — check the Security Center tab for pending CVEs.');
-
-    recs.forEach((r, i) => {
-        doc.setFontSize(9); doc.setTextColor(0, 220, 180);
-        doc.text(`${i+1}.`, M, y += 8);
-        doc.setTextColor(200, 230, 235);
-        const lines = doc.splitTextToSize(r, W - 2*M - 8);
-        lines.forEach(l => { doc.text(l, M + 8, y); y += 5; });
-    });
-
-    // Footer on all pages
-    const pageCount = doc.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i);
-        doc.setFontSize(7); doc.setTextColor(40, 70, 80);
-        doc.text(`SENTINEL-ALERT · ${dateStr} · Page ${i}/${pageCount}`, M, 292);
-    }
-
-    doc.save(`sentinel-report-${now.toISOString().substring(0,10)}.pdf`);
-}
+});
+modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
 
 setInterval(() => { hudClock.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }, 1000);
 setInterval(loadStatic, 60000);
 
-loadStatic();
-connectWS();
+loadStatic().then(connectWS);
 
 // Fullscreen button handlers
 document.querySelectorAll('.btn-fullscreen').forEach(btn => {
