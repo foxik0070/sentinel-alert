@@ -86,6 +86,10 @@ html, body {
 }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 
+/* Auth-gated panels — hidden by default; JS shows them after auth check.
+   This ensures panels stay hidden even if JS partially fails. */
+#lan-panel, #log-panel { display: none; }
+
 /* Grid */
 .grid {
     display: grid; gap: 6px; padding: 6px;
@@ -121,6 +125,18 @@ html, body {
 }
 .red    { grid-area: red;    border-color: var(--red);    }
 .green  { grid-area: green;  border-color: var(--green);  }
+
+/* Work mode layout: countries moves to left (red), users to right (green) */
+.grid.work-layout #countries-panel {
+    grid-area: red; border-color: var(--red);
+}
+.grid.work-layout #countries-panel::before,
+.grid.work-layout #countries-panel::after { border-color: var(--red); }
+.grid.work-layout #users-panel {
+    grid-area: green; border-color: var(--green);
+}
+.grid.work-layout #users-panel::before,
+.grid.work-layout #users-panel::after { border-color: var(--green); }
 .yellow { grid-area: yellow; border-color: var(--yellow); }
 .purple { grid-area: purple; border-color: var(--purple); }
 .grey   { grid-area: grey;   border-color: var(--grey);   }

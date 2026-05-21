@@ -35,6 +35,20 @@ SSH_KEY_PATH="$APP_DIR/conf/id_ed25519"
 VENV_DIR="$APP_DIR/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
 
+# Pick the best available Python (prefer 3.12, fall back to system python3)
+pick_python() {
+    for py in python3.12 python3.11 python3.10 python3.9 python3; do
+        if command -v "$py" &>/dev/null; then
+            local ver
+            ver=$("$py" -c "import sys; print(sys.version_info[:2])" 2>/dev/null)
+            echo "$py"
+            return
+        fi
+    done
+    echo "python3"
+}
+SYS_PYTHON="$(pick_python)"
+
 # ── distro detection ───────────────────────────────────────────────────────
 detect_distro() {
     if [[ -f /etc/os-release ]]; then
@@ -64,12 +78,19 @@ install_system_deps() {
                 dnf install -y epel-release 2>/dev/null || \
                 yum install -y epel-release 2>/dev/null || true
             fi
-            dnf install -y python3 python3-pip python3-devel \
-                           openssh-clients nmap curl 2>/dev/null || \
-            yum install -y python3 python3-pip python3-devel \
-                           openssh-clients nmap curl
-            # python3-venv is part of python3 on RHEL 8+; virtualenv as fallback
-            python3 -m venv --help &>/dev/null || \
+            # Prefer Python 3.12 (required for modern async features); fall back to python3
+            if dnf list available python3.12 &>/dev/null 2>&1 | grep -q python3.12; then
+                dnf install -y python3.12 python3.12-pip python3.12-devel \
+                               openssh-clients nmap curl 2>/dev/null || true
+            else
+                dnf install -y python3 python3-pip python3-devel \
+                               openssh-clients nmap curl 2>/dev/null || \
+                yum install -y python3 python3-pip python3-devel \
+                               openssh-clients nmap curl
+            fi
+            # Ensure venv support
+            python3.12 -m venv --help &>/dev/null 2>&1 || \
+                python3 -m venv --help &>/dev/null 2>&1 || \
                 dnf install -y python3-virtualenv 2>/dev/null || true
             ;;
         fedora)
@@ -85,13 +106,13 @@ install_system_deps() {
 
 # ── venv setup ─────────────────────────────────────────────────────────────
 setup_venv() {
-    info "Setting up Python virtual environment..."
+    info "Setting up Python virtual environment (using $SYS_PYTHON)..."
     if [[ ! -d "$VENV_DIR" ]]; then
-        python3 -m venv "$VENV_DIR" || die "Failed to create venv. Install python3-venv first."
+        "$SYS_PYTHON" -m venv "$VENV_DIR" || die "Failed to create venv. Install python3-venv / python3.12 first."
     fi
     "$VENV_DIR/bin/pip" install --quiet --upgrade pip
     "$VENV_DIR/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
-    ok "Python venv ready: $VENV_DIR"
+    ok "Python venv ready: $VENV_DIR ($("$VENV_PYTHON" --version 2>&1))"
 }
 
 # ── deps-only mode ─────────────────────────────────────────────────────────
@@ -231,47 +252,59 @@ if [[ "$SKIP_CONF" == "false" ]]; then
     warn "Leave empty to auto-discover all hosts from hosts file."
     ask COLLECTOR_MONITOR_HOSTS "Monitor hosts (empty = auto)" ""
 
-    echo ""
-    echo -e "${CYN}── Proxy Monitor — Sniproxy ─────────────────────${NC}"
-    warn "Sniproxy reads access logs from a REMOTE proxy server via SSH."
-    ask SNIPROXY_SERVER   "Proxy server hostname/IP (empty to disable)" ""
-    if [[ -n "$SNIPROXY_SERVER" ]]; then
-        ask SNIPROXY_SSH_USER  "SSH user on proxy server" "root"
-        ask SNIPROXY_LOG_FILES "Log files (comma-separated)" \
-            "/var/log/sniproxy/https_access.log,/var/log/sniproxy/http_access.log"
+    if [[ "$MODE_TYPE" == "home" ]]; then
+        echo ""
+        echo -e "${CYN}── Proxy Monitor — Sniproxy ─────────────────────${NC}"
+        warn "Sniproxy reads access logs from a REMOTE proxy server via SSH."
+        ask SNIPROXY_SERVER   "Proxy server hostname/IP (empty to disable)" ""
+        if [[ -n "$SNIPROXY_SERVER" ]]; then
+            ask SNIPROXY_SSH_USER  "SSH user on proxy server" "root"
+            ask SNIPROXY_LOG_FILES "Log files (comma-separated)" \
+                "/var/log/sniproxy/https_access.log,/var/log/sniproxy/http_access.log"
+        else
+            SNIPROXY_SSH_USER="root"
+            SNIPROXY_LOG_FILES="/var/log/sniproxy/https_access.log,/var/log/sniproxy/http_access.log"
+        fi
+
+        echo ""
+        echo -e "${CYN}── LAN Scanner (Network Map tab) ────────────────${NC}"
+        warn "Enable ARP-based LAN scanning and the Network Map tab."
+        read -rp "  Enable LAN scanner? [y/N]: " _scan
+        [[ "${_scan,,}" == "y" ]] && SCANNER_ENABLED=true || SCANNER_ENABLED=false
+
+        echo ""
+        echo -e "${CYN}── Security Center ──────────────────────────────${NC}"
+        read -rp "  Enable Security Center tab? [Y/n]: " _fsc
+        [[ "${_fsc,,}" == "n" ]] && FSC_ENABLED=false || FSC_ENABLED=true
+
+        ask FSC_HA_URL "Home Assistant URL (empty to disable)" ""
+        if [[ -n "$FSC_HA_URL" ]]; then
+            ask_secret FSC_HA_TOKEN "HA long-lived token" ""
+        else
+            FSC_HA_TOKEN=""
+        fi
+
+        echo ""
+        echo -e "${CYN}── Security Center — Ignored IPs ───────────────${NC}"
+        warn "Enter IPs to exclude from SSH security scan (comma-separated)."
+        warn "Typically: gateway, switches, printers, HA."
+        ask FSC_IGNORE_IPS "Ignore IPs" "192.168.2.1"
+
+        echo ""
+        echo -e "${CYN}── Blocked IPs Visualization ────────────────────${NC}"
+        warn "Path to a file with one IP per line to visualize on the globe."
+        ask BLOCKS_IPS_FILE "Blocked IPs file (empty to disable)" ""
     else
-        SNIPROXY_SSH_USER="root"
+        # Work mode — home-only features disabled
+        SNIPROXY_SERVER=""; SNIPROXY_SSH_USER="root"
         SNIPROXY_LOG_FILES="/var/log/sniproxy/https_access.log,/var/log/sniproxy/http_access.log"
+        SCANNER_ENABLED=false
+        FSC_ENABLED=false
+        FSC_HA_URL=""; FSC_HA_TOKEN=""
+        FSC_IGNORE_IPS=""
+        BLOCKS_IPS_FILE=""
+        ok "Work mode: LAN scanner, Security Center, Proxy Monitor disabled."
     fi
-
-    echo ""
-    echo -e "${CYN}── LAN Scanner (Network Map tab) ────────────────${NC}"
-    warn "Enable ARP-based LAN scanning and the Network Map tab."
-    read -rp "  Enable LAN scanner? [y/N]: " _scan
-    [[ "${_scan,,}" == "y" ]] && SCANNER_ENABLED=true || SCANNER_ENABLED=false
-
-    echo ""
-    echo -e "${CYN}── Security Center ──────────────────────────────${NC}"
-    read -rp "  Enable Security Center tab? [Y/n]: " _fsc
-    [[ "${_fsc,,}" == "n" ]] && FSC_ENABLED=false || FSC_ENABLED=true
-
-    ask FSC_HA_URL "Home Assistant URL (empty to disable)" ""
-    if [[ -n "$FSC_HA_URL" ]]; then
-        ask_secret FSC_HA_TOKEN "HA long-lived token" ""
-    else
-        FSC_HA_TOKEN=""
-    fi
-
-    echo ""
-    echo -e "${CYN}── Security Center — Ignored IPs ───────────────${NC}"
-    warn "Enter IPs to exclude from SSH security scan (comma-separated)."
-    warn "Typically: gateway, switches, printers, HA."
-    ask FSC_IGNORE_IPS "Ignore IPs" "192.168.2.1"
-
-    echo ""
-    echo -e "${CYN}── Blocked IPs Visualization ────────────────────${NC}"
-    warn "Path to a file with one IP per line to visualize on the globe."
-    ask BLOCKS_IPS_FILE "Blocked IPs file (empty to disable)" ""
 
     # ── write config ───────────────────────────────────────────────────────
     info "Creating $CONF_DIR ..."

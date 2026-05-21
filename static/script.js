@@ -263,7 +263,9 @@ async function loadCountryPolygons() {
 
 
 function pushAttack(a, isNew = true) {
-    if (!a.lat && !a.lon) return; // skip LAN/0,0
+    // Skip only if coords are 0,0 AND no country — LAN/unresolved entries with no geodata at all.
+    // Blocklist entries with partial geodata (country but no coords) still get displayed.
+    if (!a.lat && !a.lon && (!a.country || a.country === 'Unknown')) return;
     const ageSeconds = a.ts ? (Date.now() - new Date(a.ts).getTime()) / 1000 : (isNew ? 0 : MAX_AGE_S);
     if (!isNew && ageSeconds > MAX_AGE_S) return; // skip attacks older than 24h
     const proto = a.protocol || 'ssh';
@@ -789,30 +791,41 @@ function applyTabVisibility(cfg) {
     const lanPanel    = $('lan-panel');
     const usersPanel  = $('users-panel');
     const logPanel    = $('log-panel');
+    const mainGrid    = document.querySelector('.grid');
+
+    // Panels that use CSS `display:none` as default must be shown with explicit 'flex',
+    // not '' (empty string), because '' just removes inline style and CSS default wins.
+    const SHOW = 'flex';
 
     if (_workMode) {
-        // Work mode: hide home-only tabs and panels entirely (regardless of auth)
+        // Work mode: hide home-only tabs entirely
         if (btnSecurity) btnSecurity.style.display = 'none';
         if (btnProxy)    btnProxy.style.display    = 'none';
         if (btnNetwork)  btnNetwork.style.display  = 'none';
         if (settingsBtn) settingsBtn.style.display  = 'none';
+        // lan-panel never shows in work mode
         if (lanPanel)    lanPanel.style.display    = 'none';
-        // Show users panel if auth granted
-        if (usersPanel)  usersPanel.style.display  = _isAuthenticated ? '' : 'none';
-        if (logPanel)    logPanel.style.display    = _isAuthenticated ? '' : 'none';
-        const mainGrid = document.querySelector('.grid');
-        if (mainGrid) mainGrid.classList.toggle('no-scanner', !_isAuthenticated);
+        // Auth-gated panels
+        if (usersPanel)  usersPanel.style.display  = _isAuthenticated ? SHOW : 'none';
+        if (logPanel)    logPanel.style.display    = _isAuthenticated ? SHOW : 'none';
+        // Grid: swap countries to left, users to right
+        if (mainGrid) {
+            mainGrid.classList.remove('no-scanner');
+            mainGrid.classList.add('work-layout');
+        }
     } else {
         // Home mode: auth + config flags
         if (btnSecurity) btnSecurity.style.display = (_isAuthenticated && cfg.fsc_enabled !== false) ? '' : 'none';
         if (btnProxy)    btnProxy.style.display    = (_isAuthenticated && cfg.sniproxy_enabled)      ? '' : 'none';
         if (btnNetwork)  btnNetwork.style.display  = (_isAuthenticated && cfg.scanner_enabled)       ? '' : 'none';
         if (settingsBtn) settingsBtn.style.display  = _isAuthenticated ? '' : 'none';
-        if (lanPanel)    lanPanel.style.display    = (_isAuthenticated && cfg.scanner_enabled)       ? '' : 'none';
+        if (lanPanel)    lanPanel.style.display    = (_isAuthenticated && cfg.scanner_enabled)       ? SHOW : 'none';
         if (usersPanel)  usersPanel.style.display  = 'none';
-        if (logPanel)    logPanel.style.display    = _isAuthenticated                                ? '' : 'none';
-        const mainGrid = document.querySelector('.grid');
-        if (mainGrid) mainGrid.classList.toggle('no-scanner', !cfg.scanner_enabled || !_isAuthenticated);
+        if (logPanel)    logPanel.style.display    = _isAuthenticated ? SHOW : 'none';
+        if (mainGrid) {
+            mainGrid.classList.remove('work-layout');
+            mainGrid.classList.toggle('no-scanner', !cfg.scanner_enabled || !_isAuthenticated);
+        }
     }
 }
 
@@ -1050,36 +1063,43 @@ let _isAuthenticated = false;
 
 function applyAuthState(authenticated) {
     _isAuthenticated = authenticated;
+
+    // Show/hide auth-only header elements
     document.querySelectorAll('.auth-only').forEach(el => {
         el.style.display = authenticated ? '' : 'none';
     });
+
+    // Tab buttons (except Threat Map) require auth
     document.querySelectorAll('.tab-btn:not([data-tab="threat"])').forEach(btn => {
         btn.style.display = authenticated ? '' : 'none';
     });
-    // Always hide auth-gated panels when logged out
-    const lanPanel = $('lan-panel');
-    const logPanel = $('log-panel');
+
+    const lanPanel   = $('lan-panel');
+    const logPanel   = $('log-panel');
     const usersPanel = $('users-panel');
+
     if (!authenticated) {
+        // Explicit hide of auth-gated panels (CSS default already hides them,
+        // this ensures they're re-hidden after logout)
         if (lanPanel)   lanPanel.style.display   = 'none';
         if (logPanel)   logPanel.style.display   = 'none';
         if (usersPanel) usersPanel.style.display = 'none';
     }
-    // Work mode: re-hide elements that auth-only unhid but work mode forbids
-    if (_workMode && authenticated) {
-        const settingsBtn = $('settings-btn');
-        const btnSecurity = $('tab-btn-security');
-        const btnProxy    = $('tab-btn-proxy');
-        const btnNetwork  = $('tab-btn-network');
-        if (settingsBtn) settingsBtn.style.display = 'none';
-        if (btnSecurity) btnSecurity.style.display = 'none';
-        if (btnProxy)    btnProxy.style.display    = 'none';
-        if (btnNetwork)  btnNetwork.style.display  = 'none';
-        if (lanPanel)    lanPanel.style.display    = 'none';
-        if (usersPanel)  usersPanel.style.display  = '';
-        if (logPanel)    logPanel.style.display    = '';
+
+    if (_workMode) {
+        // Work mode overrides: home-only tabs/panels stay hidden regardless of auth
+        ['settings-btn', 'tab-btn-security', 'tab-btn-proxy', 'tab-btn-network'].forEach(id => {
+            const el = $(id); if (el) el.style.display = 'none';
+        });
+        if (lanPanel) lanPanel.style.display = 'none';
+        // Auth-gated work panels (must use 'flex', not '', to override CSS default none)
+        if (authenticated) {
+            if (usersPanel) usersPanel.style.display = 'flex';
+            if (logPanel)   logPanel.style.display   = 'flex';
+            if ($('users-count') && $('users-count').textContent === '0') loadUsers();
+        }
     }
-    // Show LOGIN button only when logged out
+
     const loginHeaderBtn = $('login-btn');
     if (loginHeaderBtn) loginHeaderBtn.style.display = authenticated ? 'none' : '';
     if (authenticated) _loginOverlay.classList.add('hidden');
