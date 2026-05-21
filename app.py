@@ -243,6 +243,12 @@ def get_who():
     return workmode.get_users()
 
 
+@app.get("/api/active_users")
+def get_active_users():
+    """Work mode: return active users from DB (populated externally by who-collector)."""
+    return _query("SELECT * FROM active_users WHERE lat != 0 OR lon != 0")
+
+
 @app.post("/api/sentinel/configure")
 async def sentinel_configure(payload: dict = Body(...)):
     bridge.configure(

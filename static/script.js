@@ -43,12 +43,13 @@ let attackCount = 0;
 const MAX_ARCS = 300, MAX_PTS = 300, MAX_LABELS = 50, MAX_FEED = 200;
 let _globePaused = false, _histPaused = false;
 function _globeFlush() {
-    globe.arcsData([...arcs]);
-    globe.pointsData([...points, ...homePoints]);
+    globe.arcsData([...arcs, ...userArcs]);
+    globe.pointsData([...points, ...homePoints, ...userPoints]);
     globe.labelsData([...labels]);
 }
 
 const arcs = [], points = [], labels = [], rings = [];
+const userArcs = [], userPoints = [];
 const arcTimestamps = []; // track arc creation time for age-based coloring
 const homeRings = [];   // permanent target indicator
 const homePoints = [];  // permanent target dot
@@ -93,7 +94,9 @@ const globe = Globe()(globeEl)
     .pointRadius(d => d.radius ?? 0.3)
     .pointLabel(d => d.isHome
         ? `<b>HOME</b><br>${HOME.ip || '—'}<br>${HOME.country || '?'} · ${HOME.isp || '?'}`
-        : `<b>${d.src_ip}</b><br>${d.country} · ${d.isp || '?'}<br>:${d.dst_port}/${d.protocol}`)
+        : d.protocol === 'who'
+            ? `<b>${d.username}</b><br>${d.ip}<br>${d.country} · ${d.node}`
+            : `<b>${d.src_ip}</b><br>${d.country} · ${d.isp || '?'}<br>:${d.dst_port}/${d.protocol}`)
     .labelsData(labels)
     .labelLat(d => d.lat).labelLng(d => d.lon)
     .labelText(d => d.country)
@@ -566,28 +569,59 @@ document.getElementById('vsw-modal').addEventListener('click', e => {
 // ── Work mode ─────────────────────────────────────────────────────────────
 let _workMode = false;
 
-function renderUsers(list) {
+function renderActiveUsers(users) {
     const el = $('users-list');
     const countEl = $('users-count');
     if (!el) return;
-    if (countEl) countEl.textContent = list.length;
-    if (!list.length) {
-        el.innerHTML = '<div class="empty">No users configured</div>';
-        return;
-    }
-    el.innerHTML = '<div class="who-hdr"><span>NAME / DEPT</span><span>IP</span><span>NOTE</span></div>'
-        + list.map(u => `
-        <div class="who-row">
-            <div><div class="who-name">${u.name || '—'}</div><div class="who-dept">${u.dept || ''}</div></div>
-            <div class="who-ip">${u.ip || '—'}</div>
-            <div style="color:var(--muted);font-size:10px;">${u.note || ''}</div>
+    if (countEl) countEl.textContent = users.length;
+    if (!users.length) { el.innerHTML = '<div class="empty">No active users.</div>'; return; }
+    el.innerHTML = users.map(u => `
+        <div class="row ban clickable" data-lat="${u.lat}" data-lon="${u.lon}"
+              data-ip="${escape(u.ip)}" data-country="${escape(u.country)}"
+              data-isp="${escape(u.isp)}" data-user="${escape(u.username)}" data-node="${escape(u.node)}">
+            <span class="port" style="min-width:48px;background:#06121a;color:var(--accent);">${escape(u.username)}</span>
+            <div style="flex:1;min-width:0;padding-left:4px;">
+                <div style="display:flex;justify-content:space-between;">
+                    <span class="ip">${escape(u.ip)}</span>
+                    <span class="meta" style="color:var(--muted);font-size:9px;">${escape(u.node)}</span>
+                </div>
+                <div style="color:#4d7479;font-size:10px;">${escape(u.country)}</div>
+            </div>
         </div>`).join('');
+    el.querySelectorAll('.ban.clickable').forEach(row => {
+        row.addEventListener('click', () => {
+            const lat = parseFloat(row.dataset.lat);
+            const lon = parseFloat(row.dataset.lon);
+            if (lat && lon) centerGlobeOn(lat, lon);
+        });
+    });
 }
 
-async function loadUsers() {
-    const list = await fetch('/api/who').then(r => r.json()).catch(() => []);
-    renderUsers(list);
+async function fetchActiveUsers() {
+    if (!_workMode) return;
+    try {
+        const users = await fetch('/api/active_users').then(r => r.json());
+        userArcs.length = 0;
+        userPoints.length = 0;
+        users.forEach((u, i) => {
+            const colorBase = (i % 2 === 0) ? '#00ffd5' : '#38bdf8';
+            userArcs.push({
+                startLat: u.lat, startLng: u.lon, endLat: HOME.lat, endLng: HOME.lon,
+                color: [colorBase, colorBase],
+                src_ip: u.ip, country: u.country, isp: u.isp, dst_port: 22,
+                protocol: 'who', username: u.username, node: u.node,
+            });
+            userPoints.push({
+                lat: u.lat, lon: u.lon, color: colorBase,
+                radius: 0.4, alt: 0.01, protocol: 'who',
+                username: u.username, node: u.node, ip: u.ip, country: u.country,
+            });
+        });
+        renderActiveUsers(users);
+        if (!_globePaused) _globeFlush();
+    } catch {}
 }
+setInterval(() => { if (_workMode) fetchActiveUsers(); }, 30000);
 
 // ── Attack history ─────────────────────────────────────────────────────────
 const _ATTACK_HIST_MAX_S = 24 * 3600;
@@ -757,8 +791,8 @@ async function loadStatic() {
 
         // Load blocklist / work IPS onto globe
         if (cfg.blocklist_enabled) loadBlocklist();
-        // Load work mode users
-        if (cfg.work_mode && cfg.who_enabled) loadUsers();
+        // Load work mode active users from DB
+        if (cfg.work_mode) fetchActiveUsers();
     } catch {}
     const fetches = [
         fetch('/api/bans').then(r => r.json()),
@@ -1096,7 +1130,7 @@ function applyAuthState(authenticated) {
         if (authenticated) {
             if (usersPanel) usersPanel.style.display = 'flex';
             if (logPanel)   logPanel.style.display   = 'flex';
-            if ($('users-count') && $('users-count').textContent === '0') loadUsers();
+            fetchActiveUsers();
         }
     }
 

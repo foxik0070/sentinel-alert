@@ -58,6 +58,20 @@ def init():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_attacks_ts ON attacks(ts)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_attacks_src ON attacks(src_ip)")
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS active_users (
+            username  TEXT,
+            ip        TEXT,
+            node      TEXT,
+            cluster   TEXT,
+            country   TEXT,
+            lat       REAL,
+            lon       REAL,
+            isp       TEXT,
+            timestamp TEXT
+        )
+    """)
+
     conn.commit()
     conn.close()
     print(f"DB initialized at {DB_PATH}")
