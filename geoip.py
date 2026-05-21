@@ -11,6 +11,7 @@ ASN_PATH   = os.path.join(BASE_DIR, "data", "GeoLite2-ASN.mmdb")
 _reader     = None
 _asn_reader = None
 _isp_cache: dict = {}   # ip -> isp string
+_geo_cache: dict = {}   # ip -> (lat, lon, country, isp)
 _isp_lock = threading.Lock()
 
 
@@ -65,6 +66,33 @@ def _lookup_isp_api(ip: str) -> str | None:
     return isp
 
 
+def _lookup_api_full(ip: str):
+    """Full GeoIP via ip-api.com: (lat, lon, country, isp) or None on failure."""
+    with _isp_lock:
+        if ip in _geo_cache:
+            return _geo_cache[ip]
+    try:
+        url = f"http://ip-api.com/json/{ip}?fields=status,lat,lon,country,isp,org"
+        with urllib.request.urlopen(url, timeout=4) as resp:
+            d = json.loads(resp.read())
+        if d.get("status") == "fail":
+            return None
+        result = (
+            float(d.get("lat") or 0.0),
+            float(d.get("lon") or 0.0),
+            d.get("country") or "Unknown",
+            d.get("isp") or d.get("org") or "Unknown",
+        )
+    except Exception:
+        return None
+    if result[0] or result[1]:  # only cache if we got coordinates
+        with _isp_lock:
+            if len(_geo_cache) > 5000:
+                _geo_cache.clear()
+            _geo_cache[ip] = result
+    return result
+
+
 def lookup_asn(ip: str) -> str | None:
     """Return ISP/org from ASN database, or None if unavailable."""
     asn = _get_asn_reader()
@@ -101,7 +129,16 @@ def lookup(ip):
         except Exception:
             pass
 
-    if not isp:
+    # If GeoLite2 gave no coordinates, try ip-api.com for a complete lookup
+    if not lat and not lon:
+        full = _lookup_api_full(ip)
+        if full:
+            lat, lon = full[0], full[1]
+            if country == "Unknown":
+                country = full[2]
+            if not isp:
+                isp = full[3]
+    elif not isp:
         isp = _lookup_isp_api(ip)
 
     return lat, lon, country, isp or "Unknown"

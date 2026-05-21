@@ -57,31 +57,38 @@ async def _poll_one(host: str, sem: asyncio.Semaphore, queue: asyncio.Queue):
 
 
 async def enrich_unknown_isp(queue: asyncio.Queue):
-    """One-shot: enrich DB rows that have isp='Unknown', 1 per 2.5s (< 45/min)."""
+    """One-shot: enrich DB rows missing isp or coordinates via ip-api.com, 1 per 2.5s."""
     loop = asyncio.get_running_loop()
     await asyncio.sleep(10)  # let the app fully start first
     try:
         conn = sqlite3.connect(DB_PATH)
         rows = conn.execute(
-            "SELECT 'attack', id, src_ip FROM attacks WHERE isp='Unknown' AND country NOT IN ('LAN','NoDB','Invalid')"
+            "SELECT 'attack', id, src_ip FROM attacks "
+            "WHERE (isp='Unknown' OR lat=0) AND country NOT IN ('LAN','NoDB','Invalid')"
             " UNION ALL "
-            "SELECT 'ban', rowid, ip FROM ban_history WHERE isp='Unknown' AND country NOT IN ('LAN','NoDB','Invalid')"
+            "SELECT 'ban', rowid, ip FROM ban_history "
+            "WHERE (isp='Unknown' OR lat=0) AND country NOT IN ('LAN','NoDB','Invalid')"
         ).fetchall()
         conn.close()
     except Exception as e:
-        await _publish(queue, {"type": "log", "level": "warn", "source": "isp-enrich", "msg": f"read failed: {e}"})
+        await _publish(queue, {"type": "log", "level": "warn", "source": "enrich", "msg": f"read failed: {e}"})
         return
 
     enriched = 0
     for table, row_id, ip in rows:
-        isp = await loop.run_in_executor(None, geoip._lookup_isp_api, ip)
-        if isp:
+        full = await loop.run_in_executor(None, geoip._lookup_api_full, ip)
+        if full:
+            lat, lon, country, isp = full
             try:
                 conn = sqlite3.connect(DB_PATH)
                 if table == "attack":
-                    conn.execute("UPDATE attacks SET isp=? WHERE id=?", (isp, row_id))
+                    conn.execute(
+                        "UPDATE attacks SET lat=?, lon=?, country=?, isp=? WHERE id=?",
+                        (lat, lon, country, isp, row_id))
                 else:
-                    conn.execute("UPDATE ban_history SET isp=? WHERE rowid=?", (isp, row_id))
+                    conn.execute(
+                        "UPDATE ban_history SET lat=?, lon=?, country=?, isp=? WHERE rowid=?",
+                        (lat, lon, country, isp, row_id))
                 conn.commit()
                 conn.close()
                 enriched += 1
@@ -90,8 +97,8 @@ async def enrich_unknown_isp(queue: asyncio.Queue):
         await asyncio.sleep(2.5)
 
     if enriched:
-        await _publish(queue, {"type": "log", "level": "info", "source": "isp-enrich",
-                               "msg": f"enriched ISP for {enriched} records"})
+        await _publish(queue, {"type": "log", "level": "info", "source": "enrich",
+                               "msg": f"enriched {enriched} records with GeoIP data"})
 
 
 async def periodic_collector(queue: asyncio.Queue):

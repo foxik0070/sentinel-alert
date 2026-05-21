@@ -266,9 +266,7 @@ async function loadCountryPolygons() {
 
 
 function pushAttack(a, isNew = true) {
-    // Skip only if coords are 0,0 AND no country — LAN/unresolved entries with no geodata at all.
-    // Blocklist entries with partial geodata (country but no coords) still get displayed.
-    if (!a.lat && !a.lon && (!a.country || a.country === 'Unknown')) return;
+    if (!a.lat && !a.lon) return; // no arc without valid coordinates
     const ageSeconds = a.ts ? (Date.now() - new Date(a.ts).getTime()) / 1000 : (isNew ? 0 : MAX_AGE_S);
     if (!isNew && ageSeconds > MAX_AGE_S) return; // skip attacks older than 24h
     const proto = a.protocol || 'ssh';
@@ -604,6 +602,7 @@ async function fetchActiveUsers() {
         userArcs.length = 0;
         userPoints.length = 0;
         users.forEach((u, i) => {
+            if (!u.lat && !u.lon) return; // show in panel but no arc without coordinates
             const colorBase = (i % 2 === 0) ? '#00ffd5' : '#38bdf8';
             userArcs.push({
                 startLat: u.lat, startLng: u.lon, endLat: HOME.lat, endLng: HOME.lon,

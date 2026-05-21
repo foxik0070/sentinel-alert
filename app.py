@@ -246,7 +246,7 @@ def get_who():
 @app.get("/api/active_users")
 def get_active_users():
     """Work mode: return active users from DB (populated externally by who-collector)."""
-    return _query("SELECT * FROM active_users WHERE lat != 0 OR lon != 0")
+    return _query("SELECT * FROM active_users ORDER BY timestamp DESC")
 
 
 @app.post("/api/sentinel/configure")
@@ -650,11 +650,11 @@ async def ws_live(ws: WebSocket):
     try:
         recent = _query(
             "SELECT id, ts, src_ip, dst_port, protocol, country, lat, lon, isp "
-            "FROM attacks WHERE lat != 0 OR lon != 0 ORDER BY id DESC LIMIT 100"
+            "FROM attacks ORDER BY id DESC LIMIT 100"
         )
         bans = _query(
             "SELECT ip AS src_ip, country, lat, lon, isp, timestamp AS ts "
-            "FROM ban_history WHERE lat != 0 OR lon != 0 ORDER BY timestamp DESC LIMIT 200"
+            "FROM ban_history ORDER BY timestamp DESC LIMIT 200"
         )
         # Mark bans with protocol for display
         for b in bans:
