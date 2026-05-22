@@ -107,10 +107,11 @@ async def scan_async():
     cur = conn.cursor()
     try:
         for ip, mac, vendor in seen:
-            cur.execute("SELECT is_online FROM devices WHERE mac=?", (mac,))
+            cur.execute("SELECT is_online, ip FROM devices WHERE mac=?", (mac,))
             prev = cur.fetchone()
             is_new = prev is None
             came_online = prev is not None and prev[0] == 0
+            ip_changed = prev is not None and prev[1] != ip
             hostname = resolve_hostname(ip)
             ports = ip_to_ports.get(ip, [])
             ports_str = ",".join(str(p) for p in ports) if ports else ""
@@ -131,6 +132,18 @@ async def scan_async():
                 """,
                 (mac, ip, hostname, vendor, now, now, ports_str, now),
             )
+            if ip_changed:
+                old_ip = prev[1]
+                events.append({
+                    "type": "device",
+                    "state": "ip_changed",
+                    "mac": mac, "ip": ip, "old_ip": old_ip,
+                    "hostname": hostname, "vendor": vendor,
+                })
+                events.append({
+                    "type": "log", "level": "warn", "source": "scanner",
+                    "msg": f"IP CHANGE  {hostname or ip}  {old_ip} → {ip}",
+                })
             if is_new or came_online:
                 events.append({
                     "type": "device",

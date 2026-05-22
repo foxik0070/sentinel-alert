@@ -1,5 +1,6 @@
 """Background periodic tasks. Started from app.py lifespan."""
 import asyncio
+import ipaddress
 import os
 import sqlite3
 from datetime import datetime
@@ -112,3 +113,67 @@ async def periodic_collector(queue: asyncio.Queue):
             await _publish(queue, {"type": "log", "level": "warn",
                                    "source": "fail2ban", "msg": f"loop error: {e}"})
         await asyncio.sleep(FAIL2BAN_INTERVAL)
+
+
+async def _who_one(host: str, sem: asyncio.Semaphore) -> list:
+    loop = asyncio.get_running_loop()
+    async with sem:
+        return await loop.run_in_executor(None, collector.poll_active_sessions, host)
+
+
+async def periodic_who_collector(queue: asyncio.Queue):
+    """Every 60 s: collect active SSH sessions (local + remote) into active_users."""
+    WHO_INTERVAL = 60
+    while True:
+        await asyncio.sleep(WHO_INTERVAL)
+        try:
+            loop = asyncio.get_running_loop()
+            # Local sessions
+            sessions = await loop.run_in_executor(None, collector.poll_local_sessions)
+            # Remote hosts
+            hosts = collector.discover_hosts()
+            if hosts:
+                sem = asyncio.Semaphore(FAIL2BAN_CONCURRENCY)
+                results = await asyncio.gather(*[_who_one(h, sem) for h in hosts])
+                for r in results:
+                    sessions.extend(r)
+
+            # Filter out local network sessions (only show external users)
+            def _is_private(ip):
+                try:
+                    return ipaddress.ip_address(ip).is_private
+                except ValueError:
+                    return True
+            sessions = [s for s in sessions if not _is_private(s['ip'])]
+
+            # GeoIP enrich + replace active_users table
+            enriched = []
+            for s in sessions:
+                try:
+                    lat, lon, country, isp = await loop.run_in_executor(
+                        None, geoip.lookup, s['ip'])
+                except Exception:
+                    lat, lon, country, isp = 0.0, 0.0, 'Unknown', 'Unknown'
+                enriched.append({**s, 'lat': lat, 'lon': lon,
+                                 'country': country, 'isp': isp})
+
+            now = datetime.now().isoformat()
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM active_users")
+            for s in enriched:
+                conn.execute(
+                    "INSERT INTO active_users "
+                    "(username, ip, node, cluster, country, lat, lon, isp, timestamp) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
+                    (s['username'], s['ip'], s['node'], 'home',
+                     s['country'], s['lat'], s['lon'], s['isp'], now))
+            conn.commit()
+            conn.close()
+
+            if sessions:
+                await _publish(queue, {"type": "log", "level": "info", "source": "who",
+                                       "msg": f"active sessions: {len(sessions)} user(s) on "
+                                              f"{len(set(s['node'] for s in sessions))} host(s)"})
+        except Exception as e:
+            await _publish(queue, {"type": "log", "level": "warn", "source": "who",
+                                   "msg": f"session collector error: {e}"})

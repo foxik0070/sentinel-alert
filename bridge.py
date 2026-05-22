@@ -124,6 +124,20 @@ def _translate(event: dict):
         }
     if t == "device":
         state = event.get("state")
+        mac = (event.get("mac") or "").lower()
+        # Check per-device notification preferences before forwarding.
+        if mac and state in ("online", "offline", "new"):
+            try:
+                import json as _json
+                settings_path = BASE_DIR / "data" / "net_settings.json"
+                if settings_path.exists():
+                    cfg = (_json.loads(settings_path.read_text())
+                           .get("devices", {}).get(mac, {}))
+                    if state == "online"  and not cfg.get("notify_connect",    True): return None
+                    if state == "offline" and not cfg.get("notify_disconnect",  True): return None
+                    if state == "new"     and not cfg.get("notify_new",         True): return None
+            except Exception:
+                pass
         ports = ",".join(str(p) for p in (event.get("ports") or [])) or "none"
         name = event.get("hostname") or event.get("ip")
         if state == "new":

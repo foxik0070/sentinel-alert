@@ -7,6 +7,7 @@ upserts into ban_history.
 """
 import os
 import re
+import socket
 import sqlite3
 import subprocess
 from datetime import datetime
@@ -136,6 +137,61 @@ def poll_host_with_log(host):
                                + ", ".join(e["src_ip"] for e in events[:3])
                                + ("…" if len(events) > 3 else "")}
     return [], None  # silent on hosts with no new data
+
+
+def _parse_who(output, node):
+    """Parse `who` output, return list of {username, ip, node} dicts."""
+    sessions = []
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        username = parts[0]
+        src = None
+        for p in reversed(parts):
+            if p.startswith('(') and p.endswith(')') and len(p) > 2:
+                src = p[1:-1]
+                break
+        if not src or src.startswith(':'):  # :0, :1 = local console/display
+            continue
+        ip = src
+        if not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', src):
+            try:
+                ip = socket.gethostbyname(src)
+            except Exception:
+                continue
+        sessions.append({'username': username, 'ip': ip, 'node': node})
+    return sessions
+
+
+def poll_local_sessions():
+    """Return active SSH sessions on the local machine."""
+    try:
+        out = subprocess.check_output(['who'], text=True, timeout=5,
+                                      stderr=subprocess.DEVNULL)
+        return _parse_who(out, socket.gethostname())
+    except Exception:
+        return []
+
+
+def poll_active_sessions(host):
+    """Return active SSH sessions on a remote host via `who` over SSH."""
+    try:
+        cmd = [
+            "ssh", "-i", SSH_KEY,
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "LogLevel=ERROR",
+            f"{SSH_USER}@{host}",
+            "who",
+        ]
+        out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL,
+                                      text=True, timeout=8)
+        return _parse_who(out, host)
+    except Exception:
+        return []
 
 
 def poll_all():

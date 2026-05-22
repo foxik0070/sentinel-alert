@@ -130,6 +130,26 @@ async def lifespan(app: FastAPI):
         cutoff = datetime.now() - timedelta(hours=24)
         while _proxy_attack_history and _proxy_attack_history[0].get("ts", "") < cutoff.isoformat():
             _proxy_attack_history.popleft()
+        # Persist to DB so events survive restarts (skip exact duplicates)
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            dup = conn.execute(
+                "SELECT 1 FROM attacks WHERE ts=? AND src_ip=? AND dst_port=? AND protocol=? AND payload=?",
+                (ev["ts"], ev["src_ip"], ev["dst_port"], ev["protocol"], ev.get("domain", "")),
+            ).fetchone()
+            if not dup:
+                conn.execute(
+                    "INSERT INTO attacks "
+                    "(ts, src_ip, dst_port, protocol, payload, country, lat, lon, isp) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
+                    (ev["ts"], ev["src_ip"], ev["dst_port"], ev["protocol"],
+                     ev.get("domain", ""), ev.get("country", ""),
+                     ev.get("lat", 0), ev.get("lon", 0), ev.get("isp", "")),
+                )
+                conn.commit()
+            conn.close()
+        except Exception:
+            pass
         try:
             _broadcast_queue.put_nowait(entry)
             _broadcast_queue.put_nowait({
@@ -147,6 +167,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(tasks.periodic_scanner(_broadcast_queue)),
         asyncio.create_task(tasks.periodic_collector(_broadcast_queue)),
         asyncio.create_task(tasks.enrich_unknown_isp(_broadcast_queue)),
+        asyncio.create_task(tasks.periodic_who_collector(_broadcast_queue)),
     ]
     _log_buffer.append({"type": "log", "level": "good", "source": "system",
                         "ts": datetime.now().isoformat(), "msg": "Sentinel-Alert online"})
@@ -610,9 +631,10 @@ async def net_settings_post(payload: dict = Body(...)):
         "notify_connect":    bool(payload.get("notify_connect",    existing.get("notify_connect",    True))),
         "notify_disconnect": bool(payload.get("notify_disconnect", existing.get("notify_disconnect", True))),
         "notify_new":        bool(payload.get("notify_new",        existing.get("notify_new",        True))),
-        "type":        payload.get("type",        existing.get("type",        "host")),
+        "type":        payload.get("type",        existing.get("type",        "")),
         "parent_mac":  payload.get("parent_mac",  existing.get("parent_mac",  "")),
         "parent_port": payload.get("parent_port", existing.get("parent_port", "")),
+        "visualize":   bool(payload.get("visualize",   existing.get("visualize",   False))),
     }
     _save_net_settings(data)
     return {"ok": True, "mac": mac, **devices[mac]}
@@ -650,11 +672,12 @@ async def ws_live(ws: WebSocket):
     try:
         recent = _query(
             "SELECT id, ts, src_ip, dst_port, protocol, country, lat, lon, isp "
-            "FROM attacks ORDER BY id DESC LIMIT 100"
+            "FROM attacks WHERE ts >= datetime('now', '-24 hours') ORDER BY id DESC LIMIT 500"
         )
         bans = _query(
             "SELECT ip AS src_ip, country, lat, lon, isp, timestamp AS ts "
-            "FROM ban_history ORDER BY timestamp DESC LIMIT 200"
+            "FROM ban_history WHERE timestamp >= datetime('now', '-24 hours') "
+            "ORDER BY timestamp DESC LIMIT 500"
         )
         # Mark bans with protocol for display
         for b in bans:
@@ -676,9 +699,10 @@ async def ws_live(ws: WebSocket):
 
 
 _DB_TABLES = {
-    "attacks":     ("id",    ["id","ts","src_ip","dst_port","protocol","country","isp","lat","lon"]),
-    "ban_history": ("rowid", ["rowid","ip","country","isp","timestamp","lat","lon"]),
-    "devices":     ("mac",   ["mac","ip","hostname","vendor","first_seen","last_seen","is_online"]),
+    "attacks":      ("id",       ["id","ts","src_ip","dst_port","protocol","country","isp","lat","lon"]),
+    "ban_history":  ("rowid",    ["rowid","ip","country","isp","timestamp","lat","lon"]),
+    "devices":      ("mac",      ["mac","ip","hostname","vendor","first_seen","last_seen","is_online"]),
+    "active_users": ("username", ["username","ip","node","cluster","country","isp","timestamp"]),
 }
 
 @app.get("/api/db/{table}")

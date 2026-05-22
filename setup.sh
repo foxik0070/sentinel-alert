@@ -104,6 +104,42 @@ install_system_deps() {
     ok "System dependencies installed."
 }
 
+# ── GeoIP downloader ───────────────────────────────────────────────────────
+download_geoip() {
+    local key="$1"
+    local data_dir="$APP_DIR/data"
+    mkdir -p "$data_dir"
+    local failed=0
+    for edition in GeoLite2-City GeoLite2-ASN; do
+        local mmdb="$data_dir/${edition}.mmdb"
+        if [[ -f "$mmdb" ]]; then
+            ok "$edition already present — skipping."
+            continue
+        fi
+        info "Downloading ${edition}..."
+        local tmp_tar="/tmp/${edition}-$$.tar.gz"
+        local url="https://download.maxmind.com/app/geoip_download?edition_id=${edition}&license_key=${key}&suffix=tar.gz"
+        if curl -fsSL "$url" -o "$tmp_tar" 2>/dev/null; then
+            tar -xzf "$tmp_tar" -C /tmp/ 2>/dev/null || true
+            local extracted
+            extracted=$(find /tmp -name "${edition}.mmdb" 2>/dev/null | head -1)
+            if [[ -n "$extracted" ]]; then
+                mv "$extracted" "$mmdb"
+                ok "$edition installed → $mmdb"
+            else
+                warn "$edition: could not find .mmdb in archive (wrong license key?)"
+                failed=1
+            fi
+            rm -rf /tmp/GeoLite2-*/
+        else
+            warn "$edition: download failed — check license key and internet access."
+            failed=1
+        fi
+        rm -f "$tmp_tar"
+    done
+    return $failed
+}
+
 # ── venv setup ─────────────────────────────────────────────────────────────
 setup_venv() {
     info "Setting up Python virtual environment (using $SYS_PYTHON)..."
@@ -222,6 +258,18 @@ if [[ "$SKIP_CONF" == "false" ]]; then
     echo -e "${CYN}── Server ──────────────────────────────────────${NC}"
     ask SERVER_HOST "Listen address" "0.0.0.0"
     ask SERVER_PORT "Web UI port"    "5056"
+
+    echo ""
+    echo -e "${CYN}── GeoIP (MaxMind GeoLite2) ─────────────────────${NC}"
+    warn "GeoLite2 databáze zajistí přesné souřadnice útočníků."
+    warn "Bez klíče se používá ip-api.com (online, zdarma, 45 req/min)."
+    warn "Zadarmo: https://www.maxmind.com/en/geolite2/signup"
+    _EXISTING_MM_KEY=""
+    if [[ -f "$CONF_FILE" ]]; then
+        _EXISTING_MM_KEY=$(awk -F'=' '/^\[geoip\]/,/^\[/ { if (/^license_key/) print $2 }' \
+            "$CONF_FILE" | tr -d ' ' | head -1)
+    fi
+    ask MAXMIND_KEY "MaxMind license key (empty = skip)" "$_EXISTING_MM_KEY"
 
     echo ""
     echo -e "${CYN}── Home Location (leave blank for auto-detect) ─${NC}"
@@ -394,6 +442,12 @@ ignore_ips = ${FSC_IGNORE_IPS}
 [threat]
 # Optional: path to a file with one blocked IP per line (visualized on the globe)
 blocks_ips_file = ${BLOCKS_IPS_FILE}
+
+[geoip]
+# MaxMind license key for automatic GeoLite2 database download
+# Free sign-up: https://www.maxmind.com/en/geolite2/signup
+# Leave empty to rely on ip-api.com fallback (online, rate-limited)
+license_key = ${MAXMIND_KEY}
 CONF
 
     chmod 640 "$CONF_FILE"
@@ -406,6 +460,21 @@ echo -e "${CYN}── Database ────────────────�
 info "Initialising SQLite database..."
 SENTINEL_CONF="$CONF_FILE" "$VENV_PYTHON" "$APP_DIR/db_init.py"
 ok "Database ready."
+
+# ── GeoIP databases ────────────────────────────────────────────────────────
+echo ""
+echo -e "${CYN}── GeoIP Databases ──────────────────────────────────${NC}"
+_MM_KEY=""
+if [[ -f "$CONF_FILE" ]]; then
+    _MM_KEY=$(awk -F'=' '/^\[geoip\]/,/^\[/ { if (/^license_key/) print $2 }' \
+        "$CONF_FILE" | tr -d ' ' | head -1)
+fi
+if [[ -n "$_MM_KEY" ]]; then
+    download_geoip "$_MM_KEY" || warn "Některé GeoIP soubory se nestáhly — fallback na ip-api.com."
+else
+    info "MaxMind klíč nebyl zadán — používá se ip-api.com fallback."
+    info "Přidej klíč do $CONF_FILE ([geoip] license_key) a spusť znovu setup.sh."
+fi
 
 # ── SSH key for collector ──────────────────────────────────────────────────
 echo ""
@@ -528,6 +597,10 @@ echo -e "  Logs     : ${CYN}journalctl -u sentinel-alert -f${NC}"
 echo -e "  Status   : ${CYN}systemctl status sentinel-alert${NC}"
 echo -e "  Restart  : ${CYN}sudo systemctl restart sentinel-alert${NC}"
 echo ""
-echo -e "  GeoIP    : ${YLW}Place GeoLite2-City.mmdb in $APP_DIR/data/${NC}"
-echo -e "             ${YLW}(free download from maxmind.com — account required)${NC}"
+if [[ -f "$APP_DIR/data/GeoLite2-City.mmdb" ]]; then
+    echo -e "  GeoIP    : ${GRN}GeoLite2-City nainstalován${NC}"
+else
+    echo -e "  GeoIP    : ${YLW}Není — zadej MaxMind klíč v $CONF_FILE ([geoip] license_key)${NC}"
+    echo -e "             ${YLW}a spusť: sudo $APP_DIR/setup.sh --reconf${NC}"
+fi
 echo ""

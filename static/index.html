@@ -33,14 +33,6 @@
         <span class="val live" id="ws-status">CONNECTING</span>
     </div>
     <div class="hud-cell hud-hide-sm">
-        <span class="lbl">LAN</span>
-        <span class="val" id="hud-lan">0 / 0</span>
-    </div>
-    <div class="hud-cell">
-        <span class="lbl">ATTACKS</span>
-        <span class="val danger" id="hud-attacks">0</span>
-    </div>
-    <div class="hud-cell hud-hide-sm">
         <span class="lbl">LOCAL</span>
         <span class="val" id="hud-clock">--:--:--</span>
     </div>
@@ -48,21 +40,11 @@
         <span class="lbl">HOME</span>
         <span class="val accent" id="hud-home">—</span>
     </div>
-    <div class="hud-cell hud-hide-md">
-        <span class="lbl">SENTINEL</span>
-        <span class="val" id="hud-sentinel">OFF</span>
-    </div>
     <div class="hud-title">
         <div><span class="ht-sentinel">SENTINEL</span><span class="ht-sep">//</span><span class="ht-alert">ALERT</span></div>
         <span class="ht-ver">v 2026.05.009</span>
     </div>
     <div class="hud-cell right">
-        <div class="tab-group">
-            <button class="tab-btn active" data-tab="threat">THREAT MAP</button>
-            <button class="tab-btn" data-tab="security" id="tab-btn-security">SECURITY CTR</button>
-            <button class="tab-btn" data-tab="proxy" id="tab-btn-proxy">PROXY MONITOR</button>
-            <button class="tab-btn" data-tab="network" id="tab-btn-network">NETWORK MAP</button>
-        </div>
         <button id="settings-btn" class="btn hud-hide-sm auth-only">⚙ SETTINGS</button>
         <button id="db-viewer-btn" class="btn hud-hide-sm auth-only" style="font-size:10px;">⊞ DB</button>
         <button id="report-btn" class="btn hud-hide-sm auth-only">REPORT</button>
@@ -70,6 +52,14 @@
         <button id="login-btn" class="btn" style="font-size:10px;margin-left:4px;">LOGIN</button>
     </div>
 </header>
+<nav class="tab-bar">
+    <div class="tab-group">
+        <button class="tab-btn active" data-tab="threat">THREAT MAP</button>
+        <button class="tab-btn" data-tab="security" id="tab-btn-security">SECURITY CTR</button>
+        <button class="tab-btn" data-tab="proxy" id="tab-btn-proxy">PROXY MONITOR</button>
+        <button class="tab-btn" data-tab="network" id="tab-btn-network">NETWORK MAP</button>
+    </div>
+</nav>
 
 <!-- SETTINGS MODAL -->
 <div id="settings-modal" class="modal hidden">
@@ -162,13 +152,8 @@
 <!-- ================================================================ -->
 <main id="tab-threat" class="grid">
     <section class="panel red" id="lan-panel">
-        <div class="ph"><span>◤ LOCAL NETWORK</span><button class="btn-fullscreen" data-target="lan-panel" title="Fullscreen">⛶</button><button id="add-switch-btn" class="btn" style="font-size:9px;padding:2px 7px;margin-left:4px;">+ SW</button><span class="chip" id="net-count">0</span></div>
+        <div class="ph"><span>◤ LOCAL NETWORK</span><button class="btn-fullscreen" data-target="lan-panel" title="Fullscreen">⛶</button><button id="net-search-btn" class="btn" style="font-size:10px;padding:2px 7px;margin-left:4px;" title="Search devices">⌕</button><button id="add-switch-btn" class="btn" style="font-size:9px;padding:2px 7px;margin-left:4px;">+ SW</button><span class="chip" id="net-count">0</span></div>
         <div id="net-list" class="scroll"></div>
-    </section>
-
-    <section class="panel red" id="users-panel">
-        <div class="ph"><span>◤ USERS</span><span class="chip" id="users-count">0</span></div>
-        <div id="users-list" class="scroll"></div>
     </section>
 
     <section class="panel yellow globe-panel" id="globe-panel">
@@ -191,8 +176,27 @@
     </section>
 
     <section class="panel green" id="countries-panel">
+        <div class="status-strip">
+            <div class="status-strip-cell">
+                <span class="lbl">ATTACKS</span>
+                <span class="val danger" id="hud-attacks">0</span>
+            </div>
+            <div class="status-strip-cell">
+                <span class="lbl">LAN</span>
+                <span class="val" id="hud-lan">0 / 0</span>
+            </div>
+            <div class="status-strip-cell">
+                <span class="lbl">SENTINEL</span>
+                <span class="val" id="hud-sentinel">OFF</span>
+            </div>
+        </div>
         <div class="ph"><span>◤ TOP COUNTRIES</span><span class="chip" id="cty-count">0</span></div>
         <div id="country-list" class="scroll"></div>
+    </section>
+
+    <section class="panel" id="users-panel">
+        <div class="ph"><span>◤ USERS</span><span class="chip" id="users-count">0</span></div>
+        <div id="users-list" class="scroll"></div>
     </section>
 
     <section class="panel purple" id="log-panel">
@@ -201,7 +205,15 @@
     </section>
 
     <section class="panel grey">
-        <div class="ph"><span>◤ ATTACK HISTORY</span></div>
+        <div class="ph" style="gap:6px;">
+            <span>◤ ATTACK HISTORY</span>
+            <div style="display:flex;gap:3px;margin-left:auto;">
+                <button class="hist-filter-btn active" data-filter="all" style="font-size:9px;padding:1px 6px;border:1px solid #14333a;background:#0e2228;color:var(--accent);cursor:pointer;letter-spacing:1px;">ALL</button>
+                <button class="hist-filter-btn" data-filter="fail2ban" style="font-size:9px;padding:1px 6px;border:1px solid #14333a;background:#02060a;color:#4d7479;cursor:pointer;letter-spacing:1px;">F2B</button>
+                <button class="hist-filter-btn" data-filter="http" style="font-size:9px;padding:1px 6px;border:1px solid #14333a;background:#02060a;color:#4d7479;cursor:pointer;letter-spacing:1px;">HTTP</button>
+                <button class="hist-filter-btn" data-filter="https" style="font-size:9px;padding:1px 6px;border:1px solid #14333a;background:#02060a;color:#4d7479;cursor:pointer;letter-spacing:1px;">HTTPS</button>
+            </div>
+        </div>
         <div id="attack-hist" class="scroll"></div>
     </section>
 </main>
@@ -442,9 +454,11 @@
         <div class="ph" style="margin-bottom:0;padding-bottom:8px;">
             <span>◤ DATABASE VIEWER</span>
             <div style="display:flex;gap:8px;align-items:center;">
-                <button class="chip" id="dbv-tab-attacks"  onclick="dbvSwitch('attacks')"    style="cursor:pointer;border:none;">ATTACKS</button>
-                <button class="chip" id="dbv-tab-ban_history" onclick="dbvSwitch('ban_history')" style="cursor:pointer;border:none;">BAN HISTORY</button>
-                <button class="chip" id="dbv-tab-devices"  onclick="dbvSwitch('devices')"   style="cursor:pointer;border:none;">DEVICES</button>
+                <button class="chip" id="dbv-tab-attacks"      onclick="dbvSwitch('attacks')"      style="cursor:pointer;border:none;">ATTACKS</button>
+                <button class="chip" id="dbv-tab-ban_history"  onclick="dbvSwitch('ban_history')"  style="cursor:pointer;border:none;">BAN HISTORY</button>
+                <button class="chip" id="dbv-tab-devices"      onclick="dbvSwitch('devices')"      style="cursor:pointer;border:none;">DEVICES</button>
+                <button class="chip" id="dbv-tab-active_users" onclick="dbvSwitch('active_users')" style="cursor:pointer;border:none;">USERS</button>
+                <button class="chip" id="dbv-tab-logs"         onclick="dbvSwitch('logs')"         style="cursor:pointer;border:none;">LOGS</button>
                 <button class="btn ghost" id="db-viewer-close" style="margin-left:8px;">✕</button>
             </div>
         </div>
@@ -463,6 +477,23 @@
             <button class="btn ghost" id="dbv-prev" onclick="dbvPage(-1)" style="font-size:10px;padding:2px 8px;">◀ PREV</button>
             <span id="dbv-page-info" style="color:var(--muted);font-size:10px;flex:1;text-align:center;"></span>
             <button class="btn ghost" id="dbv-next" onclick="dbvPage(1)"  style="font-size:10px;padding:2px 8px;">NEXT ▶</button>
+        </div>
+    </div>
+</div>
+
+<!-- NETWORK SEARCH MODAL -->
+<div id="net-search-modal" class="modal hidden">
+    <div class="modal-box" style="width:520px;max-height:80vh;display:flex;flex-direction:column;">
+        <div class="ph"><span>◤ DEVICE SEARCH</span><button class="btn ghost" id="net-search-close">✕</button></div>
+        <div style="padding:10px 12px;border-bottom:1px solid #0e2c30;">
+            <input id="net-search-input" type="text" placeholder="Search by IP, MAC, hostname…"
+                style="width:100%;background:#02060a;border:1px solid #14333a;color:var(--fg);padding:6px 10px;font-family:inherit;font-size:11px;outline:none;letter-spacing:0.5px;">
+        </div>
+        <div id="net-search-results" class="scroll" style="flex:1;max-height:340px;"></div>
+        <div style="padding:8px 12px;border-top:1px solid #0e2c30;display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn" id="ns-refresh-btn" style="font-size:10px;">↺ REFRESH DEVICES</button>
+            <button class="btn" id="ns-scan-btn" style="font-size:10px;">⊕ PORT SCAN SELECTED</button>
+            <button class="btn" id="ns-export-btn" style="font-size:10px;">⬇ EXPORT CSV</button>
         </div>
     </div>
 </div>
