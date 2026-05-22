@@ -122,6 +122,18 @@ def _translate(event: dict):
                         f"({event.get('country','?')})"),
             "details": event,
         }
+    if t == "service":
+        state = event.get("state", "down")
+        name = event.get("service_name", event.get("service_id", "?"))
+        target = event.get("target") or event.get("host", "")
+        stype = event.get("service_type", "http")
+        return {
+            "plugin": "service_monitor",
+            "check_name": f"{stype}_check",
+            "status": "ok" if state == "up" else "active",
+            "message": f"service {name} ({target}) is {state.upper()}",
+            "details": event,
+        }
     if t == "device":
         state = event.get("state")
         mac = (event.get("mac") or "").lower()

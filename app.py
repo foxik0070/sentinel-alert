@@ -171,6 +171,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(tasks.periodic_collector(_broadcast_queue)),
         asyncio.create_task(tasks.enrich_unknown_isp(_broadcast_queue)),
         asyncio.create_task(tasks.periodic_who_collector(_broadcast_queue)),
+        asyncio.create_task(_svc_bg_loop()),
     ]
     _log_buffer.append({"type": "log", "level": "good", "source": "system",
                         "ts": datetime.now().isoformat(), "msg": "Sentinel-Alert online"})
@@ -832,22 +833,127 @@ async def sniproxy_ban(payload: dict = Body(...)):
     return {"ok": True}
 
 
-# ── Domain / Service Monitor ──────────────────────────────────────────────────
+# ── Service Monitor ───────────────────────────────────────────────────────────
 
-_DOMAINS_PATH = os.path.join(BASE_DIR, "data", "domains.json")
+import uuid as _uuid_mod
 
-def _load_domains():
+_SVC_PATH     = os.path.join(BASE_DIR, "data", "services.json")
+_SVC_SETTINGS_PATH = os.path.join(BASE_DIR, "data", "svc_settings.json")
+
+def _load_svc_settings() -> dict:
     try:
-        with open(_DOMAINS_PATH) as f:
+        with open(_SVC_SETTINGS_PATH) as f:
             return _json_mod.load(f)
+    except Exception:
+        return {}
+
+def _save_svc_settings(cfg: dict):
+    with open(_SVC_SETTINGS_PATH, "w") as f:
+        _json_mod.dump(cfg, f, indent=2)
+
+_svc_cfg = _load_svc_settings()
+_svc_interval: int = int(_svc_cfg.get("interval_min", 5)) * 60
+
+def _load_services() -> list:
+    if os.path.exists(_SVC_PATH):
+        try:
+            with open(_SVC_PATH) as f:
+                return _json_mod.load(f)
+        except Exception:
+            return []
+    # Migrate from old domains.json
+    old_path = os.path.join(os.path.dirname(_SVC_PATH), "domains.json")
+    if os.path.exists(old_path):
+        try:
+            with open(old_path) as f:
+                old = _json_mod.load(f)
+            services = [_migrate_domain(d) for d in old]
+            _save_services(services)
+            return services
+        except Exception:
+            pass
+    return []
+
+def _migrate_domain(d: dict) -> dict:
+    url = d.get("url", "")
+    return {
+        "id": str(_uuid_mod.uuid4()), "name": d.get("name", url),
+        "type": "http", "target": url, "host": "", "port": None,
+        "method": "GET", "expected_status": 200, "expected_text": "",
+        "dns_query": "", "dns_server": "", "heartbeat_interval": 300, "enabled": True,
+    }
+
+def _save_services(services: list):
+    os.makedirs(os.path.dirname(_SVC_PATH), exist_ok=True)
+    with open(_SVC_PATH, "w") as f:
+        _json_mod.dump(services, f, indent=2)
+
+def _svc_db_store(service_id: str, status: str, response_ms, message: str = ""):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO service_checks (service_id, ts, status, response_ms, message) VALUES (?,?,?,?,?)",
+            (service_id, int(time.time()), status, response_ms, message),
+        )
+        cutoff = int(time.time()) - 30 * 86400
+        cur.execute("DELETE FROM service_checks WHERE service_id=? AND ts<?", (service_id, cutoff))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"svc_db_store: {e}")
+
+def _svc_db_history(service_id: str, limit: int = 50) -> list:
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT ts, status, response_ms FROM service_checks WHERE service_id=? ORDER BY ts DESC LIMIT ?",
+            (service_id, limit),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        return [{"ts": r[0], "status": r[1], "response_ms": r[2]} for r in reversed(rows)]
     except Exception:
         return []
 
-def _save_domains(data):
-    with open(_DOMAINS_PATH, "w") as f:
-        _json_mod.dump(data, f, indent=2)
+def _svc_uptime(service_id: str, hours: int) -> float | None:
+    try:
+        cutoff = int(time.time()) - hours * 3600
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT status FROM service_checks WHERE service_id=? AND ts>=?",
+            (service_id, cutoff),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        if not rows:
+            return None
+        up = sum(1 for r in rows if r[0] == "up")
+        return round(up / len(rows) * 100, 1)
+    except Exception:
+        return None
 
-def _check_ssl(hostname: str, port: int = 443) -> dict:
+def _svc_last(service_id: str) -> dict | None:
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT ts, status, response_ms, message FROM service_checks WHERE service_id=? ORDER BY ts DESC LIMIT 1",
+            (service_id,),
+        )
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {"ts": row[0], "status": row[1], "response_ms": row[2], "message": row[3]}
+    except Exception:
+        return None
+
+# ── Check functions ────────────────────────────────────────────────────────────
+
+def _check_ssl_sync(hostname: str, port: int = 443) -> dict:
     ctx = ssl.create_default_context()
     try:
         with socket.create_connection((hostname, port), timeout=8) as sock:
@@ -873,75 +979,308 @@ def _check_ssl(hostname: str, port: int = 443) -> dict:
     except Exception as e:
         return {"valid": False, "error": str(e)}
 
-async def _check_domain(entry: dict) -> dict:
+async def _check_http(svc: dict) -> dict:
     import urllib.request, urllib.error
-    url = entry["url"].rstrip("/")
-    result = {**entry, "checked_at": datetime.now(timezone.utc).isoformat()}
+    from urllib.parse import urlparse as _up
+    url = (svc.get("target") or "").rstrip("/")
+    method = (svc.get("method") or "GET").upper()
+    exp_status = int(svc.get("expected_status") or 200)
+    exp_text = svc.get("expected_text") or ""
+    result: dict = {"id": svc["id"], "type": svc.get("type", "http")}
     t0 = time.monotonic()
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "sentinel-monitor/1.0"}, method="GET")
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            result["status_code"] = resp.status
-            result["alive"] = resp.status < 500
-            result["redirect_url"] = resp.url if resp.url != url else None
+        loop = asyncio.get_event_loop()
+        def _do():
+            req = urllib.request.Request(url, headers={"User-Agent": "sentinel-monitor/1.0"}, method=method)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                body = resp.read(8192).decode("utf-8", errors="replace")
+                return resp.status, resp.url, body
+        status_code, final_url, body = await loop.run_in_executor(None, _do)
+        result["status_code"] = status_code
+        result["redirect_url"] = final_url if final_url != url else None
+        status_ok = status_code == exp_status
+        text_ok = (not exp_text) or (exp_text in body)
+        result["up"] = status_ok and text_ok
+        if not text_ok:
+            result["message"] = f"text '{exp_text}' not found in body"
+        elif not status_ok:
+            result["message"] = f"expected {exp_status}, got {status_code}"
+        else:
+            result["message"] = f"HTTP {status_code}"
     except urllib.error.HTTPError as e:
         result["status_code"] = e.code
-        result["alive"] = e.code < 500
+        result["up"] = False
+        result["message"] = f"HTTP {e.code}"
     except Exception as e:
-        result["status_code"] = None
-        result["alive"] = False
-        result["error"] = str(e)
+        result["up"] = False
+        result["message"] = str(e)
     result["response_ms"] = round((time.monotonic() - t0) * 1000)
-
     try:
-        from urllib.parse import urlparse as _up
         p = _up(url)
-        result["scheme"] = p.scheme
-        result["host"] = p.hostname
-        result["port"] = p.port or (443 if p.scheme == "https" else 80)
         if p.scheme == "https":
-            result["ssl"] = _check_ssl(p.hostname, p.port or 443)
+            loop = asyncio.get_event_loop()
+            result["ssl"] = await loop.run_in_executor(None, _check_ssl_sync, p.hostname, p.port or 443)
     except Exception:
         pass
     return result
 
+async def _check_tcp(svc: dict) -> dict:
+    host = svc.get("host") or svc.get("target") or ""
+    port = int(svc.get("port") or 80)
+    result: dict = {"id": svc["id"], "type": "tcp"}
+    t0 = time.monotonic()
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=5)
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        result["up"] = True
+        result["message"] = f"port {port} open"
+    except asyncio.TimeoutError:
+        result["up"] = False
+        result["message"] = "timeout"
+    except Exception as e:
+        result["up"] = False
+        result["message"] = str(e)
+    result["response_ms"] = round((time.monotonic() - t0) * 1000)
+    return result
 
-@app.get("/api/domains")
-async def domains_list():
-    return _load_domains()
+async def _check_ping(svc: dict) -> dict:
+    host = svc.get("host") or svc.get("target") or ""
+    result: dict = {"id": svc["id"], "type": "ping"}
+    t0 = time.monotonic()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ping", "-c", "1", "-W", "2", host,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        ret = await asyncio.wait_for(proc.wait(), timeout=6)
+        result["up"] = (ret == 0)
+        result["message"] = "reachable" if ret == 0 else "no response"
+    except asyncio.TimeoutError:
+        result["up"] = False
+        result["message"] = "timeout"
+    except Exception as e:
+        result["up"] = False
+        result["message"] = str(e)
+    result["response_ms"] = round((time.monotonic() - t0) * 1000)
+    return result
 
+async def _check_dns(svc: dict) -> dict:
+    query = svc.get("dns_query") or svc.get("host") or svc.get("target") or ""
+    dns_server = svc.get("dns_server") or ""
+    result: dict = {"id": svc["id"], "type": "dns"}
+    t0 = time.monotonic()
+    try:
+        if dns_server:
+            proc = await asyncio.create_subprocess_exec(
+                "dig", "+short", f"@{dns_server}", query,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            out = stdout.decode().strip()
+            result["up"] = bool(out)
+            result["message"] = out.split("\n")[0][:80] if out else "no answer"
+        else:
+            loop = asyncio.get_event_loop()
+            addrs = await asyncio.wait_for(
+                loop.run_in_executor(None, socket.getaddrinfo, query, None), timeout=5
+            )
+            result["up"] = bool(addrs)
+            result["message"] = addrs[0][4][0] if addrs else "no answer"
+    except asyncio.TimeoutError:
+        result["up"] = False
+        result["message"] = "timeout"
+    except Exception as e:
+        result["up"] = False
+        result["message"] = str(e)
+    result["response_ms"] = round((time.monotonic() - t0) * 1000)
+    return result
 
-@app.post("/api/domains")
-async def domains_add(payload: dict = Body(...)):
-    url = (payload.get("url") or "").strip()
-    name = (payload.get("name") or url).strip()
-    if not url:
-        return JSONResponse({"error": "url required"}, status_code=400)
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
-    domains = _load_domains()
-    if any(d["url"] == url for d in domains):
-        return JSONResponse({"error": "already exists"}, status_code=409)
-    domains.append({"url": url, "name": name})
-    _save_domains(domains)
-    return {"ok": True}
+_heartbeat_last: dict[str, float] = {}
 
+async def _check_heartbeat(svc: dict) -> dict:
+    svc_id = svc["id"]
+    interval = int(svc.get("heartbeat_interval") or 300)
+    result: dict = {"id": svc_id, "type": "heartbeat"}
+    last = _heartbeat_last.get(svc_id)
+    if last:
+        age = int(time.time() - last)
+        result["up"] = age <= interval * 1.5
+        result["message"] = f"last ping {age}s ago (max {int(interval * 1.5)}s)"
+        result["response_ms"] = age * 1000
+    else:
+        result["up"] = False
+        result["message"] = "no heartbeat received yet"
+        result["response_ms"] = None
+    return result
 
-@app.delete("/api/domains/{idx}")
-async def domains_delete(idx: int):
-    domains = _load_domains()
-    if idx < 0 or idx >= len(domains):
+async def _run_check(svc: dict) -> dict:
+    t = svc.get("type", "http")
+    if t in ("http", "https"):
+        return await _check_http(svc)
+    if t == "tcp":
+        return await _check_tcp(svc)
+    if t == "ping":
+        return await _check_ping(svc)
+    if t == "dns":
+        return await _check_dns(svc)
+    if t == "heartbeat":
+        return await _check_heartbeat(svc)
+    return {"id": svc["id"], "up": False, "message": f"unknown type: {t}"}
+
+_svc_prev_state: dict[str, str] = {}
+
+async def _store_check_result(svc: dict, result: dict):
+    svc_id = svc["id"]
+    up = result.get("up", False)
+    status = "up" if up else "down"
+    msg = result.get("message") or ""
+    rms = result.get("response_ms")
+    _svc_db_store(svc_id, status, rms, msg)
+    # Update last_result in services.json
+    services = _load_services()
+    for s in services:
+        if s["id"] == svc_id:
+            s["last_result"] = {k: v for k, v in result.items() if k != "id"}
+            s["last_checked"] = int(time.time())
+            break
+    _save_services(services)
+    # Bridge notification on state change
+    prev = _svc_prev_state.get(svc_id)
+    if prev is not None and prev != status:
+        await bridge.forward({
+            "type": "service",
+            "service_id": svc_id,
+            "service_name": svc.get("name", svc_id),
+            "service_type": svc.get("type", "http"),
+            "target": svc.get("target") or svc.get("host", ""),
+            "state": status,
+            "message": msg,
+        })
+    _svc_prev_state[svc_id] = status
+
+async def _svc_bg_loop():
+    global _svc_interval
+    while True:
+        await asyncio.sleep(_svc_interval)
+        try:
+            services = _load_services()
+            enabled = [s for s in services if s.get("enabled", True)]
+            if enabled:
+                results = await asyncio.gather(*[_run_check(s) for s in enabled], return_exceptions=True)
+                for svc, res in zip(enabled, results):
+                    if isinstance(res, Exception):
+                        res = {"id": svc["id"], "up": False, "message": str(res)}
+                    await _store_check_result(svc, res)
+        except Exception as e:
+            print(f"svc_bg_loop: {e}")
+
+# ── Service API ───────────────────────────────────────────────────────────────
+
+@app.get("/api/services")
+async def services_list():
+    services = _load_services()
+    out = []
+    for s in services:
+        entry = dict(s)
+        entry["last_check_db"] = _svc_last(s["id"])
+        entry["uptime_24h"]    = _svc_uptime(s["id"], 24)
+        entry["uptime_30d"]    = _svc_uptime(s["id"], 720)
+        entry["spark"]         = _svc_db_history(s["id"], 50)
+        out.append(entry)
+    return out
+
+@app.post("/api/services")
+async def services_add(payload: dict = Body(...)):
+    stype = (payload.get("type") or "http").lower()
+    name  = (payload.get("name") or "").strip()
+    if stype in ("http", "https"):
+        target = (payload.get("target") or "").strip()
+        if not target:
+            return JSONResponse({"error": "target required"}, status_code=400)
+        if not target.startswith(("http://", "https://")):
+            target = f"{stype}://" + target
+        payload["target"] = target
+    elif stype in ("tcp", "ping", "dns"):
+        if not (payload.get("host") or "").strip():
+            return JSONResponse({"error": "host required"}, status_code=400)
+    svc = {
+        "id": str(_uuid_mod.uuid4()), "name": name or payload.get("target") or payload.get("host", ""),
+        "type": stype, "target": payload.get("target", ""), "host": payload.get("host", ""),
+        "port": payload.get("port"), "method": payload.get("method", "GET"),
+        "expected_status": int(payload.get("expected_status") or 200),
+        "expected_text": payload.get("expected_text", ""),
+        "dns_query": payload.get("dns_query", ""), "dns_server": payload.get("dns_server", ""),
+        "heartbeat_interval": int(payload.get("heartbeat_interval") or 300),
+        "enabled": True,
+    }
+    services = _load_services()
+    services.append(svc)
+    _save_services(services)
+    return {"ok": True, "id": svc["id"]}
+
+@app.delete("/api/services/{sid}")
+async def services_delete(sid: str):
+    services = _load_services()
+    new = [s for s in services if s["id"] != sid]
+    if len(new) == len(services):
         return JSONResponse({"error": "not found"}, status_code=404)
-    domains.pop(idx)
-    _save_domains(domains)
+    _save_services(new)
+    _svc_prev_state.pop(sid, None)
+    _heartbeat_last.pop(sid, None)
     return {"ok": True}
 
+@app.post("/api/services/check")
+async def services_check_all():
+    services = _load_services()
+    enabled = [s for s in services if s.get("enabled", True)]
+    results = await asyncio.gather(*[_run_check(s) for s in enabled], return_exceptions=True)
+    out = []
+    for svc, res in zip(enabled, results):
+        if isinstance(res, Exception):
+            res = {"id": svc["id"], "up": False, "message": str(res)}
+        await _store_check_result(svc, res)
+        out.append(res)
+    return out
 
-@app.post("/api/domains/check")
-async def domains_check():
-    domains = _load_domains()
-    results = await asyncio.gather(*[_check_domain(d) for d in domains])
-    return list(results)
+@app.post("/api/services/{sid}/check")
+async def services_check_one(sid: str):
+    services = _load_services()
+    svc = next((s for s in services if s["id"] == sid), None)
+    if not svc:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    res = await _run_check(svc)
+    await _store_check_result(svc, res)
+    return res
+
+@app.get("/api/services/settings")
+async def svc_settings_get():
+    cfg = _load_svc_settings()
+    return {"interval_min": int(cfg.get("interval_min", 5))}
+
+@app.post("/api/services/settings")
+async def svc_settings_post(payload: dict = Body(...)):
+    global _svc_interval
+    cfg = _load_svc_settings()
+    if "interval_min" in payload:
+        mins = max(1, min(60, int(payload["interval_min"])))
+        cfg["interval_min"] = mins
+        _svc_interval = mins * 60
+    _save_svc_settings(cfg)
+    return {"ok": True, "interval_min": cfg["interval_min"]}
+
+@app.post("/api/heartbeat/{sid}")
+async def heartbeat_ping(sid: str):
+    services = _load_services()
+    if not any(s["id"] == sid and s.get("type") == "heartbeat" for s in services):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    _heartbeat_last[sid] = time.time()
+    return {"ok": True, "ts": int(_heartbeat_last[sid])}
 
 
 @app.exception_handler(404)

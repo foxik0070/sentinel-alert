@@ -72,6 +72,18 @@ def init():
         )
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS service_checks (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            service_id  TEXT NOT NULL,
+            ts          INTEGER NOT NULL,
+            status      TEXT NOT NULL,
+            response_ms INTEGER,
+            message     TEXT
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_sc_sid_ts ON service_checks(service_id, ts)")
+
     conn.commit()
     conn.close()
     print(f"DB initialized at {DB_PATH}")

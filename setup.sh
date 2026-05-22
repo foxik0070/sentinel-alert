@@ -479,6 +479,8 @@ fi
 # ── Data directory and default files ──────────────────────────────────────
 mkdir -p "$APP_DIR/data"
 [[ -f "$APP_DIR/data/domains.json" ]] || echo '[]' > "$APP_DIR/data/domains.json"
+[[ -f "$APP_DIR/data/services.json" ]] || echo '[]' > "$APP_DIR/data/services.json"
+[[ -f "$APP_DIR/data/svc_settings.json" ]] || echo '{"interval_min":5}' > "$APP_DIR/data/svc_settings.json"
 
 # ── SSH key for collector ──────────────────────────────────────────────────
 echo ""

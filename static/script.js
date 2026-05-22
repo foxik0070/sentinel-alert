@@ -2283,7 +2283,7 @@ const NODE_TYPES = {
     network: { shape: 'rect',    w: 28, h: 16, color: '#166534', stroke: '#15803d' },
 };
 
-const _NET_RECT_TYPES = new Set(['switch', 'router', 'ap', 'network']);
+const _NET_RECT_TYPES = new Set(['switch', 'router', 'ap', 'network', 'tv']);
 
 function netNodeColor(n) {
     if (n.type === 'cloud') return NODE_TYPES.cloud.color;
@@ -2590,7 +2590,7 @@ function netRender() {
                 .attr('width', cfg.w).attr('height', cfg.h)
                 .attr('rx', 2).style('fill', netNodeColor(d)).style('stroke', netNodeStroke(d))
                 .style('stroke-width', devCfg.is_isp ? 2.5 : 1.5);
-            const _RECT_ICON = { switch: 'SW', router: 'R', ap: 'AP', network: 'N' };
+            const _RECT_ICON = { switch: 'SW', router: 'R', ap: 'AP', network: 'N', tv: 'TV' };
             const icon = _RECT_ICON[d.type];
             if (icon) g.append('text').attr('y', 4).style('font-size', '7px').style('font-weight', '800')
                 .style('fill', devCfg.is_isp ? '#0d1e26' : '#001830').style('text-anchor', 'middle')
@@ -3153,25 +3153,53 @@ $('ns-scan-btn').addEventListener('click', () => {
 // SERVICES TAB — domain / HTTP / HTTPS monitor
 // ================================================================
 
+// ── Service Monitor ───────────────────────────────────────────────────────────
+
 let _svcInitDone = false;
-let _svcResults  = [];
+let _svcData     = [];  // full list from /api/services
 
 function svcInit() {
-    if (_svcInitDone) { svcRender(); return; }
+    if (_svcInitDone) { svcLoad(); return; }
     _svcInitDone = true;
 
-    document.getElementById('tab-services').style.display = 'flex';
-
     $('svc-check-btn').addEventListener('click', svcCheckAll);
-    $('svc-add-btn').addEventListener('click', svcAdd);
-    $('svc-add-url').addEventListener('keydown', e => { if (e.key === 'Enter') svcAdd(); });
+
+    const intervalSel = $('svc-interval');
+    fetch('/api/services/settings').then(r => r.json()).then(cfg => {
+        intervalSel.value = String(cfg.interval_min || 5);
+    }).catch(() => {});
+    intervalSel.addEventListener('change', () => {
+        fetch('/api/services/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ interval_min: Number(intervalSel.value) }),
+        });
+    });
+
+    $('svc-add-btn').addEventListener('click', () => {
+        const f = $('svc-add-form');
+        f.style.display = f.style.display === 'none' ? 'flex' : 'none';
+    });
+    $('svc-cancel-btn').addEventListener('click', () => { $('svc-add-form').style.display = 'none'; });
+    $('svc-submit-btn').addEventListener('click', svcSubmitAdd);
+    $('svc-f-url').addEventListener('keydown', e => { if (e.key === 'Enter') svcSubmitAdd(); });
+    $('svc-type').addEventListener('change', _svcUpdateFormFields);
+    _svcUpdateFormFields();
 
     svcLoad();
 }
 
+function _svcUpdateFormFields() {
+    const t = $('svc-type').value;
+    $('svc-f-http').style.display   = (t === 'http') ? 'flex' : 'none';
+    $('svc-f-host').style.display   = (t === 'tcp' || t === 'ping') ? 'flex' : 'none';
+    $('svc-f-portrow').style.display = (t === 'tcp') ? 'flex' : 'none';
+    $('svc-f-dns').style.display    = (t === 'dns') ? 'flex' : 'none';
+    $('svc-f-hb').style.display     = (t === 'heartbeat') ? 'flex' : 'none';
+}
+
 async function svcLoad() {
-    const domains = await fetch('/api/domains').then(r => r.json()).catch(() => []);
-    _svcResults = domains.map(d => ({ ...d }));
+    _svcData = await fetch('/api/services').then(r => r.json()).catch(() => []);
     svcRender();
 }
 
@@ -3181,95 +3209,186 @@ async function svcCheckAll() {
     btn.disabled = true;
     $('svc-status').textContent = '';
     try {
-        _svcResults = await fetch('/api/domains/check', { method: 'POST' }).then(r => r.json());
-        $('svc-status').textContent = `Last check: ${new Date().toLocaleTimeString()}`;
+        await fetch('/api/services/check', { method: 'POST' });
+        await svcLoad();
+        $('svc-status').textContent = `Checked: ${new Date().toLocaleTimeString()}`;
     } catch (e) {
         $('svc-status').textContent = 'Check failed.';
     }
     btn.textContent = '⟳ CHECK ALL';
     btn.disabled = false;
-    svcRender();
 }
 
-async function svcAdd() {
-    const url  = ($('svc-add-url').value  || '').trim();
-    const name = ($('svc-add-name').value || '').trim();
-    if (!url) return;
-    const res = await fetch('/api/domains', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, name })
-    });
-    if (res.ok) {
-        $('svc-add-url').value  = '';
-        $('svc-add-name').value = '';
-        await svcLoad();
-        svcCheckAll();
-    } else {
-        const j = await res.json().catch(() => ({}));
-        $('svc-status').textContent = j.error || 'Error adding domain.';
-    }
-}
-
-async function svcDelete(idx) {
-    if (!confirm('Remove this service?')) return;
-    await fetch(`/api/domains/${idx}`, { method: 'DELETE' });
+async function svcCheckOne(sid) {
+    await fetch(`/api/services/${sid}/check`, { method: 'POST' });
     await svcLoad();
 }
 
-function svcStatusBadge(r) {
-    if (r.alive === undefined) return '<span style="color:#4d7479;">—</span>';
-    const code = r.status_code ? ` ${r.status_code}` : '';
-    return r.alive
-        ? `<span style="color:#22c55e;font-weight:700;">●${code}</span>`
-        : `<span style="color:#ef4444;font-weight:700;">✖${code}</span>`;
+async function svcSubmitAdd() {
+    const type = $('svc-type').value;
+    const name = ($('svc-f-name').value || '').trim();
+    const payload = { type, name };
+    if (type === 'http') {
+        payload.target = ($('svc-f-url').value || '').trim();
+        payload.method = $('svc-f-method').value;
+        payload.expected_status = Number($('svc-f-status').value) || 200;
+        payload.expected_text   = ($('svc-f-text').value || '').trim();
+    } else if (type === 'tcp' || type === 'ping') {
+        payload.host = ($('svc-f-hostval').value || '').trim();
+        if (type === 'tcp') payload.port = Number($('svc-f-port').value) || 80;
+    } else if (type === 'dns') {
+        payload.dns_query  = ($('svc-f-dnsq').value || '').trim();
+        payload.dns_server = ($('svc-f-dnssrv').value || '').trim();
+        payload.host = payload.dns_query;
+    } else if (type === 'heartbeat') {
+        payload.heartbeat_interval = Number($('svc-f-hbint').value) || 300;
+    }
+    const res = await fetch('/api/services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+        $('svc-add-form').style.display = 'none';
+        ['svc-f-name','svc-f-url','svc-f-text','svc-f-hostval','svc-f-port','svc-f-dnsq','svc-f-dnssrv'].forEach(id => {
+            const el = $(id); if (el) el.value = '';
+        });
+        const j = await res.json();
+        await svcLoad();
+        svcCheckOne(j.id);
+    } else {
+        const j = await res.json().catch(() => ({}));
+        $('svc-status').textContent = j.error || 'Error.';
+    }
 }
 
-function svcSslBadge(r) {
-    if (!r.ssl) return r.scheme === 'https' ? '<span style="color:#ef4444;">✖</span>' : '<span style="color:#4d7479;">—</span>';
-    if (!r.ssl.valid) return `<span style="color:#ef4444;" title="${escape(r.ssl.error||'')}">✖ INVALID</span>`;
-    const days = r.ssl.days_left;
-    const col = days < 14 ? '#ef4444' : days < 30 ? '#fb923c' : '#22c55e';
-    return `<span style="color:${col};font-weight:700;">✔</span>`;
+async function svcDelete(sid) {
+    if (!confirm('Remove this service?')) return;
+    await fetch(`/api/services/${sid}`, { method: 'DELETE' });
+    await svcLoad();
 }
 
-function svcExpiryCell(r) {
-    if (!r.ssl?.valid) return '<span style="color:#4d7479;">—</span>';
-    const days = r.ssl.days_left;
-    const col = days < 14 ? '#ef4444' : days < 30 ? '#fb923c' : '#22c55e';
-    return `<span style="color:${col};" title="Valid until ${r.ssl.not_after}">${r.ssl.not_after} <span style="font-size:9px;">(${days}d)</span></span>`;
+// ── Render helpers ─────────────────────────────────────────────────────────────
+
+const _SVC_TYPE_COLOR = { http:'#38bdf8', https:'#38bdf8', tcp:'#b878ff', ping:'#2dffa1', dns:'#ffe83b', heartbeat:'#fb923c' };
+const _SVC_TYPE_LABEL = { http:'HTTP', https:'HTTP', tcp:'TCP', ping:'PING', dns:'DNS', heartbeat:'BEAT' };
+
+function _svcTypeBadge(type) {
+    const col = _SVC_TYPE_COLOR[type] || '#4d7479';
+    const lbl = _SVC_TYPE_LABEL[type] || type.toUpperCase();
+    return `<span style="background:${col}18;color:${col};border:1px solid ${col}44;padding:1px 5px;font-size:9px;font-weight:700;letter-spacing:1px;">${lbl}</span>`;
+}
+
+function _svcStatusBadge(svc) {
+    const lr = svc.last_result;
+    const ldb = svc.last_check_db;
+    if (!lr && !ldb) return '<span style="color:#4d7479;">—</span>';
+    const up = lr ? lr.up : (ldb?.status === 'up');
+    const code = lr?.status_code ? ` ${lr.status_code}` : '';
+    return up
+        ? `<span style="color:#22c55e;font-weight:700;">● UP${code}</span>`
+        : `<span style="color:#ef4444;font-weight:700;">✖ DOWN${code}</span>`;
+}
+
+function _svcRespCell(svc) {
+    const rms = svc.last_result?.response_ms ?? svc.last_check_db?.response_ms;
+    if (rms == null) return '<span style="color:#4d7479;">—</span>';
+    const col = rms < 200 ? '#22c55e' : rms < 800 ? '#ffe83b' : '#ef4444';
+    return `<span style="color:${col};">${rms} ms</span>`;
+}
+
+function _svcUptimeBadge(pct) {
+    if (pct == null) return '<span style="color:#4d7479;">—</span>';
+    const col = pct >= 99 ? '#22c55e' : pct >= 95 ? '#ffe83b' : '#ef4444';
+    return `<span style="color:${col};font-weight:700;">${pct}%</span>`;
+}
+
+function _svcSslCell(svc) {
+    const lr = svc.last_result;
+    if (!lr?.ssl) {
+        const isHttps = (svc.target || '').startsWith('https://');
+        return isHttps
+            ? '<span style="color:#ef4444;font-size:9px;">✖ no SSL data</span>'
+            : '<span style="color:#4d7479;">—</span>';
+    }
+    const s = lr.ssl;
+    if (!s.valid) return `<span style="color:#ef4444;font-size:9px;" title="${s.error||''}">✖ INVALID</span>`;
+    const col = s.days_left < 14 ? '#ef4444' : s.days_left < 30 ? '#fb923c' : '#22c55e';
+    const issuer = s.issuer_org || s.issuer_cn || '';
+    return `<span style="color:${col};">✔ ${s.not_after} <span style="font-size:9px;">(${s.days_left}d)</span></span>`
+        + (issuer ? `<br><span style="color:#4d7479;font-size:9px;">${issuer}</span>` : '');
+}
+
+function _svcTarget(svc) {
+    const t = svc.type;
+    if (t === 'http' || t === 'https') {
+        const url = svc.target || '';
+        return `<a href="${url}" target="_blank" rel="noopener" style="color:#38bdf8;text-decoration:none;max-width:220px;display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${url}</a>`;
+    }
+    if (t === 'tcp')  return `<span style="color:#cfe7ec;">${svc.host}:${svc.port}</span>`;
+    if (t === 'ping') return `<span style="color:#cfe7ec;">${svc.host}</span>`;
+    if (t === 'dns')  return `<span style="color:#cfe7ec;">${svc.dns_query || svc.host}${svc.dns_server ? ' @'+svc.dns_server : ''}</span>`;
+    if (t === 'heartbeat') return `<span style="color:#fb923c;font-size:9px;">POST /api/heartbeat/${svc.id}</span>`;
+    return '—';
+}
+
+function _svcSparkline(spark) {
+    if (!spark?.length) return '<span style="color:#4d7479;font-size:9px;">no data</span>';
+    const w = 3, gap = 1, maxH = 22, maxMs = 2000;
+    const bars = spark.map((p, i) => {
+        const up = p.status === 'up';
+        const h  = up ? Math.max(3, Math.round((Math.min(p.response_ms || 100, maxMs) / maxMs) * maxH)) : maxH;
+        const col = up ? (p.response_ms < 300 ? '#22c55e' : p.response_ms < 800 ? '#ffe83b' : '#fb923c') : '#ef4444';
+        return `<rect x="${i*(w+gap)}" y="${maxH-h}" width="${w}" height="${h}" fill="${col}" opacity="0.85"/>`;
+    });
+    return `<svg width="${spark.length*(w+gap)}" height="${maxH}" style="display:block;">${bars.join('')}</svg>`;
+}
+
+function _svcLastChecked(svc) {
+    const ts = svc.last_checked || svc.last_check_db?.ts;
+    if (!ts) return '<span style="color:#4d7479;">—</span>';
+    return `<span style="color:#4d7479;font-size:9px;">${new Date(ts*1000).toLocaleTimeString()}</span>`;
+}
+
+function _svcMsgRow(svc, cols) {
+    const lr  = svc.last_result;
+    const err = (lr && !lr.up) ? (lr.message || '') : '';
+    const san = lr?.ssl?.valid && lr.ssl.sans?.length
+        ? 'SAN: ' + lr.ssl.sans.map(s => `<span style="color:#38bdf8;">${s}</span>`).join(', ')
+        : '';
+    if (!err && !san) return '';
+    return `<tr style="border-bottom:1px solid #060e12;">
+        <td colspan="${cols}" style="padding:1px 8px 5px 18px;font-size:9px;">
+            ${err ? `<span style="color:#ef4444;">${err}</span>` : ''}
+            ${san}
+        </td>
+    </tr>`;
 }
 
 function svcRender() {
     const tbody = $('svc-tbody');
-    if (!_svcResults.length) {
-        tbody.innerHTML = '<tr><td colspan="8" style="padding:20px;text-align:center;color:#4d7479;">No services configured. Add a URL above.</td></tr>';
+    const COLS = 10;
+    if (!_svcData.length) {
+        tbody.innerHTML = `<tr><td colspan="${COLS}" style="padding:20px;text-align:center;color:#4d7479;">No services configured. Click + ADD SERVICE to start.</td></tr>`;
         return;
     }
-    tbody.innerHTML = _svcResults.map((r, i) => `
-        <tr style="border-bottom:1px solid #0a1418;transition:background .1s;" onmouseenter="this.style.background='#0a1418'" onmouseleave="this.style.background=''">
-            <td style="padding:7px 8px;color:#cfe7ec;font-weight:700;">${escape(r.name || r.url)}</td>
-            <td style="padding:7px 8px;color:#4d7479;font-size:10px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                <a href="${escape(r.url)}" target="_blank" rel="noopener" style="color:#38bdf8;text-decoration:none;">${escape(r.url)}</a>
-            </td>
-            <td style="padding:7px 8px;text-align:center;">${svcStatusBadge(r)}</td>
-            <td style="padding:7px 8px;text-align:right;color:#4d7479;">${r.response_ms !== undefined ? r.response_ms + ' ms' : '—'}</td>
-            <td style="padding:7px 8px;text-align:center;">${svcSslBadge(r)}</td>
-            <td style="padding:7px 8px;">${svcExpiryCell(r)}</td>
-            <td style="padding:7px 8px;color:#4d7479;font-size:10px;">${r.ssl?.issuer_org ? escape(r.ssl.issuer_org) : r.ssl?.issuer_cn ? escape(r.ssl.issuer_cn) : '—'}</td>
-            <td style="padding:7px 8px;text-align:center;">
-                <button class="btn" onclick="svcDelete(${i})" style="font-size:9px;padding:2px 6px;color:#ef4444;border-color:#ef4444;">✕</button>
+    tbody.innerHTML = _svcData.map(svc => `
+        <tr style="border-bottom:1px solid #0a1418;" onmouseenter="this.style.background='#0a1418'" onmouseleave="this.style.background=''">
+            <td style="padding:7px 8px;color:#cfe7ec;font-weight:700;white-space:nowrap;">${svc.name}</td>
+            <td style="padding:7px 8px;">${_svcTypeBadge(svc.type)}</td>
+            <td style="padding:7px 8px;font-size:10px;max-width:240px;">${_svcTarget(svc)}</td>
+            <td style="padding:7px 8px;text-align:center;">${_svcStatusBadge(svc)}</td>
+            <td style="padding:7px 8px;text-align:right;">${_svcRespCell(svc)}</td>
+            <td style="padding:7px 8px;text-align:center;">${_svcUptimeBadge(svc.uptime_24h)}</td>
+            <td style="padding:7px 8px;text-align:center;">${_svcUptimeBadge(svc.uptime_30d)}</td>
+            <td style="padding:7px 8px;font-size:10px;line-height:1.5;">${_svcSslCell(svc)}</td>
+            <td style="padding:7px 8px;">${_svcSparkline(svc.spark)}</td>
+            <td style="padding:5px 6px;text-align:right;white-space:nowrap;">
+                ${_svcLastChecked(svc)}
+                <button class="btn" onclick="svcCheckOne('${svc.id}')" style="font-size:9px;padding:2px 5px;margin-left:4px;" title="Check now">⟳</button>
+                <button class="btn" onclick="svcDelete('${svc.id}')" style="font-size:9px;padding:2px 5px;color:#ef4444;border-color:#ef4444;" title="Remove">✕</button>
             </td>
         </tr>
-        ${r.ssl?.valid && r.ssl.sans?.length ? `
-        <tr style="border-bottom:1px solid #060e12;">
-            <td colspan="8" style="padding:2px 8px 6px 24px;font-size:9px;color:#4d7479;">
-                SAN: ${r.ssl.sans.map(s => `<span style="color:#38bdf8;">${escape(s)}</span>`).join(', ')}
-            </td>
-        </tr>` : ''}
-        ${r.error ? `
-        <tr style="border-bottom:1px solid #060e12;">
-            <td colspan="8" style="padding:2px 8px 6px 24px;font-size:9px;color:#ef4444;">${escape(r.error)}</td>
-        </tr>` : ''}
+        ${_svcMsgRow(svc, COLS)}
     `).join('');
 }

@@ -459,35 +459,117 @@
 <!-- ================================================================ -->
 <main id="tab-services" class="svc-view hidden">
 
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <!-- toolbar -->
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <span style="font-size:11px;font-weight:800;letter-spacing:2px;color:#4d7479;">◤ SERVICE MONITOR</span>
         <button class="btn primary" id="svc-check-btn" style="font-size:10px;">⟳ CHECK ALL</button>
         <span id="svc-status" style="font-size:10px;color:#4d7479;"></span>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-            <input id="svc-add-url" type="text" placeholder="https://example.com"
-                style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:5px 10px;font-family:inherit;font-size:11px;outline:none;width:220px;letter-spacing:0.5px;">
-            <input id="svc-add-name" type="text" placeholder="Name (optional)"
-                style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:5px 10px;font-family:inherit;font-size:11px;outline:none;width:140px;">
-            <button class="btn" id="svc-add-btn" style="font-size:10px;">+ ADD</button>
+            <span style="font-size:10px;color:#4d7479;">INTERVAL</span>
+            <select id="svc-interval" style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:4px 6px;font-family:inherit;font-size:10px;outline:none;">
+                <option value="1">1 min</option>
+                <option value="2">2 min</option>
+                <option value="5" selected>5 min</option>
+                <option value="10">10 min</option>
+                <option value="15">15 min</option>
+                <option value="30">30 min</option>
+                <option value="60">60 min</option>
+            </select>
+            <button class="btn" id="svc-add-btn" style="font-size:10px;">+ ADD SERVICE</button>
         </div>
     </div>
 
+    <!-- add form (hidden by default) -->
+    <div id="svc-add-form" style="display:none;background:#020c10;border:1px solid #0e2c30;padding:12px;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div style="display:flex;flex-direction:column;gap:4px;">
+            <label style="font-size:9px;color:#4d7479;letter-spacing:1px;">TYPE</label>
+            <select id="svc-type" style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:5px 8px;font-family:inherit;font-size:11px;outline:none;">
+                <option value="http">HTTP / HTTPS</option>
+                <option value="tcp">TCP Port</option>
+                <option value="ping">Ping (ICMP)</option>
+                <option value="dns">DNS</option>
+                <option value="heartbeat">Heartbeat</option>
+            </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+            <label style="font-size:9px;color:#4d7479;letter-spacing:1px;">NAME</label>
+            <input id="svc-f-name" type="text" placeholder="My service" style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:5px 10px;font-family:inherit;font-size:11px;outline:none;width:150px;">
+        </div>
+        <!-- http fields -->
+        <div id="svc-f-http" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+            <div style="display:flex;flex-direction:column;gap:4px;">
+                <label style="font-size:9px;color:#4d7479;letter-spacing:1px;">URL</label>
+                <input id="svc-f-url" type="text" placeholder="https://example.com" style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:5px 10px;font-family:inherit;font-size:11px;outline:none;width:230px;">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+                <label style="font-size:9px;color:#4d7479;letter-spacing:1px;">METHOD</label>
+                <select id="svc-f-method" style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:5px 6px;font-family:inherit;font-size:11px;outline:none;">
+                    <option>GET</option><option>POST</option><option>HEAD</option>
+                </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+                <label style="font-size:9px;color:#4d7479;letter-spacing:1px;">EXP. STATUS</label>
+                <input id="svc-f-status" type="number" value="200" style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:5px 8px;font-family:inherit;font-size:11px;outline:none;width:70px;">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+                <label style="font-size:9px;color:#4d7479;letter-spacing:1px;">CONTAINS TEXT</label>
+                <input id="svc-f-text" type="text" placeholder="optional" style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:5px 10px;font-family:inherit;font-size:11px;outline:none;width:130px;">
+            </div>
+        </div>
+        <!-- tcp/ping fields -->
+        <div id="svc-f-host" style="display:none;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+            <div style="display:flex;flex-direction:column;gap:4px;">
+                <label style="font-size:9px;color:#4d7479;letter-spacing:1px;">HOST / IP</label>
+                <input id="svc-f-hostval" type="text" placeholder="192.168.2.1" style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:5px 10px;font-family:inherit;font-size:11px;outline:none;width:180px;">
+            </div>
+            <div id="svc-f-portrow" style="display:flex;flex-direction:column;gap:4px;">
+                <label style="font-size:9px;color:#4d7479;letter-spacing:1px;">PORT</label>
+                <input id="svc-f-port" type="number" placeholder="22" style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:5px 8px;font-family:inherit;font-size:11px;outline:none;width:70px;">
+            </div>
+        </div>
+        <!-- dns fields -->
+        <div id="svc-f-dns" style="display:none;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+            <div style="display:flex;flex-direction:column;gap:4px;">
+                <label style="font-size:9px;color:#4d7479;letter-spacing:1px;">DOMAIN</label>
+                <input id="svc-f-dnsq" type="text" placeholder="example.com" style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:5px 10px;font-family:inherit;font-size:11px;outline:none;width:180px;">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+                <label style="font-size:9px;color:#4d7479;letter-spacing:1px;">DNS SERVER</label>
+                <input id="svc-f-dnssrv" type="text" placeholder="8.8.8.8 (optional)" style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:5px 10px;font-family:inherit;font-size:11px;outline:none;width:160px;">
+            </div>
+        </div>
+        <!-- heartbeat fields -->
+        <div id="svc-f-hb" style="display:none;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+            <div style="display:flex;flex-direction:column;gap:4px;">
+                <label style="font-size:9px;color:#4d7479;letter-spacing:1px;">EXPECTED INTERVAL (s)</label>
+                <input id="svc-f-hbint" type="number" value="300" style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:5px 8px;font-family:inherit;font-size:11px;outline:none;width:90px;">
+            </div>
+        </div>
+        <div style="display:flex;gap:6px;align-self:flex-end;">
+            <button class="btn primary" id="svc-submit-btn" style="font-size:10px;">+ ADD</button>
+            <button class="btn" id="svc-cancel-btn" style="font-size:10px;">CANCEL</button>
+        </div>
+    </div>
+
+    <!-- table -->
     <div id="svc-table-wrap" style="flex:1;overflow:auto;">
-        <table id="svc-table" style="width:100%;border-collapse:collapse;font-size:11px;">
+        <table style="width:100%;border-collapse:collapse;font-size:11px;">
             <thead>
                 <tr style="color:#4d7479;text-align:left;border-bottom:1px solid #0e2c30;">
                     <th style="padding:6px 8px;font-weight:700;letter-spacing:1px;">NAME</th>
-                    <th style="padding:6px 8px;">URL</th>
+                    <th style="padding:6px 8px;">TYPE</th>
+                    <th style="padding:6px 8px;">TARGET</th>
                     <th style="padding:6px 8px;text-align:center;">STATUS</th>
                     <th style="padding:6px 8px;text-align:right;">RESP</th>
-                    <th style="padding:6px 8px;text-align:center;">SSL</th>
-                    <th style="padding:6px 8px;">CERT EXPIRY</th>
-                    <th style="padding:6px 8px;">ISSUER</th>
+                    <th style="padding:6px 8px;text-align:center;">24H</th>
+                    <th style="padding:6px 8px;text-align:center;">30D</th>
+                    <th style="padding:6px 8px;">SSL / INFO</th>
+                    <th style="padding:6px 8px;">HISTORY</th>
                     <th style="padding:6px 8px;text-align:center;"></th>
                 </tr>
             </thead>
             <tbody id="svc-tbody">
-                <tr><td colspan="8" style="padding:20px;text-align:center;color:#4d7479;">No services configured. Add a URL above.</td></tr>
+                <tr><td colspan="10" style="padding:20px;text-align:center;color:#4d7479;">No services configured.</td></tr>
             </tbody>
         </table>
     </div>

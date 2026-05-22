@@ -11,7 +11,8 @@ Real-time network monitoring, honeypot visualization and LAN security scanner fo
 | **Threat Map** | 3D globe — live attack arcs, country heatmap, fail2ban bans, top countries, attack history | no | — |
 | **Security Center** | SSH-based host security matrix (OS, CVEs, firewall, fail2ban) | yes | `security_center.enabled = true` |
 | **Proxy Monitor** | Sniproxy log reader — throughput, top domains, live feed | yes | `sniproxy.server` set |
-| **Network Map** | Interactive D3.js topology (drag & drop, switches, routers, ports) | yes | `scanner.enabled = true` |
+| **Network Map** | Interactive D3.js topology — LAN devices, switches, routers, ISP gateway, virtual switches | yes | `scanner.enabled = true` |
+| **Services** | Uptime monitoring — HTTP/HTTPS, TCP, Ping, DNS, Heartbeat; SSL cert check, response graphs, uptime stats | yes (home only) | — |
 | **Database Viewer** | Browse, search and delete records from attacks / bans / devices tables | yes | — |
 | **Settings** | Live config editor, system health status, export config | yes | — |
 | **Report** | Markdown report of last 24 h — attacks, bans, devices, logs (downloaded) | yes | — |
@@ -316,15 +317,94 @@ Reads sniproxy access logs from a remote server via SSH every 5 seconds:
 
 Interactive D3.js force-directed topology.
 
-**Node types:** `host` (circle), `switch` (rectangle), `router` (diamond)
+**Node types** and shapes:
 
-**Edit mode** (click EDIT):
-- Drag nodes to reposition
-- Click node → side panel: edit label, IP, MAC; set connect/disconnect notifications
-- `+ HOST`, `+ SWITCH`, `+ ROUTER` — add nodes
-- `+ LINK` → click two nodes to connect (optionally assign port numbers)
-- RESEED — auto-populate from current LAN scan
-- SAVE — persists to `data/topo.json`
+| Type | Shape | Color | Notes |
+|------|-------|-------|-------|
+| host | circle | green stroke | fill = online/offline state |
+| lxc / qemu | circle | purple / blue | virtual machines |
+| nas / server / rpi | circle | yellow / green / red | |
+| mobile / pc / iot | circle | light green / grey / cyan | |
+| printer / other | circle | orange / dark orange | |
+| switch / router / ap | rectangle | blue | network equipment |
+| tv | rectangle | orange | TV/media device |
+| network | rectangle | dark green | network segment |
+| cloud | pill shape | dark | ISP gateway node (auto-created) |
+
+**Link types:** ethernet (green), wifi (blue dashed), virtual/Proxmox (orange)
+
+**Device settings** (click any device):
+- Type, connection type, hostname alias
+- ISP Gateway flag (router only) — shows yellow glow + cloud node
+- Online/offline notifications → forwarded to Sentinel Bridge
+- LXC / QEMU flag
+
+**AUTO button** — re-seeds force layout to compact positions.
+
+**SAVE** — persists topology to `data/topo.json`.
+
+---
+
+## Services (Uptime Monitor)
+
+Available in **home mode only**. Monitors availability and health of services in your network and on the internet.
+
+### Monitor types
+
+| Type | What it checks |
+|------|----------------|
+| **HTTP / HTTPS** | GET or POST request — status code, optional text match, response time, SSL cert validity/expiry/issuer |
+| **TCP** | TCP connect to host:port — confirms port is open |
+| **Ping** | ICMP ping — basic IP reachability |
+| **DNS** | Resolves a domain — optionally against a specific DNS server |
+| **Heartbeat** | Reverse monitoring — your script POSTs to `/api/heartbeat/{id}`, alert fires if no ping arrives within interval |
+
+### Display columns
+
+`NAME | TYPE | TARGET | STATUS | RESP | 24H uptime | 30D uptime | SSL/INFO | HISTORY (sparkline) | actions`
+
+- **Status** — `● UP` / `✖ DOWN` with HTTP status code where applicable
+- **RESP** — response time (green < 200 ms, yellow < 800 ms, red ≥ 800 ms)
+- **24H / 30D** — uptime percentage from check history
+- **HISTORY** — mini SVG sparkline: green bar = up, red = down, height = response time
+- **SSL** — cert validity + expiry date + days remaining + issuer (HTTPS only)
+
+### Interval
+
+Global check interval (1–60 min) saved in `data/svc_settings.json`. Change in the INTERVAL dropdown.
+
+### Sentinel Bridge notifications
+
+When a service changes state (up→down or down→up), the event is forwarded to the configured Sentinel server (`plugin: service_monitor`).
+
+### Heartbeat URL
+
+After adding a heartbeat service, call its URL from a cron job or script:
+
+```bash
+curl -X POST https://your-sentinel-alert:5056/api/heartbeat/<id>
+```
+
+### API
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/services` | List all services with last status, uptime, sparkline |
+| POST | `/api/services` | Add a service |
+| DELETE | `/api/services/{id}` | Remove a service |
+| POST | `/api/services/check` | Manual check — all services |
+| POST | `/api/services/{id}/check` | Manual check — single service |
+| GET | `/api/services/settings` | Get check interval |
+| POST | `/api/services/settings` | Set check interval (`{"interval_min": 5}`) |
+| POST | `/api/heartbeat/{id}` | Receive heartbeat ping |
+
+### Data files
+
+| Path | Description |
+|------|-------------|
+| `data/services.json` | Service config + last check result |
+| `data/svc_settings.json` | Global interval setting |
+| `data/alerts.db` table `service_checks` | Check history (30 days retained) |
 
 ---
 
@@ -372,6 +452,14 @@ All endpoints returning sensitive data require authentication (session cookie).
 | GET | `/api/fsc/hosts` | no | Host list with enabled/disabled status |
 | POST | `/api/fsc/hosts/toggle` | no | Toggle host scan |
 | GET | `/api/sniproxy/data` | no | Proxy monitor metrics |
+| GET | `/api/services` | no | Service monitor list (with uptime + sparkline) |
+| POST | `/api/services` | no | Add monitored service |
+| DELETE | `/api/services/{id}` | no | Remove service |
+| POST | `/api/services/check` | no | Manual check — all services |
+| POST | `/api/services/{id}/check` | no | Manual check — single service |
+| GET | `/api/services/settings` | no | Get check interval |
+| POST | `/api/services/settings` | no | Set check interval |
+| POST | `/api/heartbeat/{id}` | no | Receive heartbeat ping |
 | WS | `/ws/live` | no | Live event stream |
 
 ---
@@ -380,11 +468,14 @@ All endpoints returning sensitive data require authentication (session cookie).
 
 | Path | Description |
 |------|-------------|
-| `data/alerts.db` | SQLite — attacks, bans, devices |
+| `data/alerts.db` | SQLite — attacks, bans, devices, service_checks |
 | `data/topo.json` | Network topology |
-| `data/net_settings.json` | Host notification settings |
+| `data/net_settings.json` | Network Map device settings |
+| `data/services.json` | Service Monitor config + last results |
+| `data/svc_settings.json` | Service Monitor check interval |
 | `data/fsc_hosts.json` | Security Center host enable/disable |
 | `data/sniproxy_stats.json` | Proxy monitor persisted stats |
+| `data/domains.json` | Legacy (migrated to services.json on first start) |
 | `data/GeoLite2-City.mmdb` | GeoIP city database (required) |
 | `data/GeoLite2-ASN.mmdb` | GeoIP ASN/ISP database (optional) |
 | `conf/id_ed25519` | SSH private key for remote access |
