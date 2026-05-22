@@ -1,6 +1,7 @@
 """Background periodic tasks. Started from app.py lifespan."""
 import asyncio
 import ipaddress
+import json as _json
 import os
 import sqlite3
 from datetime import datetime
@@ -12,6 +13,21 @@ import geoip
 import scanner
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "alerts.db")
+_NET_SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "net_settings.json")
+
+
+def _device_notify_allowed(mac: str, state: str) -> bool:
+    if not mac:
+        return True
+    try:
+        with open(_NET_SETTINGS_PATH) as f:
+            cfg = _json.load(f).get("devices", {}).get(mac.lower(), {})
+        if state == "online"  and not cfg.get("notify_connect",    True): return False
+        if state == "offline" and not cfg.get("notify_disconnect",  True): return False
+        if state == "new"     and not cfg.get("notify_new",         True): return False
+    except Exception:
+        pass
+    return True
 
 SCAN_INTERVAL = int(os.environ.get("SCAN_INTERVAL", "300"))
 FAIL2BAN_INTERVAL = int(os.environ.get("FAIL2BAN_INTERVAL", "300"))
@@ -39,7 +55,18 @@ async def periodic_scanner(queue: asyncio.Queue):
     while True:
         try:
             events = await scanner.scan_async()
+            skip_next_log = False
             for ev in events or []:
+                if ev.get("type") == "device":
+                    allowed = _device_notify_allowed(ev.get("mac", ""), ev.get("state", ""))
+                    skip_next_log = not allowed
+                    if not allowed:
+                        continue
+                elif ev.get("type") == "log" and skip_next_log:
+                    skip_next_log = False
+                    continue
+                else:
+                    skip_next_log = False
                 await _publish(queue, ev)
         except Exception as e:
             await _publish(queue, {"type": "log", "level": "warn",
