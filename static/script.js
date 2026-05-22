@@ -60,6 +60,22 @@ function _globeFlush() {
     globe.labelsData([...labels]);
 }
 
+// Lightweight arc-only refresh — for periodic recolor (avoids re-uploading points/labels)
+function _globeFlushArcsOnly() {
+    const visibleArcs = (_attackHistFilter && _attackHistFilter !== 'all')
+        ? arcs.filter(a => (a.protocol || 'fail2ban') === _attackHistFilter)
+        : arcs;
+    globe.arcsData([...visibleArcs, ...userArcs]);
+}
+
+// Throttled flush — coalesces rapid calls into one per animation frame
+let _flushScheduled = false;
+function _scheduleGlobeFlush() {
+    if (_flushScheduled || _globePaused) return;
+    _flushScheduled = true;
+    requestAnimationFrame(() => { _flushScheduled = false; if (!_globePaused) _globeFlush(); });
+}
+
 const arcs = [], points = [], labels = [], rings = [];
 const userArcs = [], userPoints = [];
 const arcTimestamps = []; // track arc creation time for age-based coloring
@@ -82,10 +98,11 @@ function pickTexture() {
     return isDay ? TX_DAY : TX_NIGHT;
 }
 
+const _isMobile = window.innerWidth <= 1100;
 const globe = Globe()(globeEl)
     .globeImageUrl(pickTexture())
     .backgroundColor('rgba(0,0,0,0)')
-    .showAtmosphere(true)
+    .showAtmosphere(!_isMobile)
     .atmosphereColor('#00ffd5')
     .atmosphereAltitude(0.22)
     .width(globeEl.clientWidth)
@@ -99,8 +116,11 @@ const globe = Globe()(globeEl)
     .arcDashAnimateTime(d => {
         if (d.protocol === 'who') return 1400;
         // More attacks from same country → faster animation (lower ms = faster)
+        // On mobile use slower animation (less GPU work)
         const n = _countryCounts.get(d.country) || 1;
-        return Math.max(350, Math.round(2400 / Math.log2(n + 2)));
+        const base = _isMobile ? 3000 : 2400;
+        const minMs = _isMobile ? 800 : 350;
+        return Math.max(minMs, Math.round(base / Math.log2(n + 2)));
     })
     .arcAltitudeAutoScale(0.75)
     .arcsTransitionDuration(0)
@@ -160,6 +180,18 @@ if (_SOLO_GLOBE) setTimeout(() => globe.width(globeEl.clientWidth).height(globeE
 // Refresh texture every 15 min (auto mode covers day/night transition).
 setInterval(() => { if (_manualDay === null) globe.globeImageUrl(pickTexture()); }, 15 * 60 * 1000);
 
+// Pause globe when browser tab is hidden (GPU + battery savings)
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        globe.pauseAnimation();
+        _globePaused = true;
+    } else if (_activeTab === 'threat') {
+        globe.resumeAnimation();
+        _globePaused = false;
+        _globeFlush();
+    }
+});
+
 globeModeEl.addEventListener('click', () => {
     _manualDay = globeModeEl.textContent !== 'DAY';
     globe.globeImageUrl(pickTexture());
@@ -174,6 +206,16 @@ const PROTO_RGB = {
     blocked:  [120,  20, 200],  // dark purple
 };
 const _DEFAULT_RGB = [0, 220, 180];  // green-cyan fallback
+
+// CSS hex colors matching PROTO_RGB — used in panels so colors match the globe
+const PROTO_COLOR = {
+    ssh:      '#ffc800',
+    http:     '#00c850',
+    https:    '#ffdc00',
+    fail2ban: '#a028ff',
+    blocked:  '#7814c8',
+    who:      '#38bdf8',
+};
 
 const MAX_AGE_S = 24 * 3600;
 
@@ -236,11 +278,13 @@ function refreshCountryPolygons() {
     // Long delay keeps it rare; color functions read from _countryAttackMap live.
     clearTimeout(_polyRefreshTimer);
     _polyRefreshTimer = setTimeout(() => {
-        if (_countriesGeo) globe.polygonsData(_countriesGeo);
-    }, 2000);
+        if (_countriesGeo && !_globePaused) globe.polygonsData(_countriesGeo);
+    }, 10000);
 }
 
 async function loadCountryPolygons() {
+    if (_countriesGeo) return; // already loaded, skip
+    if (_isMobile) return;     // skip on mobile — 180 country meshes are too heavy
     try {
         const geo = await fetch('/static/vendor/countries.geojson').then(r => r.json());
         _countriesGeo = geo.features;
@@ -308,35 +352,37 @@ function pushAttack(a, isNew = true) {
         while (labels.length > MAX_LABELS) labels.shift();
     }
 
-    if (!_globePaused) _globeFlush();
+    if (!_globePaused) _scheduleGlobeFlush();
 
     if (isNew) {
         const [r, g, b] = PROTO_RGB[proto] || _DEFAULT_RGB;
-        const addRing = (ring, ttl) => {
-            rings.push(ring);
-            globe.ringsData([...rings, ...homeRings]);
-            setTimeout(() => {
-                const i = rings.indexOf(ring); if (i >= 0) rings.splice(i, 1);
+        if (!_isMobile) {
+            const addRing = (ring, ttl) => {
+                rings.push(ring);
                 globe.ringsData([...rings, ...homeRings]);
-            }, ttl);
-        };
-        // 3-wave shockwave burst at attack origin
-        [
-            { delay:   0, maxR: 2.0, speed: 5.0, period: 380, ttl: 1600 },
-            { delay: 160, maxR: 3.8, speed: 3.2, period: 560, ttl: 2400 },
-            { delay: 340, maxR: 5.5, speed: 2.0, period: 800, ttl: 3500 },
-        ].forEach(({ delay, maxR, speed, period, ttl }) => setTimeout(() => addRing(
-            { lat: a.lat, lon: a.lon, maxR, speed, period,
-              color: t => `rgba(${r},${g},${b},${((1 - t) * 0.92).toFixed(2)})` }, ttl
-        ), delay));
-        // 2-wave shield-hit at HOME
-        [
-            { delay:   0, maxR: 1.8, speed: 6.0, period: 320, ttl: 1400 },
-            { delay: 280, maxR: 3.2, speed: 3.5, period: 550, ttl: 2200 },
-        ].forEach(({ delay, maxR, speed, period, ttl }) => setTimeout(() => addRing(
-            { lat: HOME.lat, lon: HOME.lon, maxR, speed, period,
-              color: t => `rgba(255,232,59,${((1 - t) * 0.95).toFixed(2)})` }, ttl
-        ), delay));
+                setTimeout(() => {
+                    const i = rings.indexOf(ring); if (i >= 0) rings.splice(i, 1);
+                    globe.ringsData([...rings, ...homeRings]);
+                }, ttl);
+            };
+            // 3-wave shockwave burst at attack origin
+            [
+                { delay:   0, maxR: 2.0, speed: 5.0, period: 380, ttl: 1600 },
+                { delay: 160, maxR: 3.8, speed: 3.2, period: 560, ttl: 2400 },
+                { delay: 340, maxR: 5.5, speed: 2.0, period: 800, ttl: 3500 },
+            ].forEach(({ delay, maxR, speed, period, ttl }) => setTimeout(() => addRing(
+                { lat: a.lat, lon: a.lon, maxR, speed, period,
+                  color: t => `rgba(${r},${g},${b},${((1 - t) * 0.92).toFixed(2)})` }, ttl
+            ), delay));
+            // 2-wave shield-hit at HOME
+            [
+                { delay:   0, maxR: 1.8, speed: 6.0, period: 320, ttl: 1400 },
+                { delay: 280, maxR: 3.2, speed: 3.5, period: 550, ttl: 2200 },
+            ].forEach(({ delay, maxR, speed, period, ttl }) => setTimeout(() => addRing(
+                { lat: HOME.lat, lon: HOME.lon, maxR, speed, period,
+                  color: t => `rgba(255,232,59,${((1 - t) * 0.95).toFixed(2)})` }, ttl
+            ), delay));
+        }
 
         acIp.textContent = a.src_ip;
         acCountry.textContent = a.country || '?';
@@ -366,12 +412,17 @@ function renderDevices(list) {
     netCountEl.textContent = `${online} / ${list.length + vswitches.length}`;
     hudLan.textContent = `${online} / ${list.length + vswitches.length}`;
 
-    // Sort by IP numerically
-    list = [...list].sort((a, b) => _ipToNum(a.ip) - _ipToNum(b.ip));
-
     const now = Date.now();
     const newThreshold = 48 * 3600 * 1000;
     const devSettings = (_netSettings.devices || {});
+
+    // Switch/router first, virtual (lxc/qemu) last, then by IP
+    const _TYPE_PRI = { switch: 0, router: 0, ap: 0, lxc: 2, qemu: 2 };
+    list = [...list].sort((a, b) => {
+        const pa = _TYPE_PRI[(devSettings[a.mac] || {}).type] ?? 1;
+        const pb = _TYPE_PRI[(devSettings[b.mac] || {}).type] ?? 1;
+        return pa !== pb ? pa - pb : _ipToNum(a.ip) - _ipToNum(b.ip);
+    });
 
     const vswHtml = vswitches.map(sw => `
         <div class="row dev clickable" data-vsw="${escape(sw.id)}" style="border-left:2px solid #38bdf8;">
@@ -388,9 +439,8 @@ function renderDevices(list) {
     const devHtml = list.length ? list.map(d => {
         const cfg = devSettings[d.mac] || {};
         const displayName = cfg.hostname || d.hostname;
-        const typeBadge = cfg.type === 'lxc'  ? ' <span style="color:#a855f7;font-size:9px;font-weight:700;">[LXC]</span>'
-                        : cfg.type === 'qemu' ? ' <span style="color:#38bdf8;font-size:9px;font-weight:700;">[QEMU]</span>'
-                        : '';
+        const _BADGE = { router:'#38bdf8', ap:'#38bdf8', switch:'#38bdf8', lxc:'#a855f7', qemu:'#60a5fa', nas:'#ffe83b', mobile:'#86efac', tv:'#fb923c', printer:'#f97316', server:'#22c55e', rpi:'#ef4444', other:'#ea580c', iot:'#06b6d4', pc:'#94a3b8', network:'#166534' };
+        const typeBadge = _BADGE[cfg.type] ? ` <span style="color:${_BADGE[cfg.type]};font-size:9px;font-weight:700;">[${cfg.type.toUpperCase()}]</span>` : '';
         const vizDot = cfg.visualize ? ' <span style="color:var(--accent);font-size:9px;" title="Visualize on map">◉</span>' : '';
         const label = displayName
             ? `${escape(displayName)}${typeBadge}${vizDot} <span style="color:#4d7479;font-size:10px;">[${escape(d.ip)}]</span>`
@@ -418,7 +468,7 @@ function renderDevices(list) {
         </div>`;
     }).join('') : '<div class="empty">No devices.</div>';
 
-    netListEl.innerHTML = vswHtml + devHtml;
+    netListEl.innerHTML = devHtml + vswHtml;
 
     netListEl.querySelectorAll('.dev[data-vsw]').forEach(row => {
         row.addEventListener('click', () => openVswModal(row.dataset.vsw));
@@ -442,10 +492,11 @@ async function openDeviceModal(mac) {
 
     const modal  = document.getElementById('detail-modal');
     const cfg    = (netCfg.devices || {})[mac] || {};
-    const devType    = cfg.type        || 'host';
-    const parentMac  = cfg.parent_mac  || '';
-    const parentPort = cfg.parent_port || '';
-    const visualize  = cfg.visualize   === true;
+    const devType       = cfg.type           || '';
+    const parentMac     = cfg.parent_mac     || '';
+    const parentPort    = cfg.parent_port    || '';
+    const connType      = cfg.connection_type || 'ethernet';
+    const visualize     = cfg.visualize      === true;
 
     const effectiveName = cfg.hostname || d.hostname || d.ip;
     document.getElementById('detail-title').textContent = '◤ ' + effectiveName;
@@ -477,15 +528,12 @@ async function openDeviceModal(mac) {
         </div>
 
         <div style="border-top:1px solid #14333a;padding-top:10px;display:flex;flex-direction:column;gap:8px;">
-            <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:#4d7479;">CONTAINER / VM</div>
-            <div id="dd-type-grp" data-value="${devType==='lxc'?'lxc':devType==='qemu'?'qemu':''}"
-                style="display:flex;border:1px solid #14333a;">
-                <button data-val="lxc"
-                    style="flex:1;padding:5px 4px;font-size:10px;border:none;border-right:1px solid #14333a;font-family:inherit;cursor:pointer;letter-spacing:1px;transition:background .15s,color .15s;background:${devType==='lxc'?'#1a0030':'#02060a'};color:${devType==='lxc'?'#a855f7':'#4d7479'};">LXC</button>
-                <button data-val=""
-                    style="flex:1;padding:5px 4px;font-size:10px;border:none;border-right:1px solid #14333a;font-family:inherit;cursor:pointer;letter-spacing:1px;transition:background .15s,color .15s;background:${devType!=='lxc'&&devType!=='qemu'?'#0e2228':'#02060a'};color:${devType!=='lxc'&&devType!=='qemu'?'#cfe7ec':'#4d7479'};">NONE</button>
-                <button data-val="qemu"
-                    style="flex:1;padding:5px 4px;font-size:10px;border:none;font-family:inherit;cursor:pointer;letter-spacing:1px;transition:background .15s,color .15s;background:${devType==='qemu'?'#001830':'#02060a'};color:${devType==='qemu'?'#38bdf8':'#4d7479'};">QEMU</button>
+            <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:#4d7479;">DEVICE TYPE</div>
+            <div id="dd-type-grp" data-value="${devType}"
+                style="display:grid;grid-template-columns:repeat(5,1fr);gap:2px;">
+                ${[['','NONE','#cfe7ec','#0e2228'],['router','ROUTER','#38bdf8','#001830'],['ap','AP','#38bdf8','#001830'],['switch','SWITCH','#38bdf8','#001830'],['lxc','LXC','#a855f7','#1a0030'],['qemu','QEMU','#60a5fa','#00101a'],['nas','NAS','#ffe83b','#1a1500'],['mobile','MOBILE','#86efac','#001a08'],['tv','TV','#fb923c','#1a0800'],['printer','PRINT','#f97316','#150800'],['server','SERVER','#22c55e','#001508'],['rpi','RPI','#ef4444','#1a0000'],['other','OTHER','#ea580c','#120400'],['iot','IoT','#06b6d4','#001a1f'],['pc','PC','#94a3b8','#0d1117']].map(([val,lbl,col,bg]) =>
+                    `<button data-val="${val}" style="padding:4px 2px;font-size:9px;border:1px solid #14333a;font-family:inherit;cursor:pointer;letter-spacing:0.5px;transition:background .15s,color .15s;background:${devType===val?bg:'#02060a'};color:${devType===val?col:'#4d7479'};">${lbl}</button>`
+                ).join('')}
             </div>
             <label style="font-size:10px;color:#4d7479;display:flex;flex-direction:column;gap:3px;">Connected to (parent)
                 <select id="dd-parent" style="background:#02060a;border:1px solid #14333a;color:#cfe7ec;padding:4px 6px;font-family:inherit;font-size:11px;">
@@ -497,6 +545,18 @@ async function openDeviceModal(mac) {
                 <input type="text" id="dd-port" value="${escape(String(parentPort))}"
                     style="background:#02060a;border:1px solid #14333a;color:#cfe7ec;padding:4px 6px;font-family:inherit;font-size:11px;width:80px;">
             </label>
+
+            <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:#4d7479;margin-top:4px;">CONNECTION TYPE</div>
+            <div id="dd-conn-grp" data-value="${connType}" style="display:flex;gap:2px;">
+                <button data-val="ethernet" style="flex:1;padding:4px;font-size:10px;border:1px solid #14333a;font-family:inherit;cursor:pointer;letter-spacing:1px;transition:background .15s,color .15s;background:${connType==='ethernet'?'#0a1418':'#02060a'};color:${connType==='ethernet'?'#2dffa1':'#4d7479'};">ETHERNET</button>
+                <button data-val="wifi" style="flex:1;padding:4px;font-size:10px;border:1px solid #14333a;font-family:inherit;cursor:pointer;letter-spacing:1px;transition:background .15s,color .15s;background:${connType==='wifi'?'#00183a':'#02060a'};color:${connType==='wifi'?'#38bdf8':'#4d7479'};">WiFi</button>
+                <button data-val="virtual" style="flex:1;padding:4px;font-size:10px;border:1px solid #14333a;font-family:inherit;cursor:pointer;letter-spacing:1px;transition:background .15s,color .15s;background:${connType==='virtual'?'#1a0d00':'#02060a'};color:${connType==='virtual'?'#fb923c':'#4d7479'};">VIRT</button>
+            </div>
+
+            <div id="dd-isp-row" style="display:${devType==='router'?'flex':'none'};align-items:center;justify-content:space-between;font-size:11px;margin-top:6px;">
+                <span style="color:#ffe83b;font-weight:700;">&#9733; ISP Gateway</span>
+                <label class="fsc-toggle"><input type="checkbox" id="dd-isp" ${cfg.is_isp?'checked':''}><span class="fsc-toggle-slider"></span></label>
+            </div>
 
             <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:#4d7479;margin-top:4px;">DISPLAY</div>
             <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;">
@@ -519,7 +579,8 @@ async function openDeviceModal(mac) {
             </div>
         </div>`;
 
-    // 3-state LXC/NONE/QEMU toggle handlers
+    // Type button selection handler (generalized)
+    const _TYPE_COLORS = { '':['#0e2228','#cfe7ec'], router:['#001830','#38bdf8'], ap:['#001830','#38bdf8'], switch:['#001830','#38bdf8'], lxc:['#1a0030','#a855f7'], qemu:['#00101a','#60a5fa'], nas:['#1a1500','#ffe83b'], mobile:['#001a08','#86efac'], tv:['#1a0800','#fb923c'], printer:['#150800','#f97316'], server:['#001508','#22c55e'], rpi:['#1a0000','#ef4444'], other:['#120400','#ea580c'], iot:['#001a1f','#06b6d4'], pc:['#0d1117','#94a3b8'], network:['#001a0a','#166534'] };
     const typeGrp = document.getElementById('dd-type-grp');
     typeGrp.querySelectorAll('button').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -527,11 +588,37 @@ async function openDeviceModal(mac) {
             typeGrp.dataset.value = val;
             typeGrp.querySelectorAll('button').forEach(b => {
                 const sel = b.dataset.val === val;
-                b.style.background = sel ? (b.dataset.val === 'lxc' ? '#1a0030' : b.dataset.val === 'qemu' ? '#001830' : '#0e2228') : '#02060a';
-                b.style.color = sel ? (b.dataset.val === 'lxc' ? '#a855f7' : b.dataset.val === 'qemu' ? '#38bdf8' : '#cfe7ec') : '#4d7479';
+                const [bg, col] = _TYPE_COLORS[b.dataset.val] || ['#02060a','#4d7479'];
+                b.style.background = sel ? bg : '#02060a';
+                b.style.color = sel ? col : '#4d7479';
             });
+            const ispRow = document.getElementById('dd-isp-row');
+            if (ispRow) ispRow.style.display = val === 'router' ? 'flex' : 'none';
         });
     });
+
+    // Connection type toggle (ethernet / wifi / virtual)
+    const _CONN_STYLE = { ethernet: ['#0a1418','#2dffa1'], wifi: ['#00183a','#38bdf8'], virtual: ['#1a0d00','#fb923c'] };
+    const connGrp = document.getElementById('dd-conn-grp');
+    if (connGrp) {
+        const wifiApMac = (_allDevices.find(x => x.ip === '192.168.2.90') || {}).mac || '';
+        connGrp.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const val = btn.dataset.val;
+                connGrp.dataset.value = val;
+                connGrp.querySelectorAll('button').forEach(b => {
+                    const sel = b.dataset.val === val;
+                    const [bg, col] = _CONN_STYLE[b.dataset.val] || ['#02060a','#4d7479'];
+                    b.style.background = sel ? bg : '#02060a';
+                    b.style.color = sel ? col : '#4d7479';
+                });
+                if (val === 'wifi' && wifiApMac) {
+                    const parentSel = document.getElementById('dd-parent');
+                    if (parentSel && !parentSel.value) parentSel.value = wifiApMac;
+                }
+            });
+        });
+    }
 
     const actionsDiv = document.getElementById('detail-actions');
     actionsDiv.innerHTML = '';
@@ -549,16 +636,40 @@ async function openDeviceModal(mac) {
                 type:              document.getElementById('dd-type-grp').dataset.value,
                 parent_mac:        document.getElementById('dd-parent').value,
                 parent_port:       document.getElementById('dd-port').value,
+                connection_type:   document.getElementById('dd-conn-grp')?.dataset.value || 'ethernet',
                 visualize:         document.getElementById('dd-viz').checked,
                 notify_connect:    document.getElementById('dd-nc').checked,
                 notify_disconnect: document.getElementById('dd-nd').checked,
                 notify_new:        document.getElementById('dd-nn').checked,
+                is_isp:            !!(document.getElementById('dd-isp')?.checked),
             })
         });
         _netSettings = await fetch('/api/network/settings').then(r => r.json()).catch(() => _netSettings);
         saveBtn.textContent = 'SAVED ✓';
         setTimeout(() => { saveBtn.textContent = 'SAVE'; }, 1500);
         fetch('/api/devices').then(r => r.json()).then(renderDevices);
+        if (_netInitDone) { _netSyncNodeTypes(); _netSyncIspCloud(); netRender(); }
+    });
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn danger';
+    deleteBtn.textContent = 'DELETE';
+    deleteBtn.style.cssText = 'color:#ff2a5e;border-color:#ff2a5e;margin-right:auto;';
+    deleteBtn.addEventListener('click', async () => {
+        if (!confirm(`Delete device ${d.ip} (${mac}) from DB? It will reappear on next scan if still online.`)) return;
+        await fetch(`/api/device/${encodeURIComponent(mac)}`, { method: 'DELETE' });
+        // Remove from topo
+        _netData.nodes = _netData.nodes.filter(n => n.mac !== mac);
+        _netData.links = _netData.links.filter(l => {
+            const s = typeof l.source === 'object' ? l.source.id : l.source;
+            const t = typeof l.target === 'object' ? l.target.id : l.target;
+            return s !== `h-${mac}` && t !== `h-${mac}`;
+        });
+        fetch('/api/topo-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(_topoForSave()) }).catch(() => {});
+        modal.classList.add('hidden');
+        _netSettings = await fetch('/api/network/settings').then(r => r.json()).catch(() => _netSettings);
+        fetch('/api/devices').then(r => r.json()).then(renderDevices);
+        if (_netInitDone) netRender();
     });
 
     const copyIpBtn = document.createElement('button');
@@ -571,6 +682,7 @@ async function openDeviceModal(mac) {
     closeBtn.textContent = 'CLOSE';
     closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
 
+    actionsDiv.appendChild(deleteBtn);
     actionsDiv.appendChild(saveBtn);
     actionsDiv.appendChild(copyIpBtn);
     actionsDiv.appendChild(closeBtn);
@@ -579,12 +691,29 @@ async function openDeviceModal(mac) {
 
 // Virtual switch modal
 let _vswEditing = null;
-function openVswModal(swId) {
+async function openVswModal(swId) {
     _vswEditing = swId || null;
     const sw = swId ? (_netSettings.virtual_switches || []).find(s => s.id === swId) : null;
     document.getElementById('vsw-hostname').value = sw ? sw.hostname : '';
     document.getElementById('vsw-ports').value = sw ? sw.ports : 8;
     document.getElementById('vsw-del').style.display = swId ? '' : 'none';
+    // Ensure device list is loaded
+    if (!_allDevices.length) {
+        _allDevices = await fetch('/api/devices').then(r => r.json()).catch(() => []);
+    }
+    // Populate parent select
+    const parentSel = document.getElementById('vsw-parent');
+    const curParent = sw ? (sw.parent_mac || '') : '';
+    const devCfgs = (_netSettings.devices || {});
+    const physOpts = _allDevices.map(x => {
+        const n = (devCfgs[x.mac] || {}).hostname || x.hostname || x.ip;
+        return `<option value="${escape(x.mac)}" ${x.mac === curParent ? 'selected' : ''}>${escape(n)} [${escape(x.ip)}]</option>`;
+    }).join('');
+    const vswOpts = (_netSettings.virtual_switches || [])
+        .filter(s => s.id !== swId)
+        .map(s => `<option value="vsw:${escape(s.id)}" ${'vsw:'+s.id === curParent ? 'selected' : ''}>${escape(s.hostname)} [SW]</option>`)
+        .join('');
+    parentSel.innerHTML = `<option value="">— none —</option>${physOpts}${vswOpts}`;
     document.getElementById('vsw-modal').classList.remove('hidden');
 }
 document.getElementById('add-switch-btn').addEventListener('click', () => openVswModal(null));
@@ -595,6 +724,7 @@ document.getElementById('vsw-save').addEventListener('click', async () => {
         id: _vswEditing || undefined,
         hostname,
         ports: parseInt(document.getElementById('vsw-ports').value) || 8,
+        parent_mac: document.getElementById('vsw-parent')?.value || '',
     };
     await fetch('/api/virtual-switch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     _netSettings = await fetch('/api/network/settings').then(r => r.json()).catch(() => _netSettings);
@@ -731,13 +861,13 @@ function renderAttackHistory() {
     const _PROTO_LABEL = { fail2ban: 'F2B', ssh: 'SSH', http: 'HTTP', https: 'HTTPS' };
     attackHistEl.innerHTML = filtered.slice(0, 10).map(b => {
         const { time, date } = _fmtLocalTs(b.ts);
-        const proto   = b.protocol || 'fail2ban';
-        const label   = _PROTO_LABEL[proto] || proto.toUpperCase();
-        const portCls = proto === 'fail2ban' ? 'port ssh' : proto === 'https' ? 'port web' : 'port';
+        const proto = b.protocol || 'fail2ban';
+        const label = _PROTO_LABEL[proto] || proto.toUpperCase();
+        const col   = PROTO_COLOR[proto] || 'var(--accent)';
         return `<div class="row ban clickable" data-lat="${b.lat}" data-lon="${b.lon}"
                      data-ip="${escape(b.src_ip)}" data-country="${escape(b.country)}"
                      data-isp="${escape(b.isp)}" data-port="${b.dst_port}" data-protocol="${proto}">
-            <span class="${portCls}" style="min-width:38px;text-align:center;align-self:center;">${label}</span>
+            <span class="port" style="min-width:38px;text-align:center;align-self:center;color:${col};border-color:${col}44;">${label}</span>
             <div style="flex:1;min-width:0;padding-left:4px;">
                 <div style="display:flex;justify-content:space-between;gap:4px;">
                     <span class="ip" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escape(b.src_ip)}</span>
@@ -792,8 +922,10 @@ function pushLog(l, prepend = true) {
     const ts = new Date(l.ts || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
     const row = document.createElement('div');
     row.className = `row level-${l.level || 'info'}`;
+    const protoCol = l.proto ? (PROTO_COLOR[l.proto] || '') : '';
+    const srcStyle = protoCol ? ` style="color:${protoCol}"` : '';
     row.innerHTML = `<span class="ts">${ts}</span>
-        <span class="src ${l.source || 'system'}">${l.source || 'sys'}</span>
+        <span class="src ${l.source || 'system'}"${srcStyle}>${l.source || 'sys'}</span>
         <span class="msg">${escape(l.msg || '')}</span>`;
     if (prepend) logListEl.prepend(row); else logListEl.appendChild(row);
     while (logListEl.children.length > MAX_FEED) logListEl.lastChild.remove();
@@ -950,9 +1082,11 @@ function connectWS() {
         const m = JSON.parse(ev.data);
         if (m.type === 'snapshot') {
             _globePaused = true; _histPaused = true;
-            (m.attacks       || []).forEach(a => pushAttack(a, false));
-            (m.proxy_attacks || []).forEach(a => { pushAttack(a, false); pushAttackHistory(a); });
-            (m.bans          || []).forEach(b => { pushAttack(b, false); pushAttackHistory(b); });
+            // Per-type quota: each type gets MAX_ARCS/3 slots so all are visible
+            const _q = Math.floor(MAX_ARCS / 3);
+            (m.bans          || []).slice(-_q).forEach(b => { pushAttack(b, false); pushAttackHistory(b); });
+            (m.attacks       || []).slice(-_q).forEach(a => pushAttack(a, false));
+            (m.proxy_attacks || []).slice(-_q).forEach(a => { pushAttack(a, false); pushAttackHistory(a); });
             _globePaused = false; _histPaused = false;
             _globeFlush(); renderAttackHistory();
             refreshCountryPolygons();
@@ -963,6 +1097,7 @@ function connectWS() {
             refreshCountryPolygons();
             pushLog({ level: 'attack',
                       source: m.type === 'ban' ? 'fail2ban' : m.source || 'honeypot',
+                      proto: m.protocol || (m.type === 'ban' ? 'fail2ban' : 'ssh'),
                       ts: m.ts,
                       msg: `${(m.protocol||'?').toUpperCase()} :${m.dst_port} ← ${m.src_ip} (${m.country})` });
             // refresh stats every few attacks
@@ -1207,6 +1342,9 @@ function applyAuthState(authenticated) {
     const loginHeaderBtn = $('login-btn');
     if (loginHeaderBtn) loginHeaderBtn.style.display = authenticated ? 'none' : '';
     if (authenticated) _loginOverlay.classList.add('hidden');
+    // Adjust grid layout for logged-out state (hides empty left column)
+    const gridEl = document.querySelector('.grid');
+    if (gridEl) gridEl.classList.toggle('no-auth', !authenticated);
 }
 
 async function checkAuth() {
@@ -1481,6 +1619,15 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         const tab = btn.dataset.tab;
         if (tab === _activeTab) return;
+        // Pause globe WebGL loop when leaving threat tab, resume on return
+        if (_activeTab === 'threat') {
+            globe.pauseAnimation();
+            _globePaused = true;
+        } else if (tab === 'threat') {
+            globe.resumeAnimation();
+            _globePaused = false;
+            _globeFlush();
+        }
         _activeTab = tab;
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
         Object.entries(TAB_IDS).forEach(([k, id]) => {
@@ -2081,9 +2228,9 @@ async function pscUpdate() {
 // Periodically recolor arcs based on age (every 5 seconds)
 // ================================================================
 setInterval(() => {
+    if (_globePaused) return;
     const now = Date.now();
     const cutoff = now - MAX_AGE_S * 1000;
-    const before = arcs.length;
     // Prune arcs older than 24h
     for (let i = arcs.length - 1; i >= 0; i--) {
         const attackTime = arcs[i].attackTime || arcTimestamps[i];
@@ -2092,15 +2239,15 @@ setInterval(() => {
             arcTimestamps.splice(i, 1);
         }
     }
-    // Recolor remaining arcs by age
+    // Recolor remaining arcs by age — only push arc data, not points/labels
     arcs.forEach((arc, i) => {
         const attackTime = arc.attackTime || arcTimestamps[i];
         const ageSeconds = attackTime ? (now - attackTime) / 1000 : MAX_AGE_S;
         const [c1, c2] = getArcColor(arc.protocol || 'ssh', ageSeconds);
         arc.color = [c1, c2];
     });
-    if (!_globePaused) _globeFlush();
-}, 5000);
+    _globeFlushArcsOnly();
+}, 30000);
 
 // ================================================================
 // NETWORK MAP (D3 force-directed topology)
@@ -2116,24 +2263,116 @@ let _netSim = null;
 let _netSvg = null, _netG = null;
 
 const NODE_TYPES = {
-    host:   { shape: 'circle',  r: 10, color: '#2dffa1', stroke: '#00ffd5', icon: '⬤' },
-    switch: { shape: 'rect',    w: 28, h: 16, color: '#38bdf8', stroke: '#00b8ff', icon: '▬' },
-    router: { shape: 'diamond', r: 12, color: '#2dffa1', stroke: '#00ffd5', icon: '◈' },
-    lxc:    { shape: 'circle',  r: 10, color: '#b878ff', stroke: '#9b5de5', icon: '⬤' },
-    qemu:   { shape: 'circle',  r: 10, color: '#3b82f6', stroke: '#60a5fa', icon: '⬤' },
+    host:    { shape: 'circle',  r: 10,       color: '#2dffa1', stroke: '#00ffd5' },
+    switch:  { shape: 'rect',    w: 28, h: 16, color: '#38bdf8', stroke: '#00b8ff' },
+    router:  { shape: 'rect',    w: 28, h: 16, color: '#38bdf8', stroke: '#00b8ff' },
+    ap:      { shape: 'rect',    w: 28, h: 16, color: '#38bdf8', stroke: '#00b8ff' },
+    cloud:   { shape: 'cloud',   w: 52, h: 30, color: '#0d2035', stroke: '#38bdf8' },
+    lxc:     { shape: 'circle',  r: 10,       color: '#b878ff', stroke: '#9b5de5' },
+    qemu:    { shape: 'circle',  r: 10,       color: '#3b82f6', stroke: '#60a5fa' },
+    nas:     { shape: 'circle',  r: 10,       color: '#ffe83b', stroke: '#fbbf24' },
+    mobile:  { shape: 'circle',  r: 10,       color: '#86efac', stroke: '#4ade80' },
+    tv:      { shape: 'rect',    w: 28, h: 16, color: '#fb923c', stroke: '#f97316' },
+    printer: { shape: 'circle',  r: 10,       color: '#f97316', stroke: '#ea580c' },
+    server:  { shape: 'circle',  r: 10,       color: '#22c55e', stroke: '#16a34a' },
+    rpi:     { shape: 'circle',  r: 10,       color: '#ef4444', stroke: '#dc2626' },
+    other:   { shape: 'circle',  r: 10,       color: '#ea580c', stroke: '#c2410c' },
+    iot:     { shape: 'circle',  r: 10,       color: '#06b6d4', stroke: '#0891b2' },
+    pc:      { shape: 'circle',  r: 10,       color: '#94a3b8', stroke: '#64748b' },
+    network: { shape: 'rect',    w: 28, h: 16, color: '#166534', stroke: '#15803d' },
 };
 
+const _NET_RECT_TYPES = new Set(['switch', 'router', 'ap', 'network']);
+
 function netNodeColor(n) {
+    if (n.type === 'cloud') return NODE_TYPES.cloud.color;
     const dev = _netDevices.get(n.mac);
     const offline = dev && !dev.is_online;
-    if (offline) return '#555';
-    return (NODE_TYPES[n.type] || NODE_TYPES.host).color;
+    const devCfg = (_netSettings.devices || {})[n.mac] || {};
+    if (_NET_RECT_TYPES.has(n.type)) {
+        if (offline) return '#0d1e26';
+        return devCfg.is_isp ? '#ffe83b' : (NODE_TYPES[n.type] || NODE_TYPES.host).color;
+    }
+    // Circle fill = online → green, offline → grey
+    return offline ? '#374151' : '#22c55e';
 }
 
 function netNodeStroke(n) {
-    const dev = _netDevices.get(n.mac);
-    if (dev && !dev.is_online) return '#333';
+    if (n.type === 'cloud') return NODE_TYPES.cloud.stroke;
+    const devCfg = (_netSettings.devices || {})[n.mac] || {};
+    if (_NET_RECT_TYPES.has(n.type)) {
+        const dev = _netDevices.get(n.mac);
+        if (dev && !dev.is_online) return '#1a3040';
+        return devCfg.is_isp ? '#f59e0b' : (NODE_TYPES[n.type] || NODE_TYPES.host).stroke;
+    }
+    // Circle stroke = type color always
     return (NODE_TYPES[n.type] || NODE_TYPES.host).stroke;
+}
+
+function _netSyncNodeTypes() {
+    if (!_netData) return;
+    const devSettings = _netSettings.devices || {};
+    _netData.nodes.forEach(n => {
+        if (!n.mac) return;
+        const cfg = devSettings[n.mac];
+        if (cfg?.type) n.type = cfg.type;
+    });
+}
+
+function _netSyncIspCloud() {
+    if (!_netData) return;
+    const devSettings = _netSettings.devices || {};
+    const ispMac = Object.entries(devSettings).find(([, c]) => c.is_isp)?.[0];
+
+    if (ispMac) {
+        const ispNodeId = `h-${ispMac}`;
+        if (!_netData.nodes.some(n => n.id === 'isp-cloud')) {
+            const rn = _netData.nodes.find(n => n.id === ispNodeId);
+            _netData.nodes.push({
+                id: 'isp-cloud', type: 'cloud', label: 'ISP', hostname: 'ISP',
+                ip: '', mac: '',
+                x: (rn?.x || 400) - 180, y: (rn?.y || 300) - 120,
+            });
+        }
+        // Remove stale isp-cloud links (wrong target) and ensure correct one exists
+        _netData.links = _netData.links.filter(l => {
+            const s = l.source?.id || l.source;
+            const t = l.target?.id || l.target;
+            if (s === 'isp-cloud' || t === 'isp-cloud') {
+                return (s === 'isp-cloud' && t === ispNodeId) || (s === ispNodeId && t === 'isp-cloud');
+            }
+            return true;
+        });
+        const hasLink = _netData.links.some(l => {
+            const s = l.source?.id || l.source;
+            const t = l.target?.id || l.target;
+            return (s === 'isp-cloud' && t === ispNodeId) || (s === ispNodeId && t === 'isp-cloud');
+        });
+        if (!hasLink) _netData.links.push({ source: 'isp-cloud', target: ispNodeId });
+    } else {
+        _netData.nodes = _netData.nodes.filter(n => n.id !== 'isp-cloud');
+        _netData.links = _netData.links.filter(l => {
+            const s = l.source?.id || l.source;
+            const t = l.target?.id || l.target;
+            return s !== 'isp-cloud' && t !== 'isp-cloud';
+        });
+    }
+    if (_netSim) {
+        _netSim.nodes(_netData.nodes);
+        _netSim.force('link').links(_netData.links);
+        _netSim.alpha(0.3).restart();
+    }
+}
+
+function _topoForSave() {
+    return {
+        nodes: _netData.nodes,
+        links: _netData.links.map(l => {
+            const s = typeof l.source === 'object' ? l.source.id : l.source;
+            const t = typeof l.target === 'object' ? l.target.id : l.target;
+            return { ...l, source: s, target: t };
+        }),
+    };
 }
 
 async function netInit() {
@@ -2145,11 +2384,17 @@ async function netInit() {
     const w = document.getElementById('net-svg').clientWidth  || 800;
     const h = document.getElementById('net-svg').clientHeight || 500;
 
-    svg.append('defs').append('marker')
+    const defs = svg.append('defs');
+    defs.append('marker')
         .attr('id', 'arrowhead')
         .attr('viewBox', '-0 -5 10 10').attr('refX', 18).attr('refY', 0)
         .attr('orient', 'auto').attr('markerWidth', 6).attr('markerHeight', 6)
         .append('path').attr('d', 'M 0,-5 L 10,0 L 0,5').attr('fill', '#14333a');
+    const glowFilter = defs.append('filter').attr('id', 'isp-glow').attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%');
+    glowFilter.append('feGaussianBlur').attr('stdDeviation', '4').attr('result', 'blur');
+    const feMerge = glowFilter.append('feMerge');
+    feMerge.append('feMergeNode').attr('in', 'blur');
+    feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
 
     _netG = svg.append('g');
 
@@ -2161,16 +2406,51 @@ async function netInit() {
         fetch('/api/topo-data').then(r => r.ok ? r.json() : { nodes: [], links: [] }),
         fetch('/api/network/settings').then(r => r.json()),
     ]);
+    // Normalize link source/target from saved objects back to string IDs for D3
+    _netData.links = _netData.links.map(l => {
+        const s = typeof l.source === 'object' ? l.source.id : l.source;
+        const t = typeof l.target === 'object' ? l.target.id : l.target;
+        return { ...l, source: s, target: t };
+    });
+    // Clear saved pins so force simulation can freely organize the layout
+    _netData.nodes.forEach(n => { delete n.fx; delete n.fy; });
+    // Normalize old double-prefix vsw node IDs: vsw-vsw-X → vsw-X (canonical = sw.id)
+    let topoChanged = false;
+    _netData.nodes.forEach(n => {
+        if (!n.id.startsWith('vsw-vsw-')) return;
+        const newId = n.id.slice('vsw-'.length);
+        _netData.links.forEach(l => {
+            if (l.source === n.id) l.source = newId;
+            if (l.target === n.id) l.target = newId;
+        });
+        n.id = newId;
+        topoChanged = true;
+    });
+    // Deduplicate nodes by id (keep last occurrence to prefer freshest data)
+    const _seenIds = new Map();
+    _netData.nodes.forEach(n => _seenIds.set(n.id, n));
+    _netData.nodes = [..._seenIds.values()];
+
     const devList = await fetch('/api/devices').then(r => r.json()).catch(() => []);
     _netDevices = new Map(devList.map(d => [d.mac, d]));
 
-    // Auto-add devices with visualize=true that aren't already in topo
+    // Helper: convert parent_mac value to node ID
+    const _parentNodeId = pm => pm.startsWith('vsw:') ? pm.slice('vsw:'.length) : `h-${pm}`;
+
+    // Sync node types from net_settings (fixes stale type='host' from old topo saves)
     const devSettings = _netSettings.devices || {};
+    _netData.nodes.forEach(n => {
+        if (!n.mac) return;
+        const cfg = devSettings[n.mac];
+        if (cfg?.type) n.type = cfg.type;
+    });
+
+    // Auto-add devices with visualize=true OR switch/router/ap type
     const w0 = document.getElementById('net-svg').clientWidth  || 800;
     const h0 = document.getElementById('net-svg').clientHeight || 500;
-    let topoChanged = false;
+    const AUTO_TYPES = new Set(['switch', 'router', 'ap']);
     for (const [mac, cfg] of Object.entries(devSettings)) {
-        if (!cfg.visualize) continue;
+        if (!cfg.visualize && !AUTO_TYPES.has(cfg.type)) continue;
         const nodeId = `h-${mac}`;
         if (_netData.nodes.some(n => n.id === nodeId)) continue;
         const dev = _netDevices.get(mac);
@@ -2184,11 +2464,23 @@ async function netInit() {
         });
         topoChanged = true;
     }
-    // Add links for parent_mac connections (device-to-device only)
+    // Auto-add virtual switches as nodes (canonical id = sw.id, e.g. 'vsw-1779451687')
+    for (const sw of (_netSettings.virtual_switches || [])) {
+        const nodeId = sw.id;
+        if (_netData.nodes.some(n => n.id === nodeId)) continue;
+        _netData.nodes.push({
+            id: nodeId, type: 'switch',
+            label: sw.hostname, hostname: sw.hostname,
+            ip: '', mac: '',
+            x: w0/2 + (Math.random()-0.5)*300, y: h0/2 + (Math.random()-0.5)*300,
+        });
+        topoChanged = true;
+    }
+    // Add links for parent_mac connections (device-to-device or device-to-vsw)
     for (const [mac, cfg] of Object.entries(devSettings)) {
-        if (!cfg.visualize || !cfg.parent_mac || cfg.parent_mac.startsWith('vsw:')) continue;
+        if ((!cfg.visualize && !AUTO_TYPES.has(cfg.type)) || !cfg.parent_mac) continue;
         const childId = `h-${mac}`;
-        const parentId = `h-${cfg.parent_mac}`;
+        const parentId = _parentNodeId(cfg.parent_mac);
         if (!_netData.nodes.some(n => n.id === childId)) continue;
         if (!_netData.nodes.some(n => n.id === parentId)) continue;
         const linked = _netData.links.some(l => {
@@ -2197,18 +2489,37 @@ async function netInit() {
             return (s === parentId && t === childId) || (s === childId && t === parentId);
         });
         if (!linked) {
-            _netData.links.push({ source: parentId, target: childId, label: cfg.parent_port || '' });
+            _netData.links.push({ source: parentId, target: childId, label: cfg.parent_port || '', wifi: cfg.connection_type === 'wifi' });
             topoChanged = true;
         }
     }
-    if (topoChanged) fetch('/api/topo-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(_netData) }).catch(() => {});
+    // Add links for virtual switch parent connections
+    for (const sw of (_netSettings.virtual_switches || [])) {
+        if (!sw.parent_mac) continue;
+        const childId = sw.id;
+        const parentId = _parentNodeId(sw.parent_mac);
+        if (!_netData.nodes.some(n => n.id === childId)) continue;
+        if (!_netData.nodes.some(n => n.id === parentId)) continue;
+        const linked = _netData.links.some(l => {
+            const s = typeof l.source === 'object' ? l.source.id : l.source;
+            const t = typeof l.target === 'object' ? l.target.id : l.target;
+            return (s === parentId && t === childId) || (s === childId && t === parentId);
+        });
+        if (!linked) {
+            _netData.links.push({ source: parentId, target: childId, label: '' });
+            topoChanged = true;
+        }
+    }
+    _netSyncIspCloud();
+    if (topoChanged) fetch('/api/topo-data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(_topoForSave()) }).catch(() => {});
 
     // D3 force simulation
     _netSim = d3.forceSimulation(_netData.nodes)
-        .force('link', d3.forceLink(_netData.links).id(d => d.id).distance(120))
-        .force('charge', d3.forceManyBody().strength(-300))
+        .force('link', d3.forceLink(_netData.links).id(d => d.id).distance(65).strength(0.8))
+        .force('charge', d3.forceManyBody().strength(-80))
         .force('center', d3.forceCenter(w / 2, h / 2))
-        .force('collision', d3.forceCollide(30))
+        .force('collision', d3.forceCollide(44))
+        .alphaDecay(0.012)
         .on('tick', netTick);
 
     netRender();
@@ -2220,10 +2531,19 @@ function netRender() {
     if (!_netG) return;
     _netG.selectAll('*').remove();
 
+    const _devCfg = _netSettings.devices || {};
+    const _linkConn = d => {
+        if (d.wifi) return 'wifi';
+        const tgt = typeof d.target === 'object' ? d.target : _netData.nodes.find(n => n.id === d.target);
+        return tgt?.mac ? (_devCfg[tgt.mac]?.connection_type || 'ethernet') : 'ethernet';
+    };
+    const _LINK_COLOR = { ethernet: '#14333a', wifi: '#3b82f6', virtual: '#f97316' };
     const linkSel = _netG.selectAll('.net-link')
         .data(_netData.links).enter().append('line')
         .attr('class', 'net-link')
-        .style('stroke', '#14333a').style('stroke-width', 1.5);
+        .style('stroke', d => _LINK_COLOR[_linkConn(d)] || '#14333a')
+        .style('stroke-width', 1.5)
+        .style('stroke-dasharray', d => _linkConn(d) === 'wifi' ? '5,3' : null);
 
     const linkLabelSel = _netG.selectAll('.net-link-label')
         .data(_netData.links).enter().append('text')
@@ -2247,22 +2567,39 @@ function netRender() {
     nodeSel.each(function(d) {
         const g = d3.select(this);
         const cfg = NODE_TYPES[d.type] || NODE_TYPES.host;
-        if (d.type === 'switch') {
+        const devCfg = (_netSettings.devices || {})[d.mac] || {};
+        if (d.type === 'cloud') {
             g.append('rect')
                 .attr('x', -cfg.w/2).attr('y', -cfg.h/2)
                 .attr('width', cfg.w).attr('height', cfg.h)
-                .attr('rx', 2).style('fill', netNodeColor(d)).style('stroke', netNodeStroke(d)).style('stroke-width', 1.5);
-        } else if (d.type === 'router') {
-            const r = cfg.r;
-            g.append('polygon')
-                .attr('points', `0,${-r} ${r},0 0,${r} ${-r},0`)
-                .style('fill', netNodeColor(d)).style('stroke', netNodeStroke(d)).style('stroke-width', 1.5);
+                .attr('rx', cfg.h/2).style('fill', cfg.color).style('stroke', cfg.stroke)
+                .style('stroke-width', 1.5).style('stroke-dasharray', '4,2');
+            g.append('text').attr('y', 6).style('font-size', '16px').style('text-anchor', 'middle')
+                .style('pointer-events', 'none').text('☁');
+        } else if (_NET_RECT_TYPES.has(d.type)) {
+            if (devCfg.is_isp) {
+                g.append('rect')
+                    .attr('x', -cfg.w/2 - 5).attr('y', -cfg.h/2 - 5)
+                    .attr('width', cfg.w + 10).attr('height', cfg.h + 10)
+                    .attr('rx', 4).style('fill', '#ffe83b').style('opacity', 0.25)
+                    .attr('filter', 'url(#isp-glow)');
+            }
+            g.append('rect')
+                .attr('x', -cfg.w/2).attr('y', -cfg.h/2)
+                .attr('width', cfg.w).attr('height', cfg.h)
+                .attr('rx', 2).style('fill', netNodeColor(d)).style('stroke', netNodeStroke(d))
+                .style('stroke-width', devCfg.is_isp ? 2.5 : 1.5);
+            const _RECT_ICON = { switch: 'SW', router: 'R', ap: 'AP', network: 'N' };
+            const icon = _RECT_ICON[d.type];
+            if (icon) g.append('text').attr('y', 4).style('font-size', '7px').style('font-weight', '800')
+                .style('fill', devCfg.is_isp ? '#0d1e26' : '#001830').style('text-anchor', 'middle')
+                .style('pointer-events', 'none').style('letter-spacing', '0.5px').text(icon);
         } else {
             g.append('circle').attr('r', cfg.r)
                 .style('fill', netNodeColor(d)).style('stroke', netNodeStroke(d)).style('stroke-width', 1.5);
         }
         g.append('text').attr('class', 'net-node-label')
-            .attr('y', (d.type === 'switch' ? 14 : 18))
+            .attr('y', (d.type === 'cloud' ? cfg.h/2 + 12 : _NET_RECT_TYPES.has(d.type) ? 14 : 18))
             .style('font-size', '10px').style('fill', '#cfe7ec').style('text-anchor', 'middle')
             .style('pointer-events', 'none')
             .text(d.label || d.hostname || d.ip || d.id);
@@ -2273,7 +2610,7 @@ function netRender() {
 
     _netSim.nodes(_netData.nodes);
     _netSim.force('link').links(_netData.links);
-    _netSim.alpha(0.1).restart();
+    _netSim.alpha(0.3).restart();
 
     netHighlight();
 }
@@ -2307,7 +2644,7 @@ const _netTT = (() => { const el = document.createElement('div'); el.id = 'net-t
 function netShowTooltip(ev, d) {
     const dev = _netDevices.get(d.mac);
     const ports = dev?.ports || '—';
-    const typeLabel = { lxc: 'LXC', qemu: 'QEMU', host: 'HOST', switch: 'SWITCH', router: 'ROUTER' }[d.type] || d.type || 'HOST';
+    const typeLabel = { lxc: 'LXC', qemu: 'QEMU', host: 'HOST', switch: 'SWITCH', router: 'ROUTER', nas: 'NAS', mobile: 'MOBILE', tv: 'TV', printer: 'PRINTER', server: 'SERVER', rpi: 'RPI', other: 'OTHER' }[d.type] || d.type?.toUpperCase() || 'HOST';
     const online = dev ? (dev.is_online ? 'ONLINE' : 'OFFLINE') : '—';
     _netTT.innerHTML =
         `<div class="net-tt-title">${escape(d.label || d.hostname || d.id)}</div>` +
@@ -2359,6 +2696,7 @@ function netClickNode(d) {
     }
     _netSelected = d.id;
     netHighlight();
+    if (d.mac) { openDeviceModal(d.mac); return; }
     netOpenPanel(d);
 }
 
@@ -2569,27 +2907,24 @@ $('net-save-btn').addEventListener('click', async () => {
         await fetch('/api/topo-data', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(_netData)
+            body: JSON.stringify(_topoForSave())
         });
         $('net-hint').textContent = 'Saved.';
         setTimeout(() => { $('net-hint').textContent = _netEdit ? 'EDIT MODE' : ''; }, 2000);
     } catch { $('net-hint').textContent = 'Save failed.'; }
 });
 
-$('net-reseed-btn').addEventListener('click', async () => {
-    if (!confirm('Reseed from /api/devices? Current topology will be replaced.')) return;
-    const devs = await fetch('/api/devices').then(r => r.json()).catch(() => []);
+$('net-reseed-btn').addEventListener('click', () => {
+    if (!_netSim) return;
     const w = document.getElementById('net-svg').clientWidth  || 800;
     const h = document.getElementById('net-svg').clientHeight || 500;
-    _netData.nodes = devs.map((d, i) => ({
-        id: `h-${d.mac}`, type: 'host', label: d.hostname || d.ip,
-        hostname: d.hostname, ip: d.ip, mac: d.mac,
-        x: 80 + (i % 6) * 130, y: 80 + Math.floor(i / 6) * 130
-    }));
-    _netData.links = [];
-    $('net-node-count').textContent = _netData.nodes.length;
-    $('net-link-count').textContent = 0;
-    netRender();
+    _netData.nodes.forEach(n => {
+        delete n.fx; delete n.fy;
+        n.x = w/2 + (Math.random() - 0.5) * 200;
+        n.y = h/2 + (Math.random() - 0.5) * 200;
+    });
+    _netSim.nodes(_netData.nodes);
+    _netSim.alpha(0.9).restart();
 });
 
 // ── DB Viewer ─────────────────────────────────────────────────────────────────

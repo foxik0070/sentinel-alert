@@ -106,6 +106,13 @@
             <input id="vsw-ports" type="number" value="8" min="1" max="48"
                 style="width:100%;padding:5px 8px;background:#0a1418;color:var(--fg);border:1px solid #1a4046;font-family:inherit;font-size:12px;outline:none;">
         </div>
+        <div style="margin-top:8px;">
+            <div style="font-size:9px;letter-spacing:1px;color:#4d7479;margin-bottom:3px;">PARENT (connected to)</div>
+            <select id="vsw-parent"
+                style="width:100%;padding:5px 8px;background:#0a1418;color:var(--fg);border:1px solid #1a4046;font-family:inherit;font-size:11px;outline:none;">
+                <option value="">— none —</option>
+            </select>
+        </div>
         <div class="modal-actions" style="margin-top:12px;">
             <button class="btn" id="vsw-del" style="color:#ff2a5e;border-color:#ff2a5e;display:none;">DELETE</button>
             <button class="btn ghost" onclick="document.getElementById('vsw-modal').classList.add('hidden')">CANCEL</button>
@@ -421,7 +428,7 @@
             <button class="btn" id="net-add-router">+ ROUTER</button>
             <button class="btn" id="net-add-link">+ LINK</button>
             <button class="btn primary" id="net-save-btn">SAVE</button>
-            <button class="btn" id="net-reseed-btn">RESEED</button>
+            <button class="btn" id="net-reseed-btn">AUTO</button>
             <span id="net-hint" style="color:#4d7479;font-size:10px;margin-left:8px;"></span>
         </div>
         <div class="net-tb-right">

@@ -141,6 +141,15 @@ html, body {
         "purple yellow grey";
 }
 
+/* Logged-out: drop empty left column, expand globe area */
+.grid.no-auth {
+    grid-template-columns: 1fr 280px;
+    grid-template-areas:
+        "yellow  green"
+        "yellow  users-area"
+        "yellow  grey";
+}
+
 .panel {
     position: relative;
     background: linear-gradient(180deg, rgba(8,16,18,0.92), rgba(2,6,10,0.92));
@@ -281,11 +290,13 @@ html, body {
 .log .src    { width: 70px; flex: 0 0 70px; text-transform: uppercase; font-size: 10px; padding-top: 1px; }
 .log .msg    { flex: 1; min-width: 0; color: var(--fg); word-break: break-word; overflow-wrap: break-word; }
 .log .src.scanner  { color: var(--green); }
-.log .src.fail2ban { color: var(--yellow); }
-.log .src.honeypot { color: var(--red); }
+.log .src.fail2ban { color: #a028ff; }
+.log .src.honeypot { color: var(--accent); }
+.log .src.proxy    { color: var(--green); }
 .log .src.demo     { color: var(--purple); }
 .log .src.system   { color: var(--accent); }
-.log .row.level-attack .msg { color: var(--red); }
+.log .src.who      { color: #38bdf8; }
+.log .row.level-attack .msg { color: var(--fg); }
 .log .row.level-warn   .msg { color: var(--yellow); }
 .log .row.level-good   .msg { color: var(--green); }
 
@@ -636,9 +647,22 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
             "purple    users-area"
             "grey      grey";
     }
+    .grid.no-auth {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "yellow"
+            "green"
+            "grey";
+        grid-template-rows: 340px auto auto;
+    }
     .globe-panel { height: 340px; }
     .fsc-stats { grid-template-columns: repeat(4, 1fr); }
     .fsc-detail-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* Disable expensive scanline animation on touch devices */
+@media (max-width: 1100px) {
+    .scanlines { display: none; }
 }
 
 /* Mobile: ≤640px */

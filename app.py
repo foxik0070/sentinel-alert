@@ -327,6 +327,20 @@ def get_device(mac: str):
     return result[0]
 
 
+@app.delete("/api/device/{mac}")
+async def delete_device(request: Request, mac: str):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM devices WHERE mac = ?", (mac.lower(),))
+    conn.commit()
+    conn.close()
+    data = _load_net_settings()
+    data.get("devices", {}).pop(mac.lower(), None)
+    _save_net_settings(data)
+    return {"ok": True}
+
+
 @app.get("/api/attacks")
 def get_attacks(limit: int = 200):
     return _query(
@@ -631,10 +645,12 @@ async def net_settings_post(payload: dict = Body(...)):
         "notify_connect":    bool(payload.get("notify_connect",    existing.get("notify_connect",    True))),
         "notify_disconnect": bool(payload.get("notify_disconnect", existing.get("notify_disconnect", True))),
         "notify_new":        bool(payload.get("notify_new",        existing.get("notify_new",        True))),
-        "type":        payload.get("type",        existing.get("type",        "")),
-        "parent_mac":  payload.get("parent_mac",  existing.get("parent_mac",  "")),
-        "parent_port": payload.get("parent_port", existing.get("parent_port", "")),
-        "visualize":   bool(payload.get("visualize",   existing.get("visualize",   False))),
+        "type":              payload.get("type",            existing.get("type",            "")),
+        "parent_mac":        payload.get("parent_mac",      existing.get("parent_mac",      "")),
+        "parent_port":       payload.get("parent_port",     existing.get("parent_port",     "")),
+        "connection_type":   payload.get("connection_type", existing.get("connection_type", "ethernet")),
+        "visualize":         bool(payload.get("visualize",   existing.get("visualize",   False))),
+        "is_isp":            bool(payload.get("is_isp",      existing.get("is_isp",      False))),
     }
     _save_net_settings(data)
     return {"ok": True, "mac": mac, **devices[mac]}
@@ -647,7 +663,12 @@ async def virtual_switch_post(payload: dict = Body(...)):
     data = _load_net_settings()
     switches = data.setdefault("virtual_switches", [])
     sw_id = payload.get("id") or f"vsw-{int(_time.time())}"
-    sw = {"id": sw_id, "hostname": str(payload.get("hostname", "switch")), "ports": int(payload.get("ports", 8))}
+    sw = {
+        "id": sw_id,
+        "hostname": str(payload.get("hostname", "switch")),
+        "ports": int(payload.get("ports", 8)),
+        "parent_mac": str(payload.get("parent_mac", "")),
+    }
     idx = next((i for i, s in enumerate(switches) if s["id"] == sw_id), None)
     if idx is not None:
         switches[idx] = sw
