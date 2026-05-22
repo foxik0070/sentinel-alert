@@ -476,6 +476,10 @@ else
     info "Přidej klíč do $CONF_FILE ([geoip] license_key) a spusť znovu setup.sh."
 fi
 
+# ── Data directory and default files ──────────────────────────────────────
+mkdir -p "$APP_DIR/data"
+[[ -f "$APP_DIR/data/domains.json" ]] || echo '[]' > "$APP_DIR/data/domains.json"
+
 # ── SSH key for collector ──────────────────────────────────────────────────
 echo ""
 echo -e "${CYN}── SSH Key (fail2ban collector) ─────────────────${NC}"

@@ -1323,7 +1323,7 @@ function applyAuthState(authenticated) {
 
     if (_workMode) {
         // Work mode overrides: home-only tabs/panels stay hidden regardless of auth
-        ['settings-btn', 'tab-btn-security', 'tab-btn-proxy', 'tab-btn-network'].forEach(id => {
+        ['settings-btn', 'tab-btn-security', 'tab-btn-proxy', 'tab-btn-network', 'tab-btn-services'].forEach(id => {
             const el = $(id); if (el) el.style.display = 'none';
         });
         if (lanPanel) lanPanel.style.display = 'none';
@@ -1612,7 +1612,7 @@ detailModal.addEventListener('click', (e) => {
 // ================================================================
 // TAB SWITCHING
 // ================================================================
-const TAB_IDS = { threat: 'tab-threat', security: 'tab-security', proxy: 'tab-proxy', network: 'tab-network' };
+const TAB_IDS = { threat: 'tab-threat', security: 'tab-security', proxy: 'tab-proxy', network: 'tab-network', services: 'tab-services' };
 let _activeTab = 'threat';
 
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -1636,6 +1636,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
         if (tab === 'security') { fscInit(); fscUpdate(); fscLoadHosts(); }
         if (tab === 'proxy')    { pscInit(); pscUpdate(); }
         if (tab === 'network')  { netInit(); }
+        if (tab === 'services') { svcInit(); }
     });
 });
 
@@ -3147,3 +3148,128 @@ $('ns-export-btn').addEventListener('click', () => {
 $('ns-scan-btn').addEventListener('click', () => {
     alert('Port scan: select a device from the list and use the device modal to view/refresh ports.');
 });
+
+// ================================================================
+// SERVICES TAB — domain / HTTP / HTTPS monitor
+// ================================================================
+
+let _svcInitDone = false;
+let _svcResults  = [];
+
+function svcInit() {
+    if (_svcInitDone) { svcRender(); return; }
+    _svcInitDone = true;
+
+    document.getElementById('tab-services').style.display = 'flex';
+
+    $('svc-check-btn').addEventListener('click', svcCheckAll);
+    $('svc-add-btn').addEventListener('click', svcAdd);
+    $('svc-add-url').addEventListener('keydown', e => { if (e.key === 'Enter') svcAdd(); });
+
+    svcLoad();
+}
+
+async function svcLoad() {
+    const domains = await fetch('/api/domains').then(r => r.json()).catch(() => []);
+    _svcResults = domains.map(d => ({ ...d }));
+    svcRender();
+}
+
+async function svcCheckAll() {
+    const btn = $('svc-check-btn');
+    btn.textContent = '⟳ CHECKING…';
+    btn.disabled = true;
+    $('svc-status').textContent = '';
+    try {
+        _svcResults = await fetch('/api/domains/check', { method: 'POST' }).then(r => r.json());
+        $('svc-status').textContent = `Last check: ${new Date().toLocaleTimeString()}`;
+    } catch (e) {
+        $('svc-status').textContent = 'Check failed.';
+    }
+    btn.textContent = '⟳ CHECK ALL';
+    btn.disabled = false;
+    svcRender();
+}
+
+async function svcAdd() {
+    const url  = ($('svc-add-url').value  || '').trim();
+    const name = ($('svc-add-name').value || '').trim();
+    if (!url) return;
+    const res = await fetch('/api/domains', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, name })
+    });
+    if (res.ok) {
+        $('svc-add-url').value  = '';
+        $('svc-add-name').value = '';
+        await svcLoad();
+        svcCheckAll();
+    } else {
+        const j = await res.json().catch(() => ({}));
+        $('svc-status').textContent = j.error || 'Error adding domain.';
+    }
+}
+
+async function svcDelete(idx) {
+    if (!confirm('Remove this service?')) return;
+    await fetch(`/api/domains/${idx}`, { method: 'DELETE' });
+    await svcLoad();
+}
+
+function svcStatusBadge(r) {
+    if (r.alive === undefined) return '<span style="color:#4d7479;">—</span>';
+    const code = r.status_code ? ` ${r.status_code}` : '';
+    return r.alive
+        ? `<span style="color:#22c55e;font-weight:700;">●${code}</span>`
+        : `<span style="color:#ef4444;font-weight:700;">✖${code}</span>`;
+}
+
+function svcSslBadge(r) {
+    if (!r.ssl) return r.scheme === 'https' ? '<span style="color:#ef4444;">✖</span>' : '<span style="color:#4d7479;">—</span>';
+    if (!r.ssl.valid) return `<span style="color:#ef4444;" title="${escape(r.ssl.error||'')}">✖ INVALID</span>`;
+    const days = r.ssl.days_left;
+    const col = days < 14 ? '#ef4444' : days < 30 ? '#fb923c' : '#22c55e';
+    return `<span style="color:${col};font-weight:700;">✔</span>`;
+}
+
+function svcExpiryCell(r) {
+    if (!r.ssl?.valid) return '<span style="color:#4d7479;">—</span>';
+    const days = r.ssl.days_left;
+    const col = days < 14 ? '#ef4444' : days < 30 ? '#fb923c' : '#22c55e';
+    return `<span style="color:${col};" title="Valid until ${r.ssl.not_after}">${r.ssl.not_after} <span style="font-size:9px;">(${days}d)</span></span>`;
+}
+
+function svcRender() {
+    const tbody = $('svc-tbody');
+    if (!_svcResults.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="padding:20px;text-align:center;color:#4d7479;">No services configured. Add a URL above.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = _svcResults.map((r, i) => `
+        <tr style="border-bottom:1px solid #0a1418;transition:background .1s;" onmouseenter="this.style.background='#0a1418'" onmouseleave="this.style.background=''">
+            <td style="padding:7px 8px;color:#cfe7ec;font-weight:700;">${escape(r.name || r.url)}</td>
+            <td style="padding:7px 8px;color:#4d7479;font-size:10px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                <a href="${escape(r.url)}" target="_blank" rel="noopener" style="color:#38bdf8;text-decoration:none;">${escape(r.url)}</a>
+            </td>
+            <td style="padding:7px 8px;text-align:center;">${svcStatusBadge(r)}</td>
+            <td style="padding:7px 8px;text-align:right;color:#4d7479;">${r.response_ms !== undefined ? r.response_ms + ' ms' : '—'}</td>
+            <td style="padding:7px 8px;text-align:center;">${svcSslBadge(r)}</td>
+            <td style="padding:7px 8px;">${svcExpiryCell(r)}</td>
+            <td style="padding:7px 8px;color:#4d7479;font-size:10px;">${r.ssl?.issuer_org ? escape(r.ssl.issuer_org) : r.ssl?.issuer_cn ? escape(r.ssl.issuer_cn) : '—'}</td>
+            <td style="padding:7px 8px;text-align:center;">
+                <button class="btn" onclick="svcDelete(${i})" style="font-size:9px;padding:2px 6px;color:#ef4444;border-color:#ef4444;">✕</button>
+            </td>
+        </tr>
+        ${r.ssl?.valid && r.ssl.sans?.length ? `
+        <tr style="border-bottom:1px solid #060e12;">
+            <td colspan="8" style="padding:2px 8px 6px 24px;font-size:9px;color:#4d7479;">
+                SAN: ${r.ssl.sans.map(s => `<span style="color:#38bdf8;">${escape(s)}</span>`).join(', ')}
+            </td>
+        </tr>` : ''}
+        ${r.error ? `
+        <tr style="border-bottom:1px solid #060e12;">
+            <td colspan="8" style="padding:2px 8px 6px 24px;font-size:9px;color:#ef4444;">${escape(r.error)}</td>
+        </tr>` : ''}
+    `).join('');
+}

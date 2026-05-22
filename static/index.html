@@ -58,6 +58,7 @@
         <button class="tab-btn" data-tab="security" id="tab-btn-security">SECURITY CTR</button>
         <button class="tab-btn" data-tab="proxy" id="tab-btn-proxy">PROXY MONITOR</button>
         <button class="tab-btn" data-tab="network" id="tab-btn-network">NETWORK MAP</button>
+        <button class="tab-btn auth-only" data-tab="services" id="tab-btn-services">SERVICES</button>
     </div>
 </nav>
 
@@ -449,6 +450,46 @@
             </div>
             <div class="net-panel-body" id="net-panel-body"></div>
         </div>
+    </div>
+
+</main>
+
+<!-- ================================================================ -->
+<!-- TAB: SERVICES                                                      -->
+<!-- ================================================================ -->
+<main id="tab-services" class="svc-view hidden">
+
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <span style="font-size:11px;font-weight:800;letter-spacing:2px;color:#4d7479;">◤ SERVICE MONITOR</span>
+        <button class="btn primary" id="svc-check-btn" style="font-size:10px;">⟳ CHECK ALL</button>
+        <span id="svc-status" style="font-size:10px;color:#4d7479;"></span>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+            <input id="svc-add-url" type="text" placeholder="https://example.com"
+                style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:5px 10px;font-family:inherit;font-size:11px;outline:none;width:220px;letter-spacing:0.5px;">
+            <input id="svc-add-name" type="text" placeholder="Name (optional)"
+                style="background:#02060a;border:1px solid #14333a;color:var(--fg);padding:5px 10px;font-family:inherit;font-size:11px;outline:none;width:140px;">
+            <button class="btn" id="svc-add-btn" style="font-size:10px;">+ ADD</button>
+        </div>
+    </div>
+
+    <div id="svc-table-wrap" style="flex:1;overflow:auto;">
+        <table id="svc-table" style="width:100%;border-collapse:collapse;font-size:11px;">
+            <thead>
+                <tr style="color:#4d7479;text-align:left;border-bottom:1px solid #0e2c30;">
+                    <th style="padding:6px 8px;font-weight:700;letter-spacing:1px;">NAME</th>
+                    <th style="padding:6px 8px;">URL</th>
+                    <th style="padding:6px 8px;text-align:center;">STATUS</th>
+                    <th style="padding:6px 8px;text-align:right;">RESP</th>
+                    <th style="padding:6px 8px;text-align:center;">SSL</th>
+                    <th style="padding:6px 8px;">CERT EXPIRY</th>
+                    <th style="padding:6px 8px;">ISSUER</th>
+                    <th style="padding:6px 8px;text-align:center;"></th>
+                </tr>
+            </thead>
+            <tbody id="svc-tbody">
+                <tr><td colspan="8" style="padding:20px;text-align:center;color:#4d7479;">No services configured. Add a URL above.</td></tr>
+            </tbody>
+        </table>
     </div>
 
 </main>

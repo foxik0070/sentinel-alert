@@ -1,13 +1,16 @@
 import asyncio
 import hashlib
 import hmac
+import json as _json_mod
 import os
 import random
+import socket
 import sqlite3
+import ssl
 import time
 from collections import deque
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Set
 
 from fastapi import Body, FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -827,6 +830,118 @@ async def sniproxy_ban(payload: dict = Body(...)):
     payload.setdefault("time", _time.strftime("%d.%m.%Y %H:%M:%S"))
     sniproxy.add_ban(payload)
     return {"ok": True}
+
+
+# ── Domain / Service Monitor ──────────────────────────────────────────────────
+
+_DOMAINS_PATH = os.path.join(BASE_DIR, "data", "domains.json")
+
+def _load_domains():
+    try:
+        with open(_DOMAINS_PATH) as f:
+            return _json_mod.load(f)
+    except Exception:
+        return []
+
+def _save_domains(data):
+    with open(_DOMAINS_PATH, "w") as f:
+        _json_mod.dump(data, f, indent=2)
+
+def _check_ssl(hostname: str, port: int = 443) -> dict:
+    ctx = ssl.create_default_context()
+    try:
+        with socket.create_connection((hostname, port), timeout=8) as sock:
+            with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
+                cert = ssock.getpeercert()
+        not_after = datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
+        not_before = datetime.strptime(cert["notBefore"], "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
+        days_left = (not_after - datetime.now(timezone.utc)).days
+        issuer = dict(x[0] for x in cert.get("issuer", []))
+        subject = dict(x[0] for x in cert.get("subject", []))
+        sans = [v for t, v in cert.get("subjectAltName", []) if t == "DNS"]
+        return {
+            "valid": True, "days_left": days_left,
+            "not_before": not_before.strftime("%Y-%m-%d"),
+            "not_after": not_after.strftime("%Y-%m-%d"),
+            "issuer_org": issuer.get("organizationName", ""),
+            "issuer_cn": issuer.get("commonName", ""),
+            "subject_cn": subject.get("commonName", ""),
+            "sans": sans[:8],
+        }
+    except ssl.SSLCertVerificationError as e:
+        return {"valid": False, "error": str(e)}
+    except Exception as e:
+        return {"valid": False, "error": str(e)}
+
+async def _check_domain(entry: dict) -> dict:
+    import urllib.request, urllib.error
+    url = entry["url"].rstrip("/")
+    result = {**entry, "checked_at": datetime.now(timezone.utc).isoformat()}
+    t0 = time.monotonic()
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "sentinel-monitor/1.0"}, method="GET")
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            result["status_code"] = resp.status
+            result["alive"] = resp.status < 500
+            result["redirect_url"] = resp.url if resp.url != url else None
+    except urllib.error.HTTPError as e:
+        result["status_code"] = e.code
+        result["alive"] = e.code < 500
+    except Exception as e:
+        result["status_code"] = None
+        result["alive"] = False
+        result["error"] = str(e)
+    result["response_ms"] = round((time.monotonic() - t0) * 1000)
+
+    try:
+        from urllib.parse import urlparse as _up
+        p = _up(url)
+        result["scheme"] = p.scheme
+        result["host"] = p.hostname
+        result["port"] = p.port or (443 if p.scheme == "https" else 80)
+        if p.scheme == "https":
+            result["ssl"] = _check_ssl(p.hostname, p.port or 443)
+    except Exception:
+        pass
+    return result
+
+
+@app.get("/api/domains")
+async def domains_list():
+    return _load_domains()
+
+
+@app.post("/api/domains")
+async def domains_add(payload: dict = Body(...)):
+    url = (payload.get("url") or "").strip()
+    name = (payload.get("name") or url).strip()
+    if not url:
+        return JSONResponse({"error": "url required"}, status_code=400)
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    domains = _load_domains()
+    if any(d["url"] == url for d in domains):
+        return JSONResponse({"error": "already exists"}, status_code=409)
+    domains.append({"url": url, "name": name})
+    _save_domains(domains)
+    return {"ok": True}
+
+
+@app.delete("/api/domains/{idx}")
+async def domains_delete(idx: int):
+    domains = _load_domains()
+    if idx < 0 or idx >= len(domains):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    domains.pop(idx)
+    _save_domains(domains)
+    return {"ok": True}
+
+
+@app.post("/api/domains/check")
+async def domains_check():
+    domains = _load_domains()
+    results = await asyncio.gather(*[_check_domain(d) for d in domains])
+    return list(results)
 
 
 @app.exception_handler(404)
