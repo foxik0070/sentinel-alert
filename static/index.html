@@ -359,16 +359,16 @@
     <!-- Domain + IP charts -->
     <div class="fsc-charts">
         <div class="panel" style="min-height:260px;">
-            <div class="ph">◤ TOP DOMAINS (DATA TRANSFER)</div>
+            <div class="ph">◤ TOP DOMAINS — LAST 24H</div>
             <div style="height:220px;"><canvas id="psc-domain-chart"></canvas></div>
         </div>
         <div class="panel" style="min-height:260px;">
-            <div class="ph">◤ TOP CLIENTS (BY DATA)</div>
+            <div class="ph">◤ TOP CLIENTS — LAST 24H</div>
             <div style="height:220px;"><canvas id="psc-ip-chart"></canvas></div>
         </div>
     </div>
 
-    <!-- Clients / Bans / Live feed — three columns -->
+    <!-- Clients / Live feed — two columns -->
     <div class="psc-bottom-row">
         <div class="panel">
             <div class="ph">◤ ACTIVE CLIENTS</div>
@@ -382,18 +382,6 @@
                         <th style="text-align:right">HITS</th>
                     </tr></thead>
                     <tbody id="psc-clients"></tbody>
-                </table>
-            </div>
-        </div>
-        <div class="panel">
-            <div class="ph">◤ FAIL2BAN BANS</div>
-            <div class="fsc-table-wrap">
-                <table class="fsc-table">
-                    <thead><tr>
-                        <th>TIME</th><th>SERVER</th><th>JAIL</th>
-                        <th>IP</th><th style="text-align:right">FAILS</th>
-                    </tr></thead>
-                    <tbody id="psc-bans"></tbody>
                 </table>
             </div>
         </div>

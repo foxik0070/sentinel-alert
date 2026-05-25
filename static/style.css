@@ -470,10 +470,10 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
 /* Proxy bottom row: 3 equal columns */
 .psc-bottom-row {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 6px;
 }
-.psc-bottom-row .fsc-table-wrap { max-height: 220px; overflow-y: auto; }
+.psc-bottom-row .fsc-table-wrap { max-height: 380px; overflow-y: auto; }
 
 /* Matrix table */
 .fsc-matrix-panel { flex: 1; min-height: 0; }
@@ -857,78 +857,41 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
 .svc-stat-card.red   .val { color: var(--red); text-shadow: 0 0 8px rgba(255,42,94,0.3); }
 .svc-stat-card.grey  .val { color: var(--grey); }
 
-/* Card grid */
-.svc-card-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-    gap: 8px; align-content: start;
-}
+/* Service table container */
+.svc-card-grid { display: block; }
 
-/* Individual card */
-.svc-card {
-    background: var(--panel); border: 1px solid var(--border);
-    border-left: 4px solid #144048;
-    padding: 12px 14px; cursor: pointer;
-    display: flex; flex-direction: column; gap: 8px;
-    transition: border-color .15s, background .1s;
-}
-.svc-card:hover { background: #041216; }
-.svc-card.up   { border-left-color: #22c55e; }
-.svc-card.down { border-left-color: #ef4444; }
-
-/* Card head */
-.svc-card-head { display: flex; align-items: center; gap: 6px; }
-.svc-card-head-right { margin-left: auto; display: flex; gap: 4px; }
+/* Service status dots */
 .svc-status-dot { font-size: 11px; font-weight: 800; letter-spacing: 0.5px; }
 .svc-status-dot.up      { color: #22c55e; }
 .svc-status-dot.down    { color: #ef4444; }
 .svc-status-dot.pending { color: #4d7479; }
 
-/* Card body */
-.svc-card-name {
-    font-size: 14px; font-weight: 800; color: #cfe7ec;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.svc-card-target {
-    font-size: 10px; color: #4d7479;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.svc-card-target a { color: #38bdf8; text-decoration: none; }
+/* Service table rows */
+.svc-table .svc-row { cursor: pointer; transition: background .1s; }
+.svc-table .svc-row:hover { background: #041216; }
+.svc-table .svc-row.up   td:first-child { border-left: 3px solid #22c55e; }
+.svc-table .svc-row.down td:first-child { border-left: 3px solid #ef4444; }
+.svc-table .svc-row.up   { background: rgba(34,197,94,0.03); }
+.svc-table .svc-row.down { background: rgba(239,68,68,0.04); }
 
-/* Stats bar */
-.svc-card-stats {
-    display: flex; border: 1px solid #0e2c30;
+.svc-row-status { white-space: nowrap; }
+.svc-row-name {
+    font-size: 12px; font-weight: 800; color: #cfe7ec;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px;
 }
-.svc-stat-cell {
-    flex: 1; padding: 5px 6px;
-    display: flex; flex-direction: column; align-items: center; gap: 1px;
-    border-right: 1px solid #0e2c30;
-}
-.svc-stat-cell:last-child { border-right: none; }
-.svc-stat-cell .val { font-size: 12px; font-weight: 700; color: #cfe7ec; }
-.svc-stat-cell .lbl { font-size: 8px; letter-spacing: 1px; color: var(--muted); }
+.svc-row-sub { font-size: 10px; color: #4d7479; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+.svc-row-target-link { color: #38bdf8; text-decoration: none; }
+.svc-row-target-text { color: #a0c8cc; }
+.svc-row-soft { color: #4d7479; }
+.svc-row-spark { white-space: nowrap; }
+.svc-row-actions { text-align: right; white-space: nowrap; }
 
-/* Sparkline dots */
-.svc-card-spark {
-    display: flex; align-items: flex-end; gap: 1px; min-height: 20px;
-}
-
-/* Card footer */
-.svc-card-footer {
-    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-    font-size: 9px; color: var(--muted);
-    border-top: 1px solid #0e2c30; padding-top: 6px;
-}
+/* Security badge */
 .svc-sec-badge {
     padding: 1px 5px; font-size: 9px; font-weight: 700;
-    letter-spacing: 0.5px; border: 1px solid;
+    letter-spacing: 0.5px; border: 1px solid; margin-right: 4px;
 }
 .svc-sec-badge.ok   { color: #22c55e; border-color: #22c55e44; background: #22c55e08; }
 .svc-sec-badge.warn { color: #ffe83b; border-color: #ffe83b44; background: #ffe83b08; }
 .svc-sec-badge.fail { color: #ef4444; border-color: #ef444444; background: #ef444408; }
-
-/* Responsive: single column on small screens */
-@media (max-width: 480px) {
-    .svc-card-grid { grid-template-columns: 1fr; }
-}
 

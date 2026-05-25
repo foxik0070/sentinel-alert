@@ -121,33 +121,28 @@ def _process_lines(lines: list[str]) -> int:
         proxy_port = int(d.get("proxy_port") or 0)
         proto = "https" if proxy_port == 443 else "http"
 
+        now = time.time()
+        conn = {
+            "time": d["time"],
+            "date": d["date"],
+            "epoch": now,
+            "src_ip": src_ip,
+            "src_port": d["src_port"],
+            "proxy_port": proxy_port,
+            "dest": dest,
+            "domain": domain,
+            "tx": tx,
+            "rx": rx,
+            "duration": d["duration"],
+            "protocol": proto,
+        }
         with _lock:
             data_store["total_tx"] += tx
             data_store["total_rx"] += rx
             data_store["total_connections"] += 1
-            data_store["top_domains"][domain] = (
-                data_store["top_domains"].get(domain, 0) + tx + rx
-            )
-            if src_ip not in data_store["top_ips"]:
-                data_store["top_ips"][src_ip] = {"tx": 0, "rx": 0, "hits": 0}
-            data_store["top_ips"][src_ip]["tx"] += tx
-            data_store["top_ips"][src_ip]["rx"] += rx
-            data_store["top_ips"][src_ip]["hits"] += 1
-
-            conn = {
-                "time": d["time"],
-                "date": d["date"],
-                "src_ip": src_ip,
-                "src_port": d["src_port"],
-                "proxy_port": proxy_port,
-                "dest": dest,
-                "domain": domain,
-                "tx": tx,
-                "rx": rx,
-                "duration": d["duration"],
-                "protocol": proto,
-            }
             data_store["recent_connections"].insert(0, conn)
+            if len(data_store["recent_connections"]) > 5000:
+                data_store["recent_connections"].pop()
 
         # Push external connections as attack events for globe + log
         if _on_attack and _is_external(src_ip):
@@ -168,8 +163,6 @@ def _process_lines(lines: list[str]) -> int:
                     })
             except Exception:
                 pass
-            if len(data_store["recent_connections"]) > 100:
-                data_store["recent_connections"].pop()
         count += 1
     return count
 
@@ -179,11 +172,32 @@ def _load_stats():
         with open(_STATS_FILE) as f:
             s = json.load(f)
         with _lock:
-            for k in ("total_tx", "total_rx", "total_connections", "top_domains", "top_ips", "bans"):
+            for k in ("total_tx", "total_rx", "total_connections", "bans"):
                 if k in s:
                     data_store[k] = s[k]
     except Exception:
         pass
+
+
+def _recompute_24h():
+    """Prune connections older than 24h and recompute top_domains / top_ips. Lock must be held."""
+    cutoff = time.time() - 86400
+    data_store["recent_connections"] = [
+        c for c in data_store["recent_connections"] if c.get("epoch", 0) >= cutoff
+    ]
+    top_d: dict = {}
+    top_i: dict = {}
+    for c in data_store["recent_connections"]:
+        d = c["domain"]
+        ip = c["src_ip"]
+        top_d[d] = top_d.get(d, 0) + c["tx"] + c["rx"]
+        if ip not in top_i:
+            top_i[ip] = {"tx": 0, "rx": 0, "hits": 0}
+        top_i[ip]["tx"] += c["tx"]
+        top_i[ip]["rx"] += c["rx"]
+        top_i[ip]["hits"] += 1
+    data_store["top_domains"] = top_d
+    data_store["top_ips"] = top_i
 
 
 def _save_stats():
@@ -192,7 +206,7 @@ def _save_stats():
         try:
             with _lock:
                 snapshot = {k: data_store[k] for k in
-                            ("total_tx", "total_rx", "total_connections", "top_domains", "top_ips", "bans")}
+                            ("total_tx", "total_rx", "total_connections", "bans")}
             os.makedirs(os.path.dirname(_STATS_FILE), exist_ok=True)
             with open(_STATS_FILE, "w") as f:
                 json.dump(snapshot, f)
@@ -207,15 +221,18 @@ def _poll_worker():
         with _lock:
             data_store["connected"] = True
             data_store["last_error"] = ""
+            _recompute_24h()
 
     while True:
         time.sleep(5)
         lines = _fetch_lines(200)
         if lines is not None:
             _process_lines(lines)
-            with _lock:
+        with _lock:
+            if lines is not None:
                 data_store["connected"] = True
                 data_store["last_error"] = ""
+            _recompute_24h()
 
 
 def _speed_worker():

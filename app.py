@@ -996,7 +996,7 @@ async def _check_http(svc: dict) -> dict:
     result: dict = {"id": svc["id"], "type": svc.get("type", "http")}
     t0 = time.monotonic()
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         def _do():
             ctx = None if ssl_verify else _ssl_mod._create_unverified_context()
             req = urllib.request.Request(url, headers={"User-Agent": "sentinel-monitor/1.0"}, method=method)
@@ -1033,7 +1033,7 @@ async def _check_http(svc: dict) -> dict:
     try:
         p = _up(url)
         if p.scheme == "https":
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             result["ssl"] = await loop.run_in_executor(None, _check_ssl_sync, p.hostname, p.port or 443, ssl_verify)
     except Exception:
         pass
@@ -1045,7 +1045,7 @@ async def _check_security(url: str, ssl_verify: bool = True) -> list:
     import urllib.request, urllib.error
     import ssl as _ssl_mod
     from urllib.parse import urlparse as _up
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _fetch():
         ctx = None if ssl_verify else _ssl_mod._create_unverified_context()
@@ -1203,7 +1203,7 @@ async def _check_dns(svc: dict) -> dict:
             result["up"] = bool(out)
             result["message"] = out.split("\n")[0][:80] if out else "no answer"
         else:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             addrs = await asyncio.wait_for(
                 loop.run_in_executor(None, socket.getaddrinfo, query, None), timeout=5
             )
@@ -1262,9 +1262,9 @@ async def _store_check_result(svc: dict, result: dict):
     # Security scan for HTTP/HTTPS services (stored in last_result.security)
     if svc.get("type") in ("http", "https") and up and svc.get("target"):
         try:
-            result["security"] = await _check_security(svc["target"], svc.get("ssl_verify", True))
-        except Exception:
-            pass
+            result["security"] = await _check_security(svc["target"], bool(svc.get("ssl_verify", True)))
+        except Exception as _sec_err:
+            print(f"security scan failed for {svc.get('target')}: {_sec_err}")
     # Update last_result in services.json
     services = _load_services()
     for s in services:

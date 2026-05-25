@@ -45,11 +45,8 @@ let _globePaused = false, _histPaused = false;
 let _countryCounts = new Map(); // country → attack arc count (for stroke width)
 
 function _globeFlush() {
-    // Filter arcs by active attack-history filter (ALL shows everything)
-    const visibleArcs = (_attackHistFilter && _attackHistFilter !== 'all')
-        ? arcs.filter(a => (a.protocol || 'fail2ban') === _attackHistFilter)
-        : arcs;
-    const allArcs = [...visibleArcs, ...userArcs];
+    // Globe always shows ALL protocols — history filter only affects the list panel
+    const allArcs = [...arcs, ...userArcs];
     _countryCounts = new Map();
     allArcs.forEach(a => {
         if (a.country && a.protocol !== 'who')
@@ -62,10 +59,7 @@ function _globeFlush() {
 
 // Lightweight arc-only refresh — for periodic recolor (avoids re-uploading points/labels)
 function _globeFlushArcsOnly() {
-    const visibleArcs = (_attackHistFilter && _attackHistFilter !== 'all')
-        ? arcs.filter(a => (a.protocol || 'fail2ban') === _attackHistFilter)
-        : arcs;
-    globe.arcsData([...visibleArcs, ...userArcs]);
+    globe.arcsData([...arcs, ...userArcs]);
 }
 
 // Throttled flush — coalesces rapid calls into one per animation frame
@@ -201,8 +195,8 @@ globeModeEl.addEventListener('click', () => {
 const PROTO_RGB = {
     ssh:      [255, 200,   0],  // yellow
     http:     [  0, 200,  80],  // green
-    https:    [255, 220,   0],  // yellow
-    fail2ban: [160,  40, 255],  // purple
+    https:    [ 30, 160, 255],  // blue
+    fail2ban: [210,  40, 255],  // magenta-purple
     blocked:  [120,  20, 200],  // dark purple
 };
 const _DEFAULT_RGB = [0, 220, 180];  // green-cyan fallback
@@ -211,8 +205,8 @@ const _DEFAULT_RGB = [0, 220, 180];  // green-cyan fallback
 const PROTO_COLOR = {
     ssh:      '#ffc800',
     http:     '#00c850',
-    https:    '#ffdc00',
-    fail2ban: '#a028ff',
+    https:    '#1ea0ff',
+    fail2ban: '#d228ff',
     blocked:  '#7814c8',
     who:      '#38bdf8',
 };
@@ -279,7 +273,7 @@ function refreshCountryPolygons() {
     clearTimeout(_polyRefreshTimer);
     _polyRefreshTimer = setTimeout(() => {
         if (_countriesGeo && !_globePaused) globe.polygonsData(_countriesGeo);
-    }, 10000);
+    }, 1000);
 }
 
 async function loadCountryPolygons() {
@@ -2168,26 +2162,26 @@ async function pscUpdate() {
         _pscCharts.speed.data.labels = h.labels;
         _pscCharts.speed.data.datasets[0].data = h.tx;
         _pscCharts.speed.data.datasets[1].data = h.rx;
-        _pscCharts.speed.update();
+        _pscCharts.speed.update('none');
 
         // Conn chart
         _pscCharts.conn.data.labels = h.labels;
         _pscCharts.conn.data.datasets[0].data = h.conn;
-        _pscCharts.conn.update();
+        _pscCharts.conn.update('none');
 
         // Domain chart — top 10 by bytes
         const domSorted = Object.entries(data.top_domains)
             .sort((a, b) => b[1] - a[1]).slice(0, 10);
         _pscCharts.domain.data.labels = domSorted.map(([d]) => d);
         _pscCharts.domain.data.datasets[0].data = domSorted.map(([, v]) => (v / 1024 / 1024).toFixed(2));
-        _pscCharts.domain.update();
+        _pscCharts.domain.update('none');
 
         // IP doughnut — top 8 clients by total bytes
         const ipSorted = Object.entries(data.top_ips)
             .sort((a, b) => (b[1].tx + b[1].rx) - (a[1].tx + a[1].rx)).slice(0, 8);
         _pscCharts.ip.data.labels = ipSorted.map(([ip]) => ip);
         _pscCharts.ip.data.datasets[0].data = ipSorted.map(([, v]) => v.tx + v.rx);
-        _pscCharts.ip.update();
+        _pscCharts.ip.update('none');
 
         // Clients table
         document.getElementById('psc-clients').innerHTML = ipSorted.map(([ip, v]) => `
@@ -2198,16 +2192,6 @@ async function pscUpdate() {
                 <td style="text-align:right;color:var(--fg);font-weight:bold">${((v.tx + v.rx) / 1024 / 1024).toFixed(2)}</td>
                 <td style="text-align:right;color:var(--muted)">${v.hits}</td>
             </tr>`).join('');
-
-        // Bans table
-        document.getElementById('psc-bans').innerHTML = (data.bans || []).map(b => `
-            <tr>
-                <td style="color:var(--muted);white-space:nowrap">${escape(b.time || '')}</td>
-                <td style="color:#f97316;font-weight:bold">${escape(b.server || '?')}</td>
-                <td style="color:var(--yellow)">${escape(b.jail || '?')}</td>
-                <td style="color:var(--red);font-weight:bold">${escape(b.ip || '?')}</td>
-                <td style="text-align:right;font-weight:bold;color:var(--fg)">${b.failures ?? '?'}</td>
-            </tr>`).join('') || `<tr><td colspan="5" class="empty">No bans recorded yet.</td></tr>`;
 
         // Live feed table
         document.getElementById('psc-live').innerHTML = (data.recent_connections || []).map(c => `
@@ -3358,8 +3342,7 @@ async function svcSubmitFromModal() {
     if (res.ok) {
         const j = await res.json();
         svcCloseModal();
-        await svcLoad();
-        svcCheckOne(j.id);
+        await svcCheckOne(j.id);
     } else {
         const j = await res.json().catch(() => ({}));
         $('m-add-status').textContent = j.error || 'Error adding service.';
@@ -3464,15 +3447,15 @@ function _svcSslStatCell(svc) {
     return `<div class="svc-stat-cell" title="${s.issuer_org||s.issuer_cn||''} · ${s.not_after}"><span class="val" style="color:${col};">🔒 ${s.days_left}d</span><span class="lbl">CERT</span></div>`;
 }
 
-// Single card HTML
-function _svcCard(svc) {
+// Single table row
+function _svcRow(svc) {
     const lr  = svc.last_result;
     const ldb = svc.last_check_db;
     const up  = lr ? lr.up : (ldb ? ldb.status === 'up' : null);
     const cls = up === true ? 'up' : up === false ? 'down' : '';
     const dot = up === true ? '<span class="svc-status-dot up">● UP</span>'
               : up === false ? '<span class="svc-status-dot down">✖ DOWN</span>'
-              : '<span class="svc-status-dot pending">— PENDING</span>';
+              : '<span class="svc-status-dot pending">—</span>';
 
     const rms    = lr?.response_ms ?? ldb?.response_ms;
     const rmsStr = rms != null ? (rms >= 1000 ? `${(rms/1000).toFixed(1)}s` : `${rms}ms`) : '—';
@@ -3482,47 +3465,50 @@ function _svcCard(svc) {
     const u24col = svc.uptime_24h == null ? '#4d7479' : svc.uptime_24h >= 99 ? '#22c55e' : svc.uptime_24h >= 95 ? '#ffe83b' : '#ef4444';
     const u30col = svc.uptime_30d == null ? '#4d7479' : svc.uptime_30d >= 99 ? '#22c55e' : svc.uptime_30d >= 95 ? '#ffe83b' : '#ef4444';
 
-    const sslCell = _svcSslStatCell(svc);
+    // SSL cell
+    const isHttps = (svc.target || '').startsWith('https://') || svc.type === 'https';
+    let sslTd = '<td style="color:#4d7479;">—</td>';
+    if (isHttps) {
+        const s = lr?.ssl;
+        if (!s) sslTd = '<td style="color:#4d7479;font-size:10px;">pending</td>';
+        else if (!s.valid) sslTd = '<td style="color:#ef4444;font-weight:700;">✗ invalid</td>';
+        else {
+            const col = s.days_left < 14 ? '#ef4444' : s.days_left < 30 ? '#fb923c' : '#22c55e';
+            sslTd = `<td style="color:${col};" title="${s.issuer_org||s.issuer_cn||''} · ${s.not_after}">🔒 ${s.days_left}d</td>`;
+        }
+    }
 
-    // Server software display
+    // Target / name cell
+    const isHttp = svc.type === 'http' || svc.type === 'https';
+    const tgtStr = isHttp
+        ? `<a href="${_esc(svc.target)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="svc-row-target-link">${_esc(svc.target)}</a>`
+        : `<span class="svc-row-target-text">${_esc(svc.host || svc.dns_query || (svc.type === 'heartbeat' ? `POST /api/heartbeat/${svc.id}` : ''))}</span>`;
+
     const server = lr?.server || '';
     const xpb    = lr?.x_powered_by || '';
-    const softwareStr = [server, xpb].filter(Boolean).join(' · ');
+    const soft   = [server, xpb].filter(Boolean).join(' · ');
 
-    // Target display for card
-    const isHttp = svc.type === 'http' || svc.type === 'https';
-    const tgt = isHttp
-        ? `<a href="${_esc(svc.target)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#38bdf8;text-decoration:none;">${_esc(svc.target)}</a>`
-        : `<span style="color:#cfe7ec;">${_esc(svc.host || svc.dns_query || '')}</span>`;
+    const codeHint = lr?.status_code ? `<span style="color:#4d7479;font-size:9px;margin-left:6px;">HTTP ${lr.status_code}</span>` : '';
 
-    // Status code hint
-    const codeHint = lr?.status_code ? `<span style="color:#4d7479;font-size:9px;">HTTP ${lr.status_code}</span>` : '';
-
-    return `<div class="svc-card ${cls}" onclick="svcShowDetail('${svc.id}')">
-        <div class="svc-card-head">
-            ${dot}
-            ${_svcTypeBadge(svc.type)}
-            ${codeHint}
-            <div class="svc-card-head-right">
-                <button class="btn" onclick="event.stopPropagation();svcCheckOne('${svc.id}')" style="font-size:9px;padding:2px 5px;" title="Check now">⟳</button>
-                <button class="btn" onclick="event.stopPropagation();svcDelete('${svc.id}')" style="font-size:9px;padding:2px 5px;color:#ef4444;border-color:#ef4444;" title="Remove">✕</button>
-            </div>
-        </div>
-        <div class="svc-card-name" title="${_esc(svc.name)}">${_esc(svc.name)}</div>
-        <div class="svc-card-target">${tgt}</div>
-        <div class="svc-card-stats">
-            <div class="svc-stat-cell"><span class="val" style="color:${rmsCol};">${rmsStr}</span><span class="lbl">RESP</span></div>
-            <div class="svc-stat-cell"><span class="val" style="color:${u24col};">${u24}</span><span class="lbl">24H</span></div>
-            <div class="svc-stat-cell"><span class="val" style="color:${u30col};">${u30}</span><span class="lbl">30D</span></div>
-            ${sslCell}
-        </div>
-        <div class="svc-card-spark">${_svcDots(svc.spark)}</div>
-        <div class="svc-card-footer">
-            ${softwareStr ? `<span style="color:#a0c8cc;">${_esc(softwareStr)}</span>` : ''}
+    return `<tr class="svc-row ${cls}" onclick="svcShowDetail('${svc.id}')">
+        <td class="svc-row-status">${dot}</td>
+        <td>${_svcTypeBadge(svc.type)}${codeHint}</td>
+        <td>
+            <div class="svc-row-name" title="${_esc(svc.name)}">${_esc(svc.name)}</div>
+            <div class="svc-row-sub">${tgtStr}${soft ? `<span class="svc-row-soft"> · ${_esc(soft)}</span>` : ''}</div>
+        </td>
+        <td><span style="color:${rmsCol};font-weight:700;">${rmsStr}</span></td>
+        <td><span style="color:${u24col};">${u24}</span></td>
+        <td><span style="color:${u30col};">${u30}</span></td>
+        ${sslTd}
+        <td style="color:#4d7479;">${_svcLastChecked(svc)}</td>
+        <td class="svc-row-spark">${_svcDots(svc.spark)}</td>
+        <td class="svc-row-actions" onclick="event.stopPropagation()">
             ${_svcSecBadge(lr?.security)}
-            <span style="margin-left:auto;">⏱ ${_svcLastChecked(svc)}</span>
-        </div>
-    </div>`;
+            <button class="btn" onclick="svcCheckOne('${svc.id}')" style="font-size:9px;padding:2px 5px;" title="Check now">⟳</button>
+            <button class="btn" onclick="svcDelete('${svc.id}')" style="font-size:9px;padding:2px 5px;color:#ef4444;border-color:#ef4444;" title="Remove">✕</button>
+        </td>
+    </tr>`;
 }
 
 // ── Detail modal ───────────────────────────────────────────────────────────────
@@ -3684,11 +3670,25 @@ function svcRender() {
         ${pendCnt ? `<div class="svc-stat-card grey"><span class="lbl">PENDING</span><span class="val">${pendCnt}</span></div>` : ''}
     ` : '';
 
-    // Cards
+    // Table
     const grid = $('svc-card-grid');
     if (!_svcData.length) {
-        grid.innerHTML = '<div style="color:#4d7479;padding:30px;text-align:center;grid-column:1/-1;">No services configured. Click + ADD SERVICE to start monitoring.</div>';
+        grid.innerHTML = '<div style="color:#4d7479;padding:30px;text-align:center;">No services configured. Click + ADD SERVICE to start monitoring.</div>';
         return;
     }
-    grid.innerHTML = _svcData.map(_svcCard).join('');
+    grid.innerHTML = `<div class="fsc-table-wrap"><table class="fsc-table svc-table">
+        <thead><tr>
+            <th style="width:70px;">STATUS</th>
+            <th style="width:90px;">TYPE</th>
+            <th>SERVICE / TARGET</th>
+            <th style="width:70px;">RESP</th>
+            <th style="width:60px;">24H</th>
+            <th style="width:60px;">30D</th>
+            <th style="width:80px;">SSL</th>
+            <th style="width:90px;">LAST CHECK</th>
+            <th style="width:130px;">HISTORY</th>
+            <th style="width:140px;text-align:right;padding-right:10px;">ACTIONS</th>
+        </tr></thead>
+        <tbody>${_svcData.map(_svcRow).join('')}</tbody>
+    </table></div>`;
 }
