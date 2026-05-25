@@ -71,7 +71,7 @@ install_system_deps() {
         ubuntu|debian|raspbian|linuxmint)
             apt-get update -qq
             apt-get install -y python3 python3-pip python3-venv python3-dev \
-                               openssh-client nmap curl
+                               openssh-client nmap arp-scan curl
             ;;
         rhel|centos|almalinux|rocky)
             if ! rpm -q epel-release &>/dev/null; then
@@ -81,12 +81,12 @@ install_system_deps() {
             # Prefer Python 3.12 (required for modern async features); fall back to python3
             if dnf list available python3.12 &>/dev/null 2>&1 | grep -q python3.12; then
                 dnf install -y python3.12 python3.12-pip python3.12-devel \
-                               openssh-clients nmap curl 2>/dev/null || true
+                               openssh-clients nmap arp-scan curl 2>/dev/null || true
             else
                 dnf install -y python3 python3-pip python3-devel \
-                               openssh-clients nmap curl 2>/dev/null || \
+                               openssh-clients nmap arp-scan curl 2>/dev/null || \
                 yum install -y python3 python3-pip python3-devel \
-                               openssh-clients nmap curl
+                               openssh-clients nmap arp-scan curl
             fi
             # Ensure venv support
             python3.12 -m venv --help &>/dev/null 2>&1 || \

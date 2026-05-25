@@ -880,7 +880,8 @@ def _migrate_domain(d: dict) -> dict:
         "id": str(_uuid_mod.uuid4()), "name": d.get("name", url),
         "type": "http", "target": url, "host": "", "port": None,
         "method": "GET", "expected_status": 200, "expected_text": "",
-        "dns_query": "", "dns_server": "", "heartbeat_interval": 300, "enabled": True,
+        "dns_query": "", "dns_server": "", "heartbeat_interval": 300,
+        "ssl_verify": True, "enabled": True,
     }
 
 def _save_services(services: list):
@@ -953,12 +954,14 @@ def _svc_last(service_id: str) -> dict | None:
 
 # ── Check functions ────────────────────────────────────────────────────────────
 
-def _check_ssl_sync(hostname: str, port: int = 443) -> dict:
-    ctx = ssl.create_default_context()
+def _check_ssl_sync(hostname: str, port: int = 443, verify: bool = True) -> dict:
+    ctx = ssl.create_default_context() if verify else ssl._create_unverified_context()
     try:
         with socket.create_connection((hostname, port), timeout=8) as sock:
             with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
                 cert = ssock.getpeercert()
+                tls_version = ssock.version()
+                cipher_name = ssock.cipher()[0] if ssock.cipher() else ""
         not_after = datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
         not_before = datetime.strptime(cert["notBefore"], "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
         days_left = (not_after - datetime.now(timezone.utc)).days
@@ -973,6 +976,8 @@ def _check_ssl_sync(hostname: str, port: int = 443) -> dict:
             "issuer_cn": issuer.get("commonName", ""),
             "subject_cn": subject.get("commonName", ""),
             "sans": sans[:8],
+            "tls_version": tls_version,
+            "cipher": cipher_name,
         }
     except ssl.SSLCertVerificationError as e:
         return {"valid": False, "error": str(e)}
@@ -981,21 +986,26 @@ def _check_ssl_sync(hostname: str, port: int = 443) -> dict:
 
 async def _check_http(svc: dict) -> dict:
     import urllib.request, urllib.error
+    import ssl as _ssl_mod
     from urllib.parse import urlparse as _up
     url = (svc.get("target") or "").rstrip("/")
     method = (svc.get("method") or "GET").upper()
     exp_status = int(svc.get("expected_status") or 200)
     exp_text = svc.get("expected_text") or ""
+    ssl_verify = svc.get("ssl_verify", True)
     result: dict = {"id": svc["id"], "type": svc.get("type", "http")}
     t0 = time.monotonic()
     try:
         loop = asyncio.get_event_loop()
         def _do():
+            ctx = None if ssl_verify else _ssl_mod._create_unverified_context()
             req = urllib.request.Request(url, headers={"User-Agent": "sentinel-monitor/1.0"}, method=method)
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
                 body = resp.read(8192).decode("utf-8", errors="replace")
-                return resp.status, resp.url, body
-        status_code, final_url, body = await loop.run_in_executor(None, _do)
+                svr = resp.headers.get("Server", "")
+                xpb = resp.headers.get("X-Powered-By", "")
+                return resp.status, resp.url, body, svr, xpb
+        status_code, final_url, body, svr, xpb = await loop.run_in_executor(None, _do)
         result["status_code"] = status_code
         result["redirect_url"] = final_url if final_url != url else None
         status_ok = status_code == exp_status
@@ -1007,10 +1017,15 @@ async def _check_http(svc: dict) -> dict:
             result["message"] = f"expected {exp_status}, got {status_code}"
         else:
             result["message"] = f"HTTP {status_code}"
+        result["server"] = svr
+        result["x_powered_by"] = xpb
     except urllib.error.HTTPError as e:
         result["status_code"] = e.code
         result["up"] = False
         result["message"] = f"HTTP {e.code}"
+        if e.headers:
+            result["server"] = e.headers.get("Server", "")
+            result["x_powered_by"] = e.headers.get("X-Powered-By", "")
     except Exception as e:
         result["up"] = False
         result["message"] = str(e)
@@ -1019,10 +1034,112 @@ async def _check_http(svc: dict) -> dict:
         p = _up(url)
         if p.scheme == "https":
             loop = asyncio.get_event_loop()
-            result["ssl"] = await loop.run_in_executor(None, _check_ssl_sync, p.hostname, p.port or 443)
+            result["ssl"] = await loop.run_in_executor(None, _check_ssl_sync, p.hostname, p.port or 443, ssl_verify)
     except Exception:
         pass
     return result
+
+
+async def _check_security(url: str, ssl_verify: bool = True) -> list:
+    """Check HTTP security headers and best practices. Returns [{name, status, detail}]."""
+    import urllib.request, urllib.error
+    import ssl as _ssl_mod
+    from urllib.parse import urlparse as _up
+    loop = asyncio.get_event_loop()
+
+    def _fetch():
+        ctx = None if ssl_verify else _ssl_mod._create_unverified_context()
+        req = urllib.request.Request(url, headers={"User-Agent": "sentinel-security/1.0"}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+                hdrs = {k.lower(): v for k, v in resp.headers.items()}
+                return hdrs, resp.status, resp.url
+        except urllib.error.HTTPError as e:
+            hdrs = {k.lower(): v for k, v in e.headers.items()} if e.headers else {}
+            return hdrs, e.code, url
+
+    try:
+        hdrs, status, final_url = await loop.run_in_executor(None, _fetch)
+    except Exception as e:
+        return [{"name": "Connection", "status": "fail", "detail": str(e)}]
+
+    findings = []
+    is_https = _up(url).scheme == "https"
+
+    # HTTPS redirect check (for http:// URLs)
+    if not is_https:
+        if final_url.startswith("https://"):
+            findings.append({"name": "HTTPS Redirect", "status": "ok", "detail": f"→ {final_url}"})
+        else:
+            findings.append({"name": "HTTPS Redirect", "status": "fail", "detail": "no redirect to HTTPS"})
+
+    # HSTS (only meaningful on HTTPS)
+    hsts = hdrs.get("strict-transport-security", "")
+    if is_https:
+        if hsts:
+            max_age = 0
+            for part in hsts.split(";"):
+                p = part.strip()
+                if p.lower().startswith("max-age="):
+                    try: max_age = int(p.split("=")[1])
+                    except: pass
+            st = "ok" if max_age >= 31536000 else "warn"
+            findings.append({"name": "HSTS", "status": st, "detail": hsts[:80]})
+        else:
+            findings.append({"name": "HSTS", "status": "fail", "detail": "missing"})
+
+    # X-Frame-Options
+    xfo = hdrs.get("x-frame-options", "")
+    csp_val = hdrs.get("content-security-policy", "")
+    if xfo:
+        findings.append({"name": "X-Frame-Options", "status": "ok", "detail": xfo})
+    elif "frame-ancestors" in csp_val:
+        findings.append({"name": "X-Frame-Options", "status": "ok", "detail": "covered by CSP frame-ancestors"})
+    else:
+        findings.append({"name": "X-Frame-Options", "status": "warn", "detail": "missing"})
+
+    # X-Content-Type-Options
+    xcto = hdrs.get("x-content-type-options", "")
+    if "nosniff" in xcto.lower():
+        findings.append({"name": "X-Content-Type-Options", "status": "ok", "detail": "nosniff"})
+    else:
+        findings.append({"name": "X-Content-Type-Options", "status": "warn", "detail": "missing"})
+
+    # Content-Security-Policy
+    if csp_val:
+        findings.append({"name": "CSP", "status": "ok", "detail": csp_val[:100] + ("…" if len(csp_val) > 100 else "")})
+    else:
+        findings.append({"name": "CSP", "status": "warn", "detail": "missing"})
+
+    # Referrer-Policy
+    rp = hdrs.get("referrer-policy", "")
+    if rp:
+        findings.append({"name": "Referrer-Policy", "status": "ok", "detail": rp})
+    else:
+        findings.append({"name": "Referrer-Policy", "status": "warn", "detail": "missing"})
+
+    # Server header (version disclosure)
+    srv = hdrs.get("server", "")
+    if srv:
+        import re as _re
+        if _re.search(r"\d+\.\d+", srv):
+            findings.append({"name": "Server Header", "status": "warn", "detail": f"version exposed: {srv}"})
+        else:
+            findings.append({"name": "Server Header", "status": "ok", "detail": srv})
+
+    # X-Powered-By (info disclosure)
+    xpb = hdrs.get("x-powered-by", "")
+    if xpb:
+        findings.append({"name": "X-Powered-By", "status": "warn", "detail": f"exposes tech: {xpb}"})
+
+    # Permissions-Policy
+    pp = hdrs.get("permissions-policy", "") or hdrs.get("feature-policy", "")
+    if pp:
+        findings.append({"name": "Permissions-Policy", "status": "ok", "detail": pp[:80]})
+    else:
+        findings.append({"name": "Permissions-Policy", "status": "warn", "detail": "missing"})
+
+    return findings
 
 async def _check_tcp(svc: dict) -> dict:
     host = svc.get("host") or svc.get("target") or ""
@@ -1142,6 +1259,12 @@ async def _store_check_result(svc: dict, result: dict):
     msg = result.get("message") or ""
     rms = result.get("response_ms")
     _svc_db_store(svc_id, status, rms, msg)
+    # Security scan for HTTP/HTTPS services (stored in last_result.security)
+    if svc.get("type") in ("http", "https") and up and svc.get("target"):
+        try:
+            result["security"] = await _check_security(svc["target"], svc.get("ssl_verify", True))
+        except Exception:
+            pass
     # Update last_result in services.json
     services = _load_services()
     for s in services:
@@ -1217,12 +1340,42 @@ async def services_add(payload: dict = Body(...)):
         "expected_text": payload.get("expected_text", ""),
         "dns_query": payload.get("dns_query", ""), "dns_server": payload.get("dns_server", ""),
         "heartbeat_interval": int(payload.get("heartbeat_interval") or 300),
+        "ssl_verify": bool(payload.get("ssl_verify", True)),
         "enabled": True,
     }
     services = _load_services()
     services.append(svc)
     _save_services(services)
     return {"ok": True, "id": svc["id"]}
+
+@app.post("/api/services/preview")
+async def services_preview(payload: dict = Body(...)):
+    """Run check + security scan on a service definition without saving."""
+    stype = (payload.get("type") or "http").lower()
+    target = (payload.get("target") or "").strip()
+    if stype in ("http", "https") and target and not target.startswith(("http://", "https://")):
+        target = f"{stype}://" + target
+    svc = {
+        "id": "preview",
+        "name": payload.get("name", "preview"),
+        "type": stype,
+        "target": target,
+        "host": (payload.get("host") or "").strip(),
+        "port": payload.get("port"),
+        "method": (payload.get("method") or "GET").upper(),
+        "expected_status": int(payload.get("expected_status") or 200),
+        "expected_text": payload.get("expected_text") or "",
+        "dns_query": (payload.get("dns_query") or "").strip(),
+        "dns_server": (payload.get("dns_server") or "").strip(),
+        "heartbeat_interval": int(payload.get("heartbeat_interval") or 300),
+        "ssl_verify": bool(payload.get("ssl_verify", True)),
+        "enabled": True,
+    }
+    check_result = await _run_check(svc)
+    security = []
+    if stype in ("http", "https") and target:
+        security = await _check_security(target, svc["ssl_verify"])
+    return {"check": check_result, "security": security}
 
 @app.delete("/api/services/{sid}")
 async def services_delete(sid: str):

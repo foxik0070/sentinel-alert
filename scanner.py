@@ -19,10 +19,13 @@ DB_PATH = os.path.join(BASE_DIR, "data", "alerts.db")
 
 OFFLINE_AFTER = timedelta(minutes=10)
 
-# Common-port menu — short on purpose. Tweak via env if needed.
+# Common homelab ports. Override with SCAN_PORTS env var (comma-separated).
 PORTS = [int(p) for p in os.environ.get(
     "SCAN_PORTS",
-    "22,53,80,123,139,443,445,3306,3389,5432,5900,6379,8080,8443,9100"
+    "21,22,23,25,53,80,110,123,139,143,443,445,587,993,995,"
+    "1883,2375,2376,3000,3306,3389,4443,5000,5056,5432,5900,5984,"
+    "6379,8006,8080,8086,8088,8123,8443,8888,"
+    "9000,9090,9091,9100,9200,10250,15672,27017,32400,51820"
 ).split(",")]
 PORT_TIMEOUT = float(os.environ.get("PORT_TIMEOUT", "0.4"))
 PORT_CONCURRENCY = int(os.environ.get("PORT_CONCURRENCY", "64"))

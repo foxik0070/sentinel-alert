@@ -547,3 +547,223 @@ async def test_store_check_result_no_change(tmp_data_dir):
         await _app._store_check_result(svc, {"id": svc["id"], "up": True, "response_ms": 5, "message": "ok"})
 
     assert len(bridge_calls) == 0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 7. SSL verify + security check
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_api_services_add_ssl_verify_false(client):
+    """Service can be added with ssl_verify=False."""
+    r = client.post("/api/services", json={
+        "type": "http", "name": "Internal", "target": "https://internal.local",
+        "ssl_verify": False,
+    })
+    assert r.status_code == 200
+    sid = r.json()["id"]
+    svcs = client.get("/api/services").json()
+    svc = next(s for s in svcs if s["id"] == sid)
+    assert svc["ssl_verify"] is False
+
+
+def test_migrate_domain_has_ssl_verify(tmp_data_dir):
+    """Migrated domains include ssl_verify=True by default."""
+    import app as _app
+    migrated = _app._migrate_domain({"url": "https://example.com", "name": "X"})
+    assert migrated.get("ssl_verify") is True
+
+
+@pytest.mark.asyncio
+async def test_check_http_ssl_verify_false(tmp_data_dir):
+    """When ssl_verify=False the unverified SSL context is used."""
+    import app as _app
+    import ssl as ssl_mod
+    svc = {"id": "x", "type": "http", "target": "https://self-signed.local",
+           "method": "GET", "expected_status": 200, "expected_text": "",
+           "ssl_verify": False}
+
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.url = svc["target"]
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    mock_resp.read = MagicMock(return_value=b"OK")
+
+    used_ctx = []
+    original_urlopen = __import__("urllib.request", fromlist=["urlopen"]).urlopen
+
+    def _capture_urlopen(req, timeout=None, context=None):
+        used_ctx.append(context)
+        return mock_resp
+
+    with patch("urllib.request.urlopen", side_effect=_capture_urlopen):
+        # also patch SSL check so it doesn't actually connect
+        with patch.object(_app, "_check_ssl_sync", return_value={"valid": False, "error": "skipped"}):
+            res = await _app._check_http(svc)
+
+    assert res["up"] is True
+    # context should be an unverified SSL context, not None (which means verified)
+    ctx_used = used_ctx[0] if used_ctx else None
+    assert ctx_used is not None  # ssl_verify=False must pass an unverified context
+
+
+@pytest.mark.asyncio
+async def test_check_security_good_headers(tmp_data_dir):
+    """_check_security returns 'ok' for all headers present."""
+    import app as _app
+
+    good_headers = {
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "x-frame-options": "SAMEORIGIN",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "default-src 'self'",
+        "referrer-policy": "strict-origin-when-cross-origin",
+    }
+
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.url = "https://example.com"
+    mock_resp.headers = good_headers
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    mock_resp.read = MagicMock(return_value=b"")
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        findings = await _app._check_security("https://example.com", ssl_verify=False)
+
+    by_name = {f["name"]: f for f in findings}
+    assert by_name["HSTS"]["status"] == "ok"
+    assert by_name["X-Frame-Options"]["status"] == "ok"
+    assert by_name["X-Content-Type-Options"]["status"] == "ok"
+    assert by_name["CSP"]["status"] == "ok"
+    assert by_name["Referrer-Policy"]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_check_security_missing_headers(tmp_data_dir):
+    """_check_security returns fail/warn for missing security headers."""
+    import app as _app
+
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.url = "https://example.com"
+    mock_resp.headers = {}  # no security headers at all
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    mock_resp.read = MagicMock(return_value=b"")
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        findings = await _app._check_security("https://example.com", ssl_verify=False)
+
+    by_name = {f["name"]: f for f in findings}
+    assert by_name["HSTS"]["status"] == "fail"
+    assert by_name["X-Frame-Options"]["status"] == "warn"
+    assert by_name["X-Content-Type-Options"]["status"] == "warn"
+    assert by_name["CSP"]["status"] == "warn"
+
+
+@pytest.mark.asyncio
+async def test_check_security_http_no_redirect(tmp_data_dir):
+    """HTTP URL without HTTPS redirect → fail."""
+    import app as _app
+
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.url = "http://example.com"  # stays http
+    mock_resp.headers = {}
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    mock_resp.read = MagicMock(return_value=b"")
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        findings = await _app._check_security("http://example.com")
+
+    by_name = {f["name"]: f for f in findings}
+    assert by_name["HTTPS Redirect"]["status"] == "fail"
+
+
+@pytest.mark.asyncio
+async def test_check_security_hsts_short_maxage(tmp_data_dir):
+    """HSTS with max-age < 31536000 → warn."""
+    import app as _app
+
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.url = "https://example.com"
+    mock_resp.headers = {"strict-transport-security": "max-age=3600"}
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    mock_resp.read = MagicMock(return_value=b"")
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        findings = await _app._check_security("https://example.com", ssl_verify=False)
+
+    by_name = {f["name"]: f for f in findings}
+    assert by_name["HSTS"]["status"] == "warn"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 8. Preview endpoint
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_api_preview_http(client):
+    """Preview endpoint runs check + security scan without saving."""
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.url = "https://example.com"
+    mock_resp.headers = {"x-frame-options": "DENY", "x-content-type-options": "nosniff"}
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    mock_resp.read = MagicMock(return_value=b"Hello")
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        with patch("app._check_ssl_sync", return_value={"valid": True, "days_left": 90}):
+            r = client.post("/api/services/preview", json={
+                "type": "http",
+                "target": "https://example.com",
+                "method": "GET",
+                "expected_status": 200,
+                "ssl_verify": False,
+            })
+
+    assert r.status_code == 200
+    j = r.json()
+    assert "check" in j
+    assert "security" in j
+    assert j["check"]["up"] is True
+    # Service must NOT be saved
+    svcs = client.get("/api/services").json()
+    assert svcs == []
+
+
+def test_api_preview_ping_no_security(client):
+    """Preview for non-HTTP type returns empty security list."""
+    r = client.post("/api/services/preview", json={
+        "type": "ping",
+        "host": "127.0.0.1",
+    })
+    assert r.status_code == 200
+    j = r.json()
+    assert j["check"]["up"] is True
+    assert j["security"] == []  # no security scan for ping
+
+
+def test_api_preview_tcp_no_save(client):
+    """Preview TCP check doesn't save the service."""
+    import asyncio
+    import socket as _sock
+
+    # Find a free port
+    s = _sock.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+
+    r = client.post("/api/services/preview", json={
+        "type": "tcp",
+        "host": "127.0.0.1",
+        "port": port,  # closed port → down is OK
+    })
+    assert r.status_code == 200
+    # No service saved
+    assert client.get("/api/services").json() == []

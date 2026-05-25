@@ -96,6 +96,24 @@ pip install pytest pytest-asyncio httpx
 | `test_store_check_result_state_change` | up→down spustí bridge notifikaci |
 | `test_store_check_result_no_change` | Stejný stav — žádná notifikace |
 
+### 7. SSL verify + security check
+| Test | Co ověřuje |
+|---|---|
+| `test_api_services_add_ssl_verify_false` | Service přidaná s `ssl_verify=False` si zachová pole |
+| `test_migrate_domain_has_ssl_verify` | Migrované domény mají `ssl_verify=True` |
+| `test_check_http_ssl_verify_false` | `ssl_verify=False` předá unverified SSL kontext do urlopen |
+| `test_check_security_good_headers` | Všechny security headers přítomny → status=ok |
+| `test_check_security_missing_headers` | Chybějící headers → fail/warn |
+| `test_check_security_http_no_redirect` | HTTP bez HTTPS redirect → fail |
+| `test_check_security_hsts_short_maxage` | HSTS max-age < 1 rok → warn |
+
+### 8. Preview endpoint
+| Test | Co ověřuje |
+|---|---|
+| `test_api_preview_http` | `POST /api/services/preview` vrací check + security, nic neukládá |
+| `test_api_preview_ping_no_security` | Ping preview → security=[] |
+| `test_api_preview_tcp_no_save` | TCP preview neukládá service |
+
 ---
 
 ## conftest.py

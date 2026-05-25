@@ -823,3 +823,112 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
     .net-panel { width: 100%; }
 }
 
+/* ================================================================
+   SERVICE MONITOR — CARD LAYOUT
+   ================================================================ */
+.svc-toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 0 2px;
+}
+.svc-toolbar-title {
+    font-size: 11px; font-weight: 800; letter-spacing: 2px; color: var(--muted);
+}
+.svc-toolbar-right {
+    margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+
+/* Stats row */
+.svc-stats-row {
+    display: flex; gap: 6px; flex-wrap: wrap;
+}
+.svc-stat-card {
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 8px 16px; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    position: relative; min-width: 80px;
+}
+.svc-stat-card::before {
+    content: ''; position: absolute; top: 0; left: 0;
+    width: 6px; height: 6px;
+    border-top: 2px solid var(--accent); border-left: 2px solid var(--accent);
+}
+.svc-stat-card .lbl { color: var(--muted); font-size: 9px; letter-spacing: 1px; }
+.svc-stat-card .val { font-size: 22px; font-weight: 900; color: var(--fg); line-height: 1.1; }
+.svc-stat-card.green .val { color: var(--green); text-shadow: 0 0 8px rgba(45,255,161,0.3); }
+.svc-stat-card.red   .val { color: var(--red); text-shadow: 0 0 8px rgba(255,42,94,0.3); }
+.svc-stat-card.grey  .val { color: var(--grey); }
+
+/* Card grid */
+.svc-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 8px; align-content: start;
+}
+
+/* Individual card */
+.svc-card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-left: 4px solid #144048;
+    padding: 12px 14px; cursor: pointer;
+    display: flex; flex-direction: column; gap: 8px;
+    transition: border-color .15s, background .1s;
+}
+.svc-card:hover { background: #041216; }
+.svc-card.up   { border-left-color: #22c55e; }
+.svc-card.down { border-left-color: #ef4444; }
+
+/* Card head */
+.svc-card-head { display: flex; align-items: center; gap: 6px; }
+.svc-card-head-right { margin-left: auto; display: flex; gap: 4px; }
+.svc-status-dot { font-size: 11px; font-weight: 800; letter-spacing: 0.5px; }
+.svc-status-dot.up      { color: #22c55e; }
+.svc-status-dot.down    { color: #ef4444; }
+.svc-status-dot.pending { color: #4d7479; }
+
+/* Card body */
+.svc-card-name {
+    font-size: 14px; font-weight: 800; color: #cfe7ec;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.svc-card-target {
+    font-size: 10px; color: #4d7479;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.svc-card-target a { color: #38bdf8; text-decoration: none; }
+
+/* Stats bar */
+.svc-card-stats {
+    display: flex; border: 1px solid #0e2c30;
+}
+.svc-stat-cell {
+    flex: 1; padding: 5px 6px;
+    display: flex; flex-direction: column; align-items: center; gap: 1px;
+    border-right: 1px solid #0e2c30;
+}
+.svc-stat-cell:last-child { border-right: none; }
+.svc-stat-cell .val { font-size: 12px; font-weight: 700; color: #cfe7ec; }
+.svc-stat-cell .lbl { font-size: 8px; letter-spacing: 1px; color: var(--muted); }
+
+/* Sparkline dots */
+.svc-card-spark {
+    display: flex; align-items: flex-end; gap: 1px; min-height: 20px;
+}
+
+/* Card footer */
+.svc-card-footer {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-size: 9px; color: var(--muted);
+    border-top: 1px solid #0e2c30; padding-top: 6px;
+}
+.svc-sec-badge {
+    padding: 1px 5px; font-size: 9px; font-weight: 700;
+    letter-spacing: 0.5px; border: 1px solid;
+}
+.svc-sec-badge.ok   { color: #22c55e; border-color: #22c55e44; background: #22c55e08; }
+.svc-sec-badge.warn { color: #ffe83b; border-color: #ffe83b44; background: #ffe83b08; }
+.svc-sec-badge.fail { color: #ef4444; border-color: #ef444444; background: #ef444408; }
+
+/* Responsive: single column on small screens */
+@media (max-width: 480px) {
+    .svc-card-grid { grid-template-columns: 1fr; }
+}
+

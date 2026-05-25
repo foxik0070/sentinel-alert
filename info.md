@@ -7,25 +7,52 @@
 
 ---
 
-## SERVICES tab (domain monitoring)
+## SERVICES tab
 
-Zalozka SERVICES (dostupna pouze v HOME rezimu, ve WORK rezimu je skryta) umoznuje monitorovat dostupnost domen a platnost SSL certifikatu.
+Zalozka SERVICES (dostupna pouze v HOME rezimu) umoznuje monitorovat dostupnost sluzeb, SSL certifikaty a bezpecnost HTTP odpovedi.
 
-### Funkce
-- Pridani domeny ve formatu `http://example.com` nebo `https://example.com`
-- Rucni overeni vsech domen tlacitkem CHECK ALL
-- Pro HTTP: meri dobu odezvy a HTTP status kod
-- Pro HTTPS: navic overuje SSL certifikat (platnost, vydavatel, SAN, pocet dni do expirace)
+### Typy sluzeb
+| Typ | Popis |
+|---|---|
+| HTTP / HTTPS | GET/POST/HEAD s kontrolou statusu, textu v tele, SSL certifikatu a security headers |
+| TCP | TCP connect na zadany port |
+| Ping (ICMP) | ICMP ping na IP/hostname |
+| DNS | Rozliseni domeny (volitelne pres zadany DNS server) |
+| Heartbeat | Push monitoring — sluzba musi pravidelne pingovat endpoint |
+
+### Konfigurece (modal "ADD SERVICE")
+- Vyber typu sluzby
+- Volitelny nazev
+- Pro HTTP: URL, metoda, ocekavany status, hledany text v tele, **ssl_verify** (odskrtni pro self-signed cert)
+- **TEST** — spusti overeni bez ulozeni, zobrazi vysledek + security scan + doporuceni
+- **+ ADD SERVICE** — ulozi a ihned zkontroluje
+
+### Security sken (HTTP / HTTPS)
+Po kliknuti TEST nebo pri zobrazeni vysledku zobrazi:
+- HTTPS Redirect (pro http://)
+- HSTS (Strict-Transport-Security)
+- X-Frame-Options
+- X-Content-Type-Options
+- Content-Security-Policy
+- Referrer-Policy
+- Server header (verze)
+- X-Powered-By
+- Permissions-Policy
 
 ### API endpointy
-- `GET  /api/domains`         — seznam domen
-- `POST /api/domains`         — pridani domeny ({"url": "https://example.com"})
-- `DELETE /api/domains/{idx}` — odstraneni domeny podle indexu
-- `POST /api/domains/check`   — spusti kontrolu vsech domen (async, vraci vysledky)
+- `GET  /api/services`              — seznam sluzeb
+- `POST /api/services`              — pridani sluzby
+- `DELETE /api/services/{id}`       — odstraneni
+- `POST /api/services/check`        — zkontroluje vsechny
+- `POST /api/services/{id}/check`   — zkontroluje jednu
+- `POST /api/services/preview`      — check + security bez ulozeni (pro modal TEST)
+- `GET  /api/services/settings`     — globalni interval
+- `POST /api/services/settings`     — nastavi interval (1-60 min)
+- `POST /api/heartbeat/{id}`        — heartbeat ping z externi sluzby
 
 ### Data
-- Ulozeno v `data/domains.json`
-- Vytvori se automaticky pri instalaci (setup.sh)
+- `data/services.json`     — konfigurace sluzeb
+- `data/svc_settings.json` — globalni interval
 
 ### Typy zarizeni v Network Map
 - ROUTER / AP / SWITCH: sitove prvky, vizual jako obdelnik (modra), ikona dle typu
