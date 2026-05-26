@@ -13,7 +13,8 @@ def _ensure_column(cur, table, col, ddl):
 
 def init():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
     cur = conn.cursor()
 
     cur.execute("""

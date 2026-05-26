@@ -150,6 +150,10 @@ async def _who_one(host: str, sem: asyncio.Semaphore) -> list:
 
 async def periodic_who_collector(queue: asyncio.Queue):
     """Every 60 s: collect active SSH sessions (local + remote) into active_users."""
+    # In work mode with an external WHO service (e.g. WHO_ISP.py), active_users is
+    # managed externally. Running the internal collector would delete that data every 60s.
+    if conf.MODE_TYPE.strip().lower() == 'work' and conf.MODE_WHO_FILE:
+        return
     WHO_INTERVAL = 60
     while True:
         await asyncio.sleep(WHO_INTERVAL)

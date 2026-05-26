@@ -893,6 +893,16 @@ document.querySelectorAll('.hist-filter-btn').forEach(btn => {
     });
 });
 
+function _computeCountriesFromHistory() {
+    const map = {};
+    _attackHistory.forEach(a => {
+        if (!a.country || ['?','Unknown','LAN','Invalid','NoDB'].includes(a.country)) return;
+        map[a.country] = (map[a.country] || 0) + 1;
+    });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 20)
+        .map(([country, hits]) => ({ country, hits }));
+}
+
 function renderCountries(list) {
     ctyCountEl.textContent = list.length;
     if (!list.length) { countryListEl.innerHTML = '<div class="empty">No attacks yet.</div>'; return; }
@@ -1003,7 +1013,9 @@ async function loadStatic() {
         renderDevices(devs || []);
     }
     bans.forEach(b => pushAttackHistory(b));
-    renderCountries(ctys);
+    // In work mode the attacks table is empty; derive countries from ban_history instead.
+    const effectiveCts = (_workMode && !ctys.length) ? _computeCountriesFromHistory() : ctys;
+    renderCountries(effectiveCts);
     loadCountryPolygons();
 }
 
@@ -1084,6 +1096,8 @@ function connectWS() {
             _globePaused = false; _histPaused = false;
             _globeFlush(); renderAttackHistory();
             refreshCountryPolygons();
+            // In work mode the attacks table is empty; recompute countries from ban data.
+            if (_workMode) renderCountries(_computeCountriesFromHistory());
             (m.logs          || []).forEach(l => pushLog(l, false));
         } else if (m.type === 'attack' || m.type === 'ban') {
             pushAttack(m, true);
@@ -1336,9 +1350,10 @@ function applyAuthState(authenticated) {
     const loginHeaderBtn = $('login-btn');
     if (loginHeaderBtn) loginHeaderBtn.style.display = authenticated ? 'none' : '';
     if (authenticated) _loginOverlay.classList.add('hidden');
-    // Adjust grid layout for logged-out state (hides empty left column)
+    // Adjust grid layout for logged-out state (hides empty left column).
+    // In work mode the 3-column work-layout is always active — don't override it.
     const gridEl = document.querySelector('.grid');
-    if (gridEl) gridEl.classList.toggle('no-auth', !authenticated);
+    if (gridEl && !_workMode) gridEl.classList.toggle('no-auth', !authenticated);
 }
 
 async function checkAuth() {

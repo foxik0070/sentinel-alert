@@ -655,6 +655,14 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
             "grey";
         grid-template-rows: 340px auto auto;
     }
+    .grid.work-layout {
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: 340px auto auto;
+        grid-template-areas:
+            "yellow     yellow"
+            "red        green"
+            "purple     grey";
+    }
     .globe-panel { height: 340px; }
     .fsc-stats { grid-template-columns: repeat(4, 1fr); }
     .fsc-detail-grid { grid-template-columns: 1fr 1fr; }
@@ -695,6 +703,11 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
     .grid.no-scanner {
         grid-template-rows: 280px auto auto auto auto;
         grid-template-areas: "yellow" "purple" "green" "users-area" "grey";
+    }
+    .grid.work-layout {
+        grid-template-columns: 1fr;
+        grid-template-rows: 280px auto auto auto auto;
+        grid-template-areas: "yellow" "red" "green" "purple" "grey";
     }
     .globe-panel { height: 280px; }
 
