@@ -1046,11 +1046,18 @@ function applyTabVisibility(cfg) {
         // Auth-gated panels
         if (usersPanel)  usersPanel.style.display  = _isAuthenticated ? SHOW : 'none';
         if (logPanel)    logPanel.style.display    = _isAuthenticated ? SHOW : 'none';
-        // Grid: swap countries to left, users to right
+        // Grid: swap countries to left, users to right.
+        // Remove no-auth FIRST — it may have been applied by applyAuthState() before
+        // _workMode was known (checkAuth runs before loadStatic sets _workMode).
+        // Leaving no-auth+work-layout together creates a 2-column grid with 3-column
+        // area names, which collapses the globe to 280px and auto-places countries.
         if (mainGrid) {
             mainGrid.classList.remove('no-scanner');
+            mainGrid.classList.remove('no-auth');
             mainGrid.classList.add('work-layout');
         }
+        // Sync globe canvas to new container size after layout change.
+        requestAnimationFrame(() => globe.width(globeEl.clientWidth).height(globeEl.clientHeight));
     } else {
         // Home mode: auth + config flags
         if (btnSecurity) btnSecurity.style.display = (_isAuthenticated && cfg.fsc_enabled !== false) ? '' : 'none';
