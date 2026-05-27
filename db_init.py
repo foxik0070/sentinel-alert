@@ -41,6 +41,7 @@ def init():
             timestamp DATETIME
         )
     """)
+    _ensure_column(cur, "ban_history", "protocol", "TEXT")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS attacks (

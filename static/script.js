@@ -105,13 +105,24 @@ const globe = Globe()(globeEl)
     .arcStartLat(d => d.startLat).arcStartLng(d => d.startLng)
     .arcEndLat(d => d.endLat).arcEndLng(d => d.endLng)
     .arcColor(d => d.color)
-    .arcStroke(d => d.protocol === 'who' ? 1.1 : 0.7)
-    .arcDashLength(0.25).arcDashGap(0.75).arcDashInitialGap(d => d.phase)
+    .arcStroke(d => d.protocol === 'who' ? 0.4 : 0.7)
+    .arcDashLength(d => {
+        if (d.protocol === 'who') return 0.3;
+        const n = _countryCounts.get(d.country) || 1;
+        return n <= 1 ? 1.0 : 0.25; // solid arc when only 1 attack from country
+    })
+    .arcDashGap(d => {
+        if (d.protocol === 'who') return 0.7;
+        const n = _countryCounts.get(d.country) || 1;
+        return n <= 1 ? 0.0 : 0.75;
+    })
+    .arcDashInitialGap(d => d.phase)
     .arcDashAnimateTime(d => {
         if (d.protocol === 'who') return 1400;
-        // More attacks from same country → faster animation (lower ms = faster)
-        // On mobile use slower animation (less GPU work)
+        // solid (dashLen=1, dashGap=0) arcs look static regardless of animateTime,
+        // but 0 avoids unnecessary GPU work for single-country arcs
         const n = _countryCounts.get(d.country) || 1;
+        if (n <= 1) return 0;
         const base = _isMobile ? 3000 : 2400;
         const minMs = _isMobile ? 800 : 350;
         return Math.max(minMs, Math.round(base / Math.log2(n + 2)));
@@ -192,23 +203,25 @@ globeModeEl.addEventListener('click', () => {
 });
 
 // Protocol colors [r,g,b] at full brightness — age dims them
+// Warm tones = attacks/threats; cool cyan = active users
 const PROTO_RGB = {
-    ssh:      [255, 200,   0],  // yellow
-    http:     [  0, 200,  80],  // green
-    https:    [ 30, 160, 255],  // blue
-    fail2ban: [210,  40, 255],  // magenta-purple
-    blocked:  [120,  20, 200],  // dark purple
+    ssh:      [255, 190,   0],  // amber  — SSH brute-force
+    http:     [255, 110,   0],  // orange — HTTP web attack
+    https:    [230,   0,  60],  // crimson — HTTPS web attack
+    fail2ban: [210,  40, 255],  // magenta-purple — Fail2Ban ban
+    blocked:  [120,  20, 200],  // dark purple — blocked IP
+    who:      [  0, 200, 200],  // cyan — active user session
 };
-const _DEFAULT_RGB = [0, 220, 180];  // green-cyan fallback
+const _DEFAULT_RGB = [0, 220, 180];  // teal fallback
 
 // CSS hex colors matching PROTO_RGB — used in panels so colors match the globe
 const PROTO_COLOR = {
-    ssh:      '#ffc800',
-    http:     '#00c850',
-    https:    '#1ea0ff',
+    ssh:      '#ffbe00',
+    http:     '#ff6e00',
+    https:    '#e6003c',
     fail2ban: '#d228ff',
     blocked:  '#7814c8',
-    who:      '#38bdf8',
+    who:      '#00c8c8',
 };
 
 const MAX_AGE_S = 24 * 3600;
@@ -770,11 +783,12 @@ function renderActiveUsers(users) {
 async function fetchActiveUsers() {
     try {
         const users = await fetch('/api/active_users').then(r => r.json());
+        users.sort((a, b) => (b.timestamp || '') > (a.timestamp || '') ? 1 : -1);
         userArcs.length = 0;
         userPoints.length = 0;
         users.forEach((u, i) => {
             if (!u.lat && !u.lon) return; // show in panel but no arc without coordinates
-            const colorBase = '#3b82f6';
+            const colorBase = PROTO_COLOR.who;
             userArcs.push({
                 startLat: u.lat, startLng: u.lon, endLat: HOME.lat, endLng: HOME.lon,
                 color: [colorBase, colorBase],
@@ -853,7 +867,8 @@ function renderAttackHistory() {
         return;
     }
     const _PROTO_LABEL = { fail2ban: 'F2B', ssh: 'SSH', http: 'HTTP', https: 'HTTPS' };
-    attackHistEl.innerHTML = filtered.slice(0, 10).map(b => {
+    const _sorted = [...filtered].sort((a, b) => (b.ts || '') > (a.ts || '') ? 1 : -1);
+    attackHistEl.innerHTML = _sorted.slice(0, 10).map(b => {
         const { time, date } = _fmtLocalTs(b.ts);
         const proto = b.protocol || 'fail2ban';
         const label = _PROTO_LABEL[proto] || proto.toUpperCase();
@@ -1077,10 +1092,12 @@ function applyTabVisibility(cfg) {
 async function loadBlocklist() {
     try {
         const data = await fetch('/api/blocklist').then(r => r.json());
-        // Give blocklist entries a fixed 48h-old timestamp → orange-red color range
         const ts48h = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
         (data.entries || []).forEach(e => pushAttack({
-            ...e, src_ip: e.ip, protocol: 'fail2ban', dst_port: 22, ts: ts48h
+            ...e, src_ip: e.ip || e.src_ip,
+            protocol: e.protocol || 'fail2ban',
+            dst_port: e.dst_port || (e.protocol === 'https' ? 443 : 22),
+            ts: ts48h,
         }, false));
     } catch {}
 }

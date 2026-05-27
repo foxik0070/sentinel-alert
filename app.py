@@ -357,14 +357,13 @@ def get_attacks(limit: int = 200):
 @app.get("/api/bans")
 def get_bans(limit: int = 200):
     bans = _query(
-        "SELECT ip, country, lat, lon, isp, timestamp FROM ban_history "
+        "SELECT ip, country, lat, lon, isp, timestamp, protocol FROM ban_history "
         "WHERE lat != 0 OR lon != 0 ORDER BY timestamp DESC LIMIT ?", (limit,),
     )
-    # Add fail2ban-specific fields for display
     for b in bans:
         b["src_ip"] = b.get("ip")
-        b["dst_port"] = 22
-        b["protocol"] = "fail2ban"
+        b["dst_port"] = b.get("dst_port") or (443 if b.get("protocol") == "https" else 22)
+        b["protocol"] = b.get("protocol") or "fail2ban"
     return bans
 
 
@@ -582,11 +581,12 @@ def report_data():
         "WHERE ts >= ? ORDER BY ts DESC LIMIT 500", (since_24h,)
     )
     bans_24h = _query(
-        "SELECT ip AS src_ip, country, isp, timestamp AS ts FROM ban_history "
+        "SELECT ip AS src_ip, country, isp, timestamp AS ts, protocol FROM ban_history "
         "WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT 200", (since_24h,)
     )
     for b in bans_24h:
-        b["dst_port"] = 22; b["protocol"] = "fail2ban"
+        b["dst_port"] = 443 if b.get("protocol") == "https" else 22
+        b["protocol"] = b.get("protocol") or "fail2ban"
     countries = _query(
         "SELECT country, COUNT(*) AS hits FROM attacks "
         "WHERE ts >= ? AND country NOT IN ('LAN','Unknown','Invalid','NoDB') "
@@ -700,14 +700,13 @@ async def ws_live(ws: WebSocket):
             "FROM attacks WHERE ts >= datetime('now', '-24 hours') ORDER BY id DESC LIMIT 500"
         )
         bans = _query(
-            "SELECT ip AS src_ip, country, lat, lon, isp, timestamp AS ts "
+            "SELECT ip AS src_ip, country, lat, lon, isp, timestamp AS ts, protocol "
             "FROM ban_history WHERE timestamp >= datetime('now', '-24 hours') "
             "ORDER BY timestamp DESC LIMIT 500"
         )
-        # Mark bans with protocol for display
         for b in bans:
-            b["dst_port"] = 22
-            b["protocol"] = "fail2ban"
+            b["dst_port"] = 443 if b.get("protocol") == "https" else 22
+            b["protocol"] = b.get("protocol") or "fail2ban"
         await ws.send_json({"type": "snapshot",
                             "attacks": list(reversed(recent)),
                             "bans": list(reversed(bans)),

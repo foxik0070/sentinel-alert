@@ -268,6 +268,17 @@ html, body {
     transition: opacity 0.3s, box-shadow 0.3s;
 }
 .hud-overlay.hot { opacity: 1; box-shadow: 0 0 24px rgba(255,42,94,0.45); border-color: var(--red); }
+
+.globe-legend {
+    position: absolute; right: 10px; bottom: 10px; z-index: 3;
+    padding: 7px 11px; background: rgba(2,8,10,0.82);
+    border: 1px solid #1a4046; font-size: 10px; letter-spacing: 0.04em;
+    color: #8ab0b8; opacity: 0.72; transition: opacity 0.25s;
+    pointer-events: none;
+}
+.globe-legend:hover { opacity: 1; }
+.globe-legend .legend-row { display: flex; align-items: center; gap: 7px; padding: 2px 0; }
+.globe-legend .ldot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .hud-overlay .hud-row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
 .hud-overlay .lbl { color: var(--muted); }
 .hud-overlay .val { color: var(--fg); }
@@ -720,6 +731,7 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
 
     /* Attack card: fill globe width */
     .hud-overlay { min-width: 0; left: 6px; right: 6px; bottom: 6px; width: auto; }
+    .globe-legend { right: 6px; bottom: auto; top: 38px; font-size: 9px; padding: 5px 8px; }
 
     /* Panels */
     .panel { min-height: 160px; }
