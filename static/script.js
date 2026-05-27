@@ -9,10 +9,12 @@ if (_SOLO_GLOBE) {
     style.textContent = `
         header, .grid > :not(#globe-panel) { display: none !important; }
         body { overflow: hidden; background: #000; }
-        .grid { display: block !important; height: 100vh !important; }
+        .grid { display: block !important; height: 100vh !important; margin: 0 !important; padding: 0 !important; }
         #globe-panel { height: 100vh !important; width: 100vw !important;
-                       border: none !important; border-radius: 0 !important; }
+                       border: none !important; border-radius: 0 !important;
+                       position: relative !important; }
         #globe-panel .ph { background: rgba(2,10,14,0.7) !important; }
+        .globe-legend { opacity: 0.85 !important; pointer-events: auto !important; }
     `;
     document.head.appendChild(style);
 }
@@ -37,6 +39,16 @@ const acIp       = $('ac-ip');
 const acCountry  = $('ac-country');
 const acIsp      = $('ac-isp');
 const acVec      = $('ac-vec');
+const acHits     = $('ac-hits');
+
+$('ac-copy')?.addEventListener('click', () => {
+    const ip = acIp?.textContent;
+    if (!ip || ip.includes('-')) return;
+    navigator.clipboard?.writeText(ip).then(() => {
+        const btn = $('ac-copy');
+        if (btn) { btn.textContent = '✓'; setTimeout(() => { btn.textContent = '⎘'; }, 1200); }
+    });
+});
 
 let HOME = { lat: 49.8209, lon: 18.2625 };
 let attackCount = 0;
@@ -156,6 +168,7 @@ const globe = Globe()(globeEl)
         acCountry.textContent = pt.country || '?';
         acIsp.textContent     = pt.isp || '—';
         acVec.textContent     = `:${pt.dst_port}/${(pt.protocol||'').toUpperCase()}`;
+        if (acHits) acHits.textContent = (_ipCounts.get(pt.src_ip) || 1) + '×';
         card.classList.add('hot');
         clearTimeout(pushAttack._t);
         pushAttack._t = setTimeout(() => card.classList.remove('hot'), 10000);
@@ -167,6 +180,7 @@ const globe = Globe()(globeEl)
         acCountry.textContent = arc.country || '?';
         acIsp.textContent     = arc.isp || '—';
         acVec.textContent     = `:${arc.dst_port}/${(arc.protocol||'').toUpperCase()}`;
+        if (acHits) acHits.textContent = (_ipCounts.get(arc.src_ip) || 1) + '×';
         card.classList.add('hot');
         clearTimeout(pushAttack._t);
         pushAttack._t = setTimeout(() => card.classList.remove('hot'), 10000);
@@ -177,10 +191,21 @@ globe.controls().autoRotate = true;
 globe.controls().autoRotateSpeed = 0.8;
 globe.controls().enableDamping = true;
 
+// Restore autoRotate when mouse leaves the globe panel (OrbitControls may pause it during interaction)
+globeEl.addEventListener('mouseleave', () => {
+    if (!_rotationLocked) globe.controls().autoRotate = true;
+});
+
 window.addEventListener('resize', () => {
     globe.width(globeEl.clientWidth).height(globeEl.clientHeight);
 });
-if (_SOLO_GLOBE) setTimeout(() => globe.width(globeEl.clientWidth).height(globeEl.clientHeight), 50);
+if (_SOLO_GLOBE) {
+    const _soloResize = () => {
+        globe.width(globeEl.clientWidth).height(globeEl.clientHeight);
+    };
+    setTimeout(_soloResize, 50);
+    window.addEventListener('resize', _soloResize);
+}
 
 // Refresh texture every 15 min (auto mode covers day/night transition).
 setInterval(() => { if (_manualDay === null) globe.globeImageUrl(pickTexture()); }, 15 * 60 * 1000);
@@ -313,25 +338,47 @@ async function loadCountryPolygons() {
             .polygonLabel(d => {
                 const name = _polyName(d);
                 const hits = _countryAttackMap[name] || [];
-                const uniqIPs = [...new Set(hits.map(a => a.src_ip))].slice(0, 6);
                 if (!hits.length) return `<div style="background:rgba(2,10,14,0.92);padding:5px 9px;border:1px solid #1a4046;font-size:11px;color:#4d7479;">${name}</div>`;
-                return `<div style="background:rgba(2,10,14,0.95);padding:6px 10px;border:1px solid #ff2a5e;font-size:11px;color:#cfe7ec;line-height:1.5;">
-                    <b style="color:#ff2a5e;">${name}</b><br>
-                    <span style="color:#4d7479;">${hits.length} attack${hits.length!==1?'s':''}</span><br>
-                    ${uniqIPs.map(ip=>`<span style="color:#ffe83b;">${ip}</span>`).join('<br>')}
+                const ipMap = {};
+                hits.forEach(h => { if (h.src_ip) ipMap[h.src_ip] = (ipMap[h.src_ip]||0)+1; });
+                const topIPs = Object.entries(ipMap).sort((a,b)=>b[1]-a[1]).slice(0,5);
+                return `<div style="background:rgba(2,10,14,0.95);padding:6px 10px;border:1px solid #ff2a5e;font-size:11px;color:#cfe7ec;line-height:1.8;">
+                    <b style="color:#ff2a5e;">${name}</b>&nbsp;<span style="color:#4d7479;">${hits.length} hit${hits.length!==1?'s':''} — click for details</span><br>
+                    ${topIPs.map(([ip,cnt])=>`<span style="color:#ffe83b;">${ip}</span>&nbsp;<span style="color:#4d7479;font-size:10px;">×${cnt}</span>`).join('<br>')}
                 </div>`;
             })
             .onPolygonClick(d => {
                 if (!d) return;
-                const name = _polyName(d);
-                const hit = _attackHistory.find(a => a.country === name && (a.lat || a.lon));
-                if (hit) centerGlobeOn(hit.lat, hit.lon);
+                _openCountryModal(_polyName(d));
             });
     } catch(e) {
         console.warn('countries.geojson unavailable:', e);
     }
 }
 
+function _openCountryModal(name) {
+    const hits = _countryAttackMap[name] || [];
+    if (!hits.length) return;
+    const ipMap = {};
+    hits.forEach(h => { if (h.src_ip) ipMap[h.src_ip] = (ipMap[h.src_ip]||0)+1; });
+    const sorted = Object.entries(ipMap).sort((a,b)=>b[1]-a[1]);
+
+    $('cmod-title').textContent = name.toUpperCase();
+    $('cmod-stats').textContent = `${hits.length} attack${hits.length!==1?'s':''} from ${sorted.length} unique IP${sorted.length!==1?'s':''}`;
+    $('cmod-list').innerHTML = sorted.map(([ip, cnt]) => {
+        const col = PROTO_COLOR[(_attackHistory.find(a=>a.src_ip===ip)||{}).protocol||'fail2ban'] || '#d228ff';
+        return `<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:#02060a;border:1px solid #14333a;border-radius:2px;">
+            <span style="flex:1;font-family:monospace;font-size:12px;color:#ffe83b;">${ip}</span>
+            <span style="color:#4d7479;font-size:11px;min-width:28px;text-align:right;">×${cnt}</span>
+            <button onclick="navigator.clipboard?.writeText('${ip}');this.textContent='✓';setTimeout(()=>this.textContent='⎘',1200);"
+                style="background:none;border:1px solid #1a4046;color:#00c8c8;font-size:11px;padding:2px 6px;cursor:pointer;border-radius:2px;">⎘</button>
+        </div>`;
+    }).join('');
+    $('country-modal').classList.remove('hidden');
+}
+
+$('cmod-close').addEventListener('click', () => $('country-modal').classList.add('hidden'));
+$('country-modal').addEventListener('click', e => { if (e.target === $('country-modal')) $('country-modal').classList.add('hidden'); });
 
 function pushAttack(a, isNew = true) {
     if (!a.lat && !a.lon) return; // no arc without valid coordinates
@@ -395,14 +442,12 @@ function pushAttack(a, isNew = true) {
         acCountry.textContent = a.country || '?';
         acIsp.textContent = a.isp || '—';
         acVec.textContent = `:${a.dst_port}/${(a.protocol||'').toUpperCase()}`;
+        if (acHits) acHits.textContent = (_ipCounts.get(a.src_ip) || 1) + '×';
         card.classList.add('hot');
         clearTimeout(pushAttack._t);
         pushAttack._t = setTimeout(() => card.classList.remove('hot'), 10000);
 
-        // For new fail2ban events, center globe
-        if (a.protocol === 'fail2ban') {
-            centerGlobeOn(a.lat, a.lon);
-        }
+        // Auto-centering removed — disrupts flow when many attacks arrive in batch
 
         attackCount++;
         hudAttacks.textContent = attackCount;
@@ -487,6 +532,7 @@ function renderDevices(list) {
 
 let _allDevices = [];    // cache for parent selector
 let _attackHistory = []; // combined fail2ban + proxy attacks, last 24h
+let _ipCounts = new Map(); // ip → total attack count across _attackHistory
 
 async function openDeviceModal(mac) {
     const [d, netCfg] = await Promise.all([
@@ -751,6 +797,7 @@ document.getElementById('vsw-modal').addEventListener('click', e => {
 
 // ── Work mode ─────────────────────────────────────────────────────────────
 let _workMode = false;
+let _globeInitialized = false; // prevent loadStatic from resetting camera on periodic refresh
 
 function renderActiveUsers(users) {
     const el = $('users-list');
@@ -823,6 +870,7 @@ function pushAttackHistory(entry) {
         lat: entry.lat || 0,
         lon: entry.lon || 0,
     });
+    _ipCounts.set(src_ip, (_ipCounts.get(src_ip) || 0) + 1);
     // Prune to 24h
     if (ts) {
         const cutoff = Date.now() - _ATTACK_HIST_MAX_S * 1000;
@@ -873,6 +921,7 @@ function renderAttackHistory() {
         const proto = b.protocol || 'fail2ban';
         const label = _PROTO_LABEL[proto] || proto.toUpperCase();
         const col   = PROTO_COLOR[proto] || 'var(--accent)';
+        const cnt   = _ipCounts.get(b.src_ip) || 1;
         return `<div class="row ban clickable" data-lat="${b.lat}" data-lon="${b.lon}"
                      data-ip="${escape(b.src_ip)}" data-country="${escape(b.country)}"
                      data-isp="${escape(b.isp)}" data-port="${b.dst_port}" data-protocol="${proto}">
@@ -880,11 +929,11 @@ function renderAttackHistory() {
             <div style="flex:1;min-width:0;padding-left:4px;">
                 <div style="display:flex;justify-content:space-between;gap:4px;">
                     <span class="ip" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escape(b.src_ip)}</span>
-                    <span class="meta" style="white-space:nowrap;">${time}</span>
+                    <span class="meta" style="white-space:nowrap;color:${cnt>1?col:'#4d7479'};" title="${cnt} hit(s) from this IP">${cnt>1?'×'+cnt:time}</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:4px;">
                     <span style="color:#4d7479;font-size:10px;">${escape(b.country)}</span>
-                    <span style="color:#4d7479;font-size:10px;white-space:nowrap;">${date}</span>
+                    <span style="color:#4d7479;font-size:10px;white-space:nowrap;">${cnt>1?time+' '+date:date}</span>
                 </div>
             </div>
         </div>`;
@@ -908,10 +957,12 @@ document.querySelectorAll('.hist-filter-btn').forEach(btn => {
     });
 });
 
+const _BAD_COUNTRIES = new Set(['?','unknown','lan','invalid','nodb','attack','sentinel','local','internal']);
+
 function _computeCountriesFromHistory() {
     const map = {};
     _attackHistory.forEach(a => {
-        if (!a.country || ['?','Unknown','LAN','Invalid','NoDB'].includes(a.country)) return;
+        if (!a.country || _BAD_COUNTRIES.has(a.country.toLowerCase())) return;
         map[a.country] = (map[a.country] || 0) + 1;
     });
     return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 20)
@@ -919,6 +970,7 @@ function _computeCountriesFromHistory() {
 }
 
 function renderCountries(list) {
+    list = list.filter(c => c.country && !_BAD_COUNTRIES.has((c.country).toLowerCase()));
     ctyCountEl.textContent = list.length;
     if (!list.length) { countryListEl.innerHTML = '<div class="empty">No attacks yet.</div>'; return; }
     const max = Math.max(...list.map(c => c.hits));
@@ -1001,7 +1053,10 @@ async function loadStatic() {
             hudSentinel.classList.add('warn');
         }
         installHomeMarker();
-        globe.pointOfView({ lat: HOME.lat, lng: HOME.lon, altitude: 2.2 }, 0);
+        if (!_globeInitialized) {
+            globe.pointOfView({ lat: HOME.lat, lng: HOME.lon, altitude: 2.2 }, 0);
+            _globeInitialized = true;
+        }
 
         // Tab visibility based on config flags
         applyTabVisibility(cfg);
@@ -1056,6 +1111,9 @@ function applyTabVisibility(cfg) {
         if (btnProxy)    btnProxy.style.display    = 'none';
         if (btnNetwork)  btnNetwork.style.display  = 'none';
         if (settingsBtn) settingsBtn.style.display  = 'none';
+        // In work mode attacks table is empty — hide the tab, ban_history is the default
+        const dbvTabAttacks = $('dbv-tab-attacks');
+        if (dbvTabAttacks) dbvTabAttacks.style.display = 'none';
         // lan-panel never shows in work mode
         if (lanPanel)    lanPanel.style.display    = 'none';
         // Auth-gated panels
@@ -1115,7 +1173,7 @@ function connectWS() {
             // Per-type quota: each type gets MAX_ARCS/3 slots so all are visible
             const _q = Math.floor(MAX_ARCS / 3);
             (m.bans          || []).slice(-_q).forEach(b => { pushAttack(b, false); pushAttackHistory(b); });
-            (m.attacks       || []).slice(-_q).forEach(a => pushAttack(a, false));
+            (m.attacks       || []).slice(-_q).forEach(a => { pushAttack(a, false); pushAttackHistory(a); });
             (m.proxy_attacks || []).slice(-_q).forEach(a => { pushAttack(a, false); pushAttackHistory(a); });
             _globePaused = false; _histPaused = false;
             _globeFlush(); renderAttackHistory();
@@ -1125,7 +1183,7 @@ function connectWS() {
             (m.logs          || []).forEach(l => pushLog(l, false));
         } else if (m.type === 'attack' || m.type === 'ban') {
             pushAttack(m, true);
-            if (m.type === 'ban' || m.source === 'proxy') pushAttackHistory(m);
+            if (m.type === 'ban' || m.type === 'attack' || m.source === 'proxy') pushAttackHistory(m);
             refreshCountryPolygons();
             pushLog({ level: 'attack',
                       source: m.type === 'ban' ? 'fail2ban' : m.source || 'honeypot',
@@ -2952,9 +3010,14 @@ $('net-reseed-btn').addEventListener('click', () => {
 });
 
 // ── DB Viewer ─────────────────────────────────────────────────────────────────
-const _dbv = { table: 'attacks', page: 0, pageSize: 100, total: 0, cols: [], selected: new Set(), q: '' };
+const _dbv = { table: 'attacks', page: 0, pageSize: 100, total: 0, cols: [], selected: new Set(), q: '', sortCol: '', sortDir: 'desc' };
 
-function dbvOpen() { $('db-viewer').classList.remove('hidden'); dbvLoad(); }
+function dbvOpen() {
+    $('db-viewer').classList.remove('hidden');
+    // In work mode the attacks table is empty; start on ban_history which has HTTP/HTTPS/fail2ban
+    if (_workMode && _dbv.table === 'attacks') dbvSwitch('ban_history');
+    else dbvLoad();
+}
 function dbvClose() { $('db-viewer').classList.add('hidden'); }
 
 function dbvSwitch(table) {
@@ -2994,14 +3057,19 @@ async function dbvLoad() {
     if (_dbv.table === 'logs') { await dbvLoadLogs(); return; }
     const params = new URLSearchParams({ limit: _dbv.pageSize, offset: _dbv.page * _dbv.pageSize });
     if (_dbv.q) params.set('q', _dbv.q);
+    if (_dbv.sortCol) { params.set('sort_col', _dbv.sortCol); params.set('sort_dir', _dbv.sortDir); }
     const data = await fetch(`/api/db/${_dbv.table}?${params}`).then(r => r.json()).catch(() => null);
     if (!data || data.error) return;
     _dbv.cols = data.columns; _dbv.total = data.total; _dbv.pk = data.pk;
 
-    // Header
+    // Header with sortable columns
     const thead = $('dbv-thead');
     thead.innerHTML = '<tr><th><input type="checkbox" id="dbv-chk-all" title="Select all"></th>'
-        + data.columns.map(c => `<th>${c.toUpperCase()}</th>`).join('') + '</tr>';
+        + data.columns.map(c => {
+            const isActive = c === _dbv.sortCol;
+            const arrow = isActive ? (_dbv.sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+            return `<th class="dbv-sortable" data-col="${c}" style="cursor:pointer;user-select:none;${isActive?'color:var(--accent)':''}">${c.toUpperCase()}${arrow}</th>`;
+        }).join('') + '</tr>';
     $('dbv-chk-all').addEventListener('change', e => {
         document.querySelectorAll('#dbv-tbody .dbv-chk').forEach(chk => {
             chk.checked = e.target.checked;
@@ -3010,6 +3078,19 @@ async function dbvLoad() {
             chk.closest('tr').classList.toggle('selected', e.target.checked);
         });
         dbvUpdateDeleteBtn();
+    });
+
+    // Sort on column header click
+    thead.querySelectorAll('.dbv-sortable').forEach(th => {
+        th.addEventListener('click', () => {
+            const col = th.dataset.col;
+            if (_dbv.sortCol === col) {
+                _dbv.sortDir = _dbv.sortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                _dbv.sortCol = col; _dbv.sortDir = 'desc';
+            }
+            _dbv.page = 0; dbvLoad();
+        });
     });
 
     // Rows
@@ -3072,7 +3153,7 @@ $('dbv-search').addEventListener('input', e => {
     clearTimeout(_dbvSearchTimer);
     _dbvSearchTimer = setTimeout(() => { _dbv.q = e.target.value; _dbv.page = 0; dbvLoad(); }, 350);
 });
-$('db-viewer-btn').addEventListener('click', () => { dbvOpen(); dbvSwitch('attacks'); });
+$('db-viewer-btn').addEventListener('click', () => { dbvOpen(); });
 $('db-viewer-close').addEventListener('click', dbvClose);
 $('db-viewer').addEventListener('click', e => { if (e.target === $('db-viewer')) dbvClose(); });
 

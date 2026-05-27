@@ -164,6 +164,62 @@ async def lifespan(app: FastAPI):
             pass
 
     sniproxy.set_attack_callback(_sniproxy_attack)
+
+    async def _ban_watcher():
+        """Watch ban_history and active_users for changes; emit log events."""
+        import sqlite3 as _sl
+        prev_bans: dict = {}   # proto -> total count
+        prev_users: int = -1
+        first_run = True
+        while True:
+            await asyncio.sleep(60)
+            try:
+                conn = _sl.connect(DB_PATH, timeout=10)
+                ban_rows = conn.execute(
+                    "SELECT COALESCE(protocol,'fail2ban') AS proto, COUNT(*) AS n "
+                    "FROM ban_history GROUP BY proto"
+                ).fetchall()
+                user_count = conn.execute("SELECT COUNT(*) FROM active_users").fetchone()[0]
+                conn.close()
+
+                now = datetime.now().isoformat()
+
+                # ban_history changes
+                cur_bans = {p: n for p, n in ban_rows}
+                def _emit(ev):
+                    # broadcaster appends log-type events to _log_buffer; avoid double-add
+                    try: _broadcast_queue.put_nowait(ev)
+                    except asyncio.QueueFull: _log_buffer.append(ev)
+
+                if first_run:
+                    for proto, n in cur_bans.items():
+                        _emit({"type": "log", "level": "info", "source": proto,
+                               "ts": now, "msg": f"{n} {proto.upper()} ban(s) in DB"})
+                else:
+                    for proto, n in cur_bans.items():
+                        diff = n - prev_bans.get(proto, 0)
+                        if diff > 0:
+                            _emit({"type": "log", "level": "attack", "source": proto,
+                                   "ts": now, "msg": f"+{diff} new {proto.upper()} ban(s) added"})
+                prev_bans = cur_bans
+
+                # active_users changes
+                if user_count != prev_users:
+                    if prev_users >= 0:
+                        diff = user_count - prev_users
+                        sign = "+" if diff > 0 else ""
+                        _emit({"type": "log", "level": "info", "source": "who",
+                               "ts": now,
+                               "msg": f"active users: {user_count} ({sign}{diff} change)"})
+                    else:
+                        _emit({"type": "log", "level": "good", "source": "who",
+                               "ts": now, "msg": f"active users: {user_count} session(s)"})
+                prev_users = user_count
+
+                first_run = False
+            except Exception:
+                pass
+
     bg = [
         asyncio.create_task(_broadcaster()),
         asyncio.create_task(_heartbeat_loop()),
@@ -172,6 +228,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(tasks.enrich_unknown_isp(_broadcast_queue)),
         asyncio.create_task(tasks.periodic_who_collector(_broadcast_queue)),
         asyncio.create_task(_svc_bg_loop()),
+        asyncio.create_task(_ban_watcher()),
     ]
     _log_buffer.append({"type": "log", "level": "good", "source": "system",
                         "ts": datetime.now().isoformat(), "msg": "Sentinel-Alert online"})
@@ -369,10 +426,13 @@ def get_bans(limit: int = 200):
 
 @app.get("/api/stats/countries")
 def stats_countries():
+    bad = "LOWER(country) NOT IN ('lan','unknown','invalid','nodb','attack','sentinel','local','internal','?')"
     return _query(
-        "SELECT country, COUNT(*) AS hits FROM attacks "
-        "WHERE country NOT IN ('LAN','Unknown','Invalid','NoDB') "
-        "GROUP BY country ORDER BY hits DESC LIMIT 20"
+        f"SELECT country, SUM(hits) AS hits FROM ("
+        f"  SELECT country, COUNT(*) AS hits FROM attacks WHERE {bad} GROUP BY country"
+        f"  UNION ALL"
+        f"  SELECT country, COUNT(*) AS hits FROM ban_history WHERE {bad} GROUP BY country"
+        f") GROUP BY country ORDER BY hits DESC LIMIT 20"
     )
 
 
@@ -724,13 +784,14 @@ async def ws_live(ws: WebSocket):
 
 _DB_TABLES = {
     "attacks":      ("id",       ["id","ts","src_ip","dst_port","protocol","country","isp","lat","lon"]),
-    "ban_history":  ("rowid",    ["rowid","ip","country","isp","timestamp","lat","lon"]),
+    "ban_history":  ("rowid",    ["rowid","ip","country","isp","timestamp","lat","lon","protocol"]),
     "devices":      ("mac",      ["mac","ip","hostname","vendor","first_seen","last_seen","is_online"]),
     "active_users": ("username", ["username","ip","node","cluster","country","isp","timestamp"]),
 }
 
 @app.get("/api/db/{table}")
-def db_table(table: str, request: Request, limit: int = 500, offset: int = 0, q: str = ""):
+def db_table(table: str, request: Request, limit: int = 500, offset: int = 0,
+             q: str = "", sort_col: str = "", sort_dir: str = "desc"):
     if not _is_authed(request):
         return JSONResponse({"error": "unauthorized"}, 401)
     if table not in _DB_TABLES:
@@ -743,7 +804,11 @@ def db_table(table: str, request: Request, limit: int = 500, offset: int = 0, q:
         text_cols = [c for c in cols if c not in ("lat","lon","is_online","dst_port","id","rowid")]
         where = "WHERE " + " OR ".join(f"{c} LIKE ?" for c in text_cols)
         params = [f"%{q}%" for _ in text_cols]
-    order = f"ORDER BY {pk} DESC"
+    if sort_col and sort_col in cols:
+        direction = "ASC" if sort_dir.lower() == "asc" else "DESC"
+        order = f"ORDER BY {sort_col} {direction}"
+    else:
+        order = f"ORDER BY {pk} DESC"
     rows = _query(
         f"SELECT {col_list} FROM {table} {where} {order} LIMIT ? OFFSET ?",
         (*params, limit, offset)

@@ -176,10 +176,17 @@
         </div>
         <div id="globe-viz"></div>
         <div class="hud-overlay" id="attack-card">
-            <div class="hud-row"><span class="lbl">SOURCE</span><span class="val" id="ac-ip">---.---.---.---</span></div>
+            <div class="hud-row">
+                <span class="lbl">SOURCE</span>
+                <span style="display:flex;align-items:center;gap:6px;">
+                    <span class="val" id="ac-ip">---.---.---.---</span>
+                    <button id="ac-copy" title="Copy IP" style="background:none;border:1px solid #1a4046;color:#4d7479;font-size:9px;padding:1px 5px;cursor:pointer;border-radius:2px;">⎘</button>
+                </span>
+            </div>
             <div class="hud-row"><span class="lbl">COUNTRY</span><span class="val accent" id="ac-country">—</span></div>
             <div class="hud-row"><span class="lbl">ISP</span><span class="val" id="ac-isp">—</span></div>
             <div class="hud-row"><span class="lbl">VECTOR</span><span class="val danger" id="ac-vec">—</span></div>
+            <div class="hud-row"><span class="lbl">HITS</span><span class="val" id="ac-hits" style="color:#ff6e00;">—</span></div>
         </div>
         <div class="globe-legend">
             <div class="legend-row"><span class="ldot" style="background:#00c8c8;box-shadow:0 0 5px #00c8c8aa;"></span><span>Active user session</span></div>
@@ -483,6 +490,20 @@
     </div>
 
 </main>
+
+<!-- ================================================================ -->
+<!-- COUNTRY DETAIL MODAL                                               -->
+<!-- ================================================================ -->
+<div id="country-modal" class="modal hidden">
+    <div class="modal-box" style="width:340px;max-height:70vh;display:flex;flex-direction:column;">
+        <div class="ph" style="margin-bottom:0;padding-bottom:8px;">
+            <span>◤ <span id="cmod-title">COUNTRY</span></span>
+            <button class="btn ghost" id="cmod-close">✕</button>
+        </div>
+        <div style="padding:4px 0 8px;color:#4d7479;font-size:11px;" id="cmod-stats"></div>
+        <div id="cmod-list" style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:4px;"></div>
+    </div>
+</div>
 
 <!-- ================================================================ -->
 <!-- DB VIEWER MODAL                                                    -->
