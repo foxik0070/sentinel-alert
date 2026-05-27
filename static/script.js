@@ -1129,6 +1129,9 @@ function applyTabVisibility(cfg) {
             mainGrid.classList.remove('no-auth');
             mainGrid.classList.add('work-layout');
         }
+        // Hide sensitive counters in work mode
+        const strip = document.querySelector('#countries-panel .status-strip');
+        if (strip) strip.style.display = 'none';
         // Sync globe canvas to new container size after layout change.
         requestAnimationFrame(() => globe.width(globeEl.clientWidth).height(globeEl.clientHeight));
     } else {
@@ -1144,6 +1147,8 @@ function applyTabVisibility(cfg) {
             mainGrid.classList.remove('work-layout');
             mainGrid.classList.toggle('no-scanner', !cfg.scanner_enabled || !_isAuthenticated);
         }
+        const strip = document.querySelector('#countries-panel .status-strip');
+        if (strip) strip.style.display = '';
     }
 }
 
