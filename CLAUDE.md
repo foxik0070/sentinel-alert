@@ -1,4 +1,13 @@
-# Sentinel-Alert Project Documentation
+# Sentinel-Alert
+
+Sledovani portu
+
+[honeypot]
+# Ports the fake services listen on (must be > 1024 unless running as root)
+ssh_port  = 2222
+http_port = 8080
+
+Hlasi sam sebe -> 192.168.2.114 a 192.168.2.115 -> zde bezi... potrebuji, aby to hlasilo jen ip adresy mimo lokalni sit. Router na 192.168.2.1 ma presmerovane porty 2222 a 8080 sem na tyto porty 
 
 Sentinel-Alert is a dual-purpose network monitoring and honeypot visualization tool. It integrates LAN scanning (Pi.Alert style) with honeypot threat detection (Knock-Knock style). It runs on Ubuntu/Debian/RHEL. I want a modern look, interactive, attacker visualization on a globe with animations, labels, destination countries, etc.
 
