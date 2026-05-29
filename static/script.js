@@ -141,6 +141,7 @@ const globe = Globe()(globeEl)
     })
     .arcAltitudeAutoScale(0.75)
     .arcsTransitionDuration(0)
+    .pointsTransitionDuration(0)
     .pointsData([...points, ...homePoints])
     .pointLat(d => d.lat).pointLng(d => d.lon)
     .pointColor(d => d.color)
@@ -459,14 +460,10 @@ function _ipToNum(ip) {
 }
 
 function renderDevices(list) {
-    const online = list.filter(d => d.is_online).length;
-    const vswitches = (_netSettings.virtual_switches || []);
-    netCountEl.textContent = `${online} / ${list.length + vswitches.length}`;
-    hudLan.textContent = `${online} / ${list.length + vswitches.length}`;
-
     const now = Date.now();
     const newThreshold = 48 * 3600 * 1000;
     const devSettings = (_netSettings.devices || {});
+    const vswitches = (_netSettings.virtual_switches || []);
 
     // Switch/router first, virtual (lxc/qemu) last, then by IP
     const _TYPE_PRI = { switch: 0, router: 0, ap: 0, lxc: 2, qemu: 2 };
@@ -475,6 +472,25 @@ function renderDevices(list) {
         const pb = _TYPE_PRI[(devSettings[b.mac] || {}).type] ?? 1;
         return pa !== pb ? pa - pb : _ipToNum(a.ip) - _ipToNum(b.ip);
     });
+
+    // Group by display name — multi-homed devices (eth+wifi, dual-NIC) appear as one row
+    const _nameToGroup = new Map();
+    const _groups = [];
+    for (const d of list) {
+        const name = (devSettings[d.mac] || {}).hostname || d.hostname;
+        if (name && _nameToGroup.has(name)) {
+            _groups[_nameToGroup.get(name)].push(d);
+        } else {
+            const idx = _groups.length;
+            _groups.push([d]);
+            if (name) _nameToGroup.set(name, idx);
+        }
+    }
+
+    const onlineGroups = _groups.filter(g => g.some(d => d.is_online)).length;
+    const totalGroups = _groups.length + vswitches.length;
+    netCountEl.textContent = `${onlineGroups} / ${totalGroups}`;
+    hudLan.textContent = `${onlineGroups} / ${totalGroups}`;
 
     const vswHtml = vswitches.map(sw => `
         <div class="row dev clickable" data-vsw="${escape(sw.id)}" style="border-left:2px solid #38bdf8;">
@@ -488,33 +504,38 @@ function renderDevices(list) {
             </div>
         </div>`).join('');
 
-    const devHtml = list.length ? list.map(d => {
-        const cfg = devSettings[d.mac] || {};
-        const displayName = cfg.hostname || d.hostname;
-        const _BADGE = { router:'#38bdf8', ap:'#38bdf8', switch:'#38bdf8', lxc:'#a855f7', qemu:'#60a5fa', nas:'#ffe83b', mobile:'#86efac', tv:'#fb923c', printer:'#f97316', server:'#22c55e', rpi:'#ef4444', other:'#ea580c', iot:'#06b6d4', pc:'#94a3b8', network:'#166534' };
+    const _BADGE = { router:'#38bdf8', ap:'#38bdf8', switch:'#38bdf8', lxc:'#a855f7', qemu:'#60a5fa', nas:'#ffe83b', mobile:'#86efac', tv:'#fb923c', printer:'#f97316', server:'#22c55e', rpi:'#ef4444', other:'#ea580c', iot:'#06b6d4', pc:'#94a3b8', network:'#166534' };
+
+    const devHtml = _groups.length ? _groups.map(group => {
+        const primary = group.find(d => d.is_online) || group[0];
+        const cfg = devSettings[primary.mac] || {};
+        const displayName = cfg.hostname || primary.hostname;
+        const isOnline = group.some(d => d.is_online);
         const typeBadge = _BADGE[cfg.type] ? ` <span style="color:${_BADGE[cfg.type]};font-size:9px;font-weight:700;">[${cfg.type.toUpperCase()}]</span>` : '';
         const vizDot = cfg.visualize ? ' <span style="color:var(--accent);font-size:9px;" title="Visualize on map">◉</span>' : '';
+        const ipList = group.length > 1 ? group.map(d => escape(d.ip)).join(' / ') : escape(primary.ip);
         const label = displayName
-            ? `${escape(displayName)}${typeBadge}${vizDot} <span style="color:#4d7479;font-size:10px;">[${escape(d.ip)}]</span>`
-            : escape(d.ip);
-        const seen = d.last_seen ? timeAgo(d.last_seen) : '—';
-        const ports = (d.ports || '').split(',').filter(Boolean).map(p => {
+            ? `${escape(displayName)}${typeBadge}${vizDot} <span style="color:#4d7479;font-size:10px;">[${ipList}]</span>`
+            : ipList;
+        const seen = group.reduce((best, d) => (!best || (d.last_seen && d.last_seen > best)) ? d.last_seen : best, null);
+        const allPorts = [...new Set(group.flatMap(d => (d.ports || '').split(',').filter(Boolean)))].sort((a,b)=>+a-+b);
+        const ports = allPorts.map(p => {
             const cls = ({22:'ssh',80:'web',443:'web',8080:'web',3306:'db',5432:'db',6379:'db'}[+p]) || '';
             return `<span class="port ${cls}">${p}</span>`;
         }).join('');
         const notifyNew = cfg.notify_new !== false;
-        const isNew = notifyNew && d.first_seen &&
-                      (now - new Date(d.first_seen).getTime()) < newThreshold;
+        const isNew = notifyNew && primary.first_seen &&
+                      (now - new Date(primary.first_seen).getTime()) < newThreshold;
         const newBadge = isNew ? ' <span class="badge-new">(NEW)</span>' : '';
         return `
-        <div class="row dev clickable ${d.is_online ? '' : 'offline'}" data-mac="${escape(d.mac)}">
-            <span class="dot ${d.is_online ? 'on' : 'off'}"></span>
+        <div class="row dev clickable ${isOnline ? '' : 'offline'}" data-mac="${escape(primary.mac)}">
+            <span class="dot ${isOnline ? 'on' : 'off'}"></span>
             <div style="flex:1;min-width:0;">
                 <div style="display:flex;justify-content:space-between;">
                     <span class="name">${label}${newBadge}</span>
-                    <span class="meta">${seen}</span>
+                    <span class="meta">${seen ? timeAgo(seen) : '—'}</span>
                 </div>
-                <div class="ip">${escape(d.vendor || d.ip)}</div>
+                <div class="ip">${escape(primary.vendor || primary.ip)}</div>
                 ${ports ? `<div class="ports">${ports}</div>` : ''}
             </div>
         </div>`;
@@ -838,7 +859,7 @@ async function fetchActiveUsers() {
             const colorBase = PROTO_COLOR.who;
             userArcs.push({
                 startLat: u.lat, startLng: u.lon, endLat: HOME.lat, endLng: HOME.lon,
-                color: [colorBase, colorBase],
+                color: [colorBase, colorBase], phase: Math.random(),
                 src_ip: u.ip, country: u.country, isp: u.isp, dst_port: 22,
                 protocol: 'who', username: u.username, node: u.node,
             });
@@ -1145,7 +1166,7 @@ function applyTabVisibility(cfg) {
         if (logPanel)    logPanel.style.display    = _isAuthenticated ? SHOW : 'none';
         if (mainGrid) {
             mainGrid.classList.remove('work-layout');
-            mainGrid.classList.toggle('no-scanner', !cfg.scanner_enabled || !_isAuthenticated);
+            mainGrid.classList.toggle('no-scanner', !cfg.scanner_enabled && _isAuthenticated);
         }
         const strip = document.querySelector('#countries-panel .status-strip');
         if (strip) strip.style.display = '';
@@ -2646,7 +2667,7 @@ function netRender() {
             .on('drag',  netDragged)
             .on('end',   netDragEnd))
         .on('click',      (ev, d) => { ev.stopPropagation(); netHideTooltip(); netClickNode(d); })
-        .on('mouseenter', (ev, d) => { _netHoverTimer = setTimeout(() => netShowTooltip(ev, d), 3000); })
+        .on('mouseenter', (ev, d) => { _netHoverTimer = setTimeout(() => netShowTooltip(ev, d), 600); })
         .on('mousemove',  (ev)    => { netMoveTooltip(ev); })
         .on('mouseleave', ()      => { clearTimeout(_netHoverTimer); netHideTooltip(); });
 

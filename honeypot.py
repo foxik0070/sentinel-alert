@@ -4,8 +4,8 @@ Each attempt is GeoIP-enriched, persisted to the `attacks` table, broadcast over
 the shared asyncio Queue, and (optionally) forwarded via the Sentinel bridge.
 """
 import asyncio
+import ipaddress
 import os
-import socket
 import sqlite3
 from datetime import datetime
 
@@ -16,17 +16,6 @@ sqlite3.register_adapter(datetime, lambda val: val.isoformat())
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "data", "alerts.db")
-
-def _collect_local_ips() -> frozenset:
-    ips = {"127.0.0.1", "::1"}
-    try:
-        for info in socket.getaddrinfo(socket.gethostname(), None):
-            ips.add(info[4][0])
-    except Exception:
-        pass
-    return frozenset(ips)
-
-_LOCAL_IPS: frozenset = _collect_local_ips()
 
 SSH_BANNER = b"SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.4\r\n"
 HTTP_RESPONSE = (
@@ -67,13 +56,17 @@ def _persist(event):
 async def _handle(reader, writer, protocol, port, banner):
     peer = writer.get_extra_info("peername")
     src_ip = peer[0] if peer else "0.0.0.0"
-    if src_ip in _LOCAL_IPS:
-        try:
+    try:
+        addr = ipaddress.ip_address(src_ip)
+        if addr.is_private or addr.is_loopback or addr.is_link_local:
             writer.close()
-            await writer.wait_closed()
-        except Exception:
-            pass
-        return
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            return
+    except ValueError:
+        pass
     payload = b""
     try:
         if banner:

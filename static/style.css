@@ -141,12 +141,13 @@ html, body {
         "purple yellow grey";
 }
 
-/* Logged-out: drop empty left column, expand globe area */
+/* Logged-out: drop empty left column, expand globe area.
+   users-area is hidden when not authenticated — remove that row to avoid empty space. */
 .grid.no-auth {
     grid-template-columns: 1fr 280px;
+    grid-template-rows: 1fr 1fr;
     grid-template-areas:
         "yellow  green"
-        "yellow  users-area"
         "yellow  grey";
 }
 
@@ -720,6 +721,11 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
         grid-template-rows: 280px auto auto auto auto;
         grid-template-areas: "yellow" "red" "green" "purple" "grey";
     }
+    .grid.no-auth {
+        grid-template-columns: 1fr;
+        grid-template-rows: 280px auto auto;
+        grid-template-areas: "yellow" "green" "grey";
+    }
     .globe-panel { height: 280px; }
 
     /* Globe header: truncate long title so buttons don't overflow */
@@ -751,6 +757,11 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
 
     /* Modals */
     .modal-box { width: 96vw; }
+}
+
+/* Medium: 641–1100px — title overlaps header elements on these widths */
+@media (min-width: 641px) and (max-width: 1100px) {
+    .hud-title { display: none; }
 }
 
 /* Medium: 641–768px */

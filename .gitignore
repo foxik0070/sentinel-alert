@@ -8,18 +8,22 @@ venv/
 
 # Runtime data — SQLite, stats, persisted state
 data/alerts.db
+data/sentinel.db
+data/domains.json
 data/sniproxy_stats.json
 data/fsc_hosts.json
 data/topo.json
 data/topology.json
 data/settings.json
 data/net_settings.json
+data/svc_settings.json
 
 # Sentinel credentials (configured via UI or setup.sh)
 data/sentinel.json
 
-# GeoIP database (large binary, download separately)
+# GeoIP databases (large binaries, download separately via setup.sh)
 data/GeoLite2-City.mmdb
+data/GeoLite2-ASN.mmdb
 
 # SSH keys — never commit private keys
 conf/id_ed25519
@@ -28,6 +32,15 @@ conf/id_ed25519.pub
 # Node
 node_modules/
 package-lock.json
+
+# Claude Code session data and personal work scripts
+.claude/
+work/
+resume.sh
+resume-work.sh
+
+# pytest
+.pytest_cache/
 
 # Editor / OS
 .idea/

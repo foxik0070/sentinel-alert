@@ -1,35 +1,56 @@
 # Sentinel-Alert
 
-Sledovani portu
+## Popis
 
-[honeypot]
-# Ports the fake services listen on (must be > 1024 unless running as root)
-ssh_port  = 2222
-http_port = 8080
+Sentinel-Alert je nástroj pro monitoring domácí sítě a vizualizaci honeypot útoků. Kombinuje LAN skenování (Pi.Alert styl) s detekcí hrozeb přes honeypot (Knock-Knock styl). Běží na Ubuntu/Debian/Raspberry Pi OS.
 
-Hlasi sam sebe -> 192.168.2.114 a 192.168.2.115 -> zde bezi... potrebuji, aby to hlasilo jen ip adresy mimo lokalni sit. Router na 192.168.2.1 ma presmerovane porty 2222 a 8080 sem na tyto porty 
+## Architektura
 
-Sentinel-Alert is a dual-purpose network monitoring and honeypot visualization tool. It integrates LAN scanning (Pi.Alert style) with honeypot threat detection (Knock-Knock style). It runs on Ubuntu/Debian/RHEL. I want a modern look, interactive, attacker visualization on a globe with animations, labels, destination countries, etc.
-
-## Basic Architecture
 - **Backend:** Python / FastAPI
-- **Database:** SQLite
-- **Frontend:** HTML5, CSS3, Vanilla JS + D3.js/Leaflet
-- **Communication:** WebSockets for live data streaming
+- **Databáze:** SQLite (`data/alerts.db`)
+- **Frontend:** HTML5, CSS3, Vanilla JS + Globe.gl (3D globus), Chart.js
+- **Komunikace:** WebSockets pro live streaming dat
 - **Port:** 5056
 
-## Modules
-1. **Scanner/Collector:** ARP scanning, host inventory, service availability.
-2. **Honeypot:** Captures SSH/HTTP/etc. attacks, GeoIP enrichment.
-3. **API and WS:** FastAPI server, real-time event streaming.
-4. **Sentinel Bridge:** Internal API/client for reporting to the main 'Sentinel' infrastructure.
+## Moduly
 
-## Plan
-- [ ] Phase 1: Data and DB (Unified Schema)
-- [ ] Phase 2: Scanning Engine
-- [ ] Phase 3: Real-time Backend (WebSockets)
-- [ ] Phase 4: Frontend Visualization
-- [ ] Phase 5: Local Network Visualization with IP, Hostname, Port information
+1. **honeypot.py** — Fake SSH (port 2222) a HTTP (port 8080) server. Každé připojení z externí IP zaznamená, obohatí o GeoIP data a uloží do DB.
+2. **scanner.py** — ARP sweep + TCP port probe. Detekuje zařízení v síti, jejich dostupnost a otevřené porty.
+3. **fsc.py** — Service checker (HTTP/TCP/Ping/DNS/Heartbeat). Konfigurace v `data/services.json`.
+4. **sniproxy.py** — SSH monitor vzdáleného SNI proxy, statistiky za posledních 24h.
+5. **app.py** — FastAPI server, WebSocket streaming, REST API.
+6. **bridge.py** — Odesílání událostí do hlavní Sentinel instance.
+7. **geoip.py** — GeoIP lookup (GeoLite2-City.mmdb + ip-api.com fallback).
+
+## Honeypot — konfigurace
+
+```ini
+[honeypot]
+ssh_port  = 2222
+http_port = 8080
+```
+
+Router (192.168.2.1) přeposílá WAN porty 2222 a 8080 na tento stroj.
+Honeypot filtruje všechna privátní/lokální IP (RFC 1918) — zaznamenává pouze skutečné externí útočníky.
+
+## Otevřené TODO
+
+- [x] Responzivita — desktop `no-auth` odstraněn prázdný `users-area` řádek; mobilní `no-auth` override (single col); title skryt na 641–1100px
+- [x] Zařízení s více IP — groupování v device listu podle hostname; zobrazuje `[192.168.2.114 / 192.168.2.115]`
+- [x] WORK — animace oblouků aktivních uživatelů — `phase` fix + `pointsTransitionDuration(0)`
+- [x] Globus se sekl — `pointsTransitionDuration(0)`, `arcsTransitionDuration(0)`
+- [x] Závislost na externích JS/CSS — vše je lokálně ve `static/vendor/`
+- [x] LXC/QEMU badge — barevné označení `[LXC]`/`[QEMU]` v device listu funguje
+- [x] Badge NEW — po odškrtnutí `notify_new` se badge skryje po refreshi device listu
+- [x] Grid no-scanner/no-auth konflikt — fixed (`no-scanner` se aplikuje jen když authenticated)
+
+## Fáze vývoje
+
+- [x] Phase 1: Databázové schema (attacks, devices, ban_history, active_users)
+- [x] Phase 2: Scanning Engine (ARP + TCP port probe)
+- [x] Phase 3: Real-time Backend (WebSockets, event queue)
+- [x] Phase 4: Frontend Vizualizace (Globe.gl, Chart.js, attack history)
+- [x] Phase 5: Network Map — D3 force-directed graf s IP, hostname, porty, drag & drop, topology save
 
 ---
 
