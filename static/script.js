@@ -1150,6 +1150,7 @@ function applyTabVisibility(cfg) {
             mainGrid.classList.remove('no-auth');
             mainGrid.classList.add('work-layout');
         }
+        document.body.classList.add('work-mode');
         // Hide sensitive counters in work mode
         const strip = document.querySelector('#countries-panel .status-strip');
         if (strip) strip.style.display = 'none';
@@ -1168,6 +1169,7 @@ function applyTabVisibility(cfg) {
             mainGrid.classList.remove('work-layout');
             mainGrid.classList.toggle('no-scanner', !cfg.scanner_enabled && _isAuthenticated);
         }
+        document.body.classList.remove('work-mode');
         const strip = document.querySelector('#countries-panel .status-strip');
         if (strip) strip.style.display = '';
     }
