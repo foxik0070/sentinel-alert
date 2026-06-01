@@ -17,11 +17,36 @@ import geoip
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 _on_attack = None   # callback(dict) — set by app.py to push to WebSocket
+_on_warn   = None   # callback(dict) — fires on connected state transitions
+_prev_connected: bool | None = None
 
 
 def set_attack_callback(fn):
     global _on_attack
     _on_attack = fn
+
+
+def set_warn_callback(fn):
+    global _on_warn
+    _on_warn = fn
+
+
+def _notify_status_change(connected: bool, error: str = ""):
+    global _prev_connected
+    if _prev_connected == connected:
+        return
+    prev, _prev_connected = _prev_connected, connected
+    if prev is None:
+        return  # skip initial state, don't spam on startup
+    if _on_warn is None:
+        return
+    if not connected:
+        _on_warn({"type": "log", "level": "warn", "source": "sniproxy",
+                  "msg": f"SNIProxy unreachable ({_server}): {error}" if error
+                         else f"SNIProxy connection lost ({_server})"})
+    else:
+        _on_warn({"type": "log", "level": "info", "source": "sniproxy",
+                  "msg": f"SNIProxy reconnected ({_server})"})
 
 
 def _is_external(ip: str) -> bool:
@@ -222,6 +247,8 @@ def _poll_worker():
             data_store["connected"] = True
             data_store["last_error"] = ""
             _recompute_24h()
+    _notify_status_change(lines is not None,
+                          data_store.get("last_error", "") if lines is None else "")
 
     while True:
         time.sleep(5)
@@ -233,6 +260,8 @@ def _poll_worker():
                 data_store["connected"] = True
                 data_store["last_error"] = ""
             _recompute_24h()
+        _notify_status_change(lines is not None,
+                              data_store.get("last_error", "") if lines is None else "")
 
 
 def _speed_worker():

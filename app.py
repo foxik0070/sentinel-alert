@@ -165,6 +165,15 @@ async def lifespan(app: FastAPI):
 
     sniproxy.set_attack_callback(_sniproxy_attack)
 
+    def _sniproxy_warn(ev: dict):
+        try:
+            _broadcast_queue.put_nowait(ev)
+        except asyncio.QueueFull:
+            pass
+        asyncio.create_task(bridge.forward(ev))
+
+    sniproxy.set_warn_callback(_sniproxy_warn)
+
     async def _ban_watcher():
         """Watch ban_history and active_users for changes; emit log events."""
         import sqlite3 as _sl
