@@ -81,3 +81,90 @@ Honeypot filtruje všechna privátní/lokální IP (RFC 1918) — zaznamenává 
 ---
 
 **These guidelines work if:** fewer unnecessary changes, fewer reworked solutions, and questions come *before* implementation.
+
+---
+
+## Plánovaná migrace: sniproxy → nginx
+
+### Kontext
+
+Proxy server (`proxy`, 192.168.2.203 / 192.168.2.250) přechází ze sniproxy na nginx stream modul.
+Detaily architektury viz Ansible repo (`/opt/git/Ansible`), role `proxy/303-Nginx` (nová).
+
+### Co se mění v tomto projektu
+
+#### `sniproxy.py` → přejmenovat na `proxy_monitor.py`
+
+Modul čte access logy z proxy serveru přes SSH. Po migraci se změní:
+
+**Nový nginx stream log formát** (konfigurovat v nginx `log_format`):
+```nginx
+log_format proxy_stream '$remote_addr [$time_local] '
+                        '$ssl_preread_server_name '
+                        '$upstream_addr '
+                        '$bytes_sent $bytes_received '
+                        '$session_time';
+```
+
+Příklad řádku:
+```
+1.2.3.4 [01/Jun/2026:19:30:00 +0200] git.foxik-iot.cz 192.168.2.212:443 15234 8432 0.456
+```
+
+**Nový `_PATTERN` regex:**
+```python
+_PATTERN = re.compile(
+    r"(?P<src_ip>[0-9a-fA-F.:]+)\s+"
+    r"\[(?P<date>\d{2}/\w+/\d{4}):(?P<time>\d{2}:\d{2}:\d{2})[^\]]*\]\s+"
+    r"(?P<domain>\S+)\s+"
+    r"(?P<dest_ip>[^:]+):(?P<dest_port>\d+)\s+"
+    r"(?P<tx>\d+)\s+(?P<rx>\d+)\s+"
+    r"(?P<duration>[0-9.]+)"
+)
+```
+
+**Nové log cesty** (výchozí v `conf.py`):
+```
+/var/log/nginx/proxy_public.log    ← 192.168.2.203 (git, ha, music)
+/var/log/nginx/proxy_internal.log  ← 192.168.2.250 (vše ostatní)
+```
+
+**Zprávy ve `_notify_status_change`:** nahradit `SNIProxy` → `nginx proxy`.
+
+#### `conf.py`
+
+Sekci `[sniproxy]` přejmenovat na `[proxy]`, proměnné:
+```
+SNIPROXY_SERVER    → PROXY_SERVER
+SNIPROXY_SSH_USER  → PROXY_SSH_USER
+SNIPROXY_LOG_FILES → PROXY_LOG_FILES
+```
+Výchozí hodnota `PROXY_LOG_FILES`:
+```
+/var/log/nginx/proxy_public.log,/var/log/nginx/proxy_internal.log
+```
+
+#### `app.py`
+
+- Import `sniproxy` → `proxy_monitor`
+- Všechny reference `sniproxy.*` → `proxy_monitor.*`
+- Konfigurace `start(...)` volat s novými proměnnými
+
+#### `data/sniproxy_stats.json`
+
+Přejmenovat na `data/proxy_stats.json` (aktualizovat `_STATS_FILE` v novém modulu).
+
+### Co zůstává nezměněno
+
+- Logika `_process_lines()` — přizpůsobit pouze pokud se změní klíče (tx/rx/domain/src_ip)
+- `_speed_worker()`, `_save_stats()`, `add_ban()` — beze změny
+- `data_store` struktura — beze změny
+- SSH fetch mechanismus (`_fetch_lines`) — stejný, jen jiné log soubory
+
+### Pořadí migrace
+
+1. Ansible nasadí nginx na proxy (nahradí sniproxy)
+2. Přejmenovat `sniproxy.py` → `proxy_monitor.py`, aktualizovat regex + cesty
+3. Aktualizovat `conf.py` a `app.py`
+4. Aktualizovat `/etc/sentinel/sentinel-alert.conf` na proxy hostu: sekce `[proxy]`, nové log cesty
+5. Restartovat sentinel-alert službu na rpi5

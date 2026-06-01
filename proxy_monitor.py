@@ -1,8 +1,11 @@
-"""Sniproxy Monitor — reads sniproxy access logs from a remote server via SSH.
+"""Proxy Monitor — reads nginx stream access logs from a remote server via SSH.
 
 Runs two daemon threads:
   - _poll_worker: every 5 s fetches new log lines via SSH, deduplicates, updates stats
   - _speed_worker: every 2 s computes KB/s metrics and appends to speed_history
+
+Log format (nginx stream):
+  1.2.3.4 [01/Jun/2026:18:38:37 +0000] "git.foxik-iot.cz" -> 192.168.2.212:443 15234/8432 0.456s
 """
 import ipaddress
 import json
@@ -41,12 +44,12 @@ def _notify_status_change(connected: bool, error: str = ""):
     if _on_warn is None:
         return
     if not connected:
-        _on_warn({"type": "log", "level": "warn", "source": "sniproxy",
-                  "msg": f"SNIProxy unreachable ({_server}): {error}" if error
-                         else f"SNIProxy connection lost ({_server})"})
+        _on_warn({"type": "log", "level": "warn", "source": "proxy",
+                  "msg": f"nginx proxy unreachable ({_server}): {error}" if error
+                         else f"nginx proxy connection lost ({_server})"})
     else:
-        _on_warn({"type": "log", "level": "info", "source": "sniproxy",
-                  "msg": f"SNIProxy reconnected ({_server})"})
+        _on_warn({"type": "log", "level": "info", "source": "proxy",
+                  "msg": f"nginx proxy reconnected ({_server})"})
 
 
 def _is_external(ip: str) -> bool:
@@ -55,18 +58,16 @@ def _is_external(ip: str) -> bool:
         return not (a.is_private or a.is_loopback or a.is_link_local)
     except ValueError:
         return False
-_STATS_FILE = os.path.join(BASE_DIR, "data", "sniproxy_stats.json")
+
+_STATS_FILE = os.path.join(BASE_DIR, "data", "proxy_stats.json")
 
 _PATTERN = re.compile(
-    r"(?P<date>\d{4}-\d{2}-\d{2})\s+"
-    r"(?P<time>\d{2}:\d{2}:\d{2})\s+"
-    r"(?:\[::ffff:)?(?P<src_ip>[0-9a-fA-F\.:]+)(?:\])?:(?P<src_port>\d+)\s+->\s+"
-    r"(?:\[::ffff:)?(?P<proxy_ip>[0-9a-fA-F\.:]+)(?:\])?:(?P<proxy_port>\d+)\s+->\s+"
-    r"(?:(?P<dest_ip>[0-9a-fA-F\.:]+):(?P<dest_port>\d+)|NONE)\s+"
-    r"\[(?P<domain>[^\]]*)\]\s+"
-    r"(?P<tx>\d+)/\d+\s+bytes tx\s+"
-    r"(?P<rx>\d+)/\d+\s+bytes rx\s+"
-    r"(?P<duration>[0-9\.]+)\s+seconds"
+    r"(?P<src_ip>[0-9a-fA-F.:]+)\s+"
+    r"\[(?P<date>\d{2}/\w+/\d{4}):(?P<time>\d{2}:\d{2}:\d{2})[^\]]*\]\s+"
+    r'"(?P<domain>[^"]+)"\s+->\s+'
+    r"(?P<dest_ip>[^:]+):(?P<dest_port>\d+)\s+"
+    r"(?P<tx>\d+)/(?P<rx>\d+)\s+"
+    r"(?P<duration>[0-9.]+)s"
 )
 
 data_store = {
@@ -75,6 +76,7 @@ data_store = {
     "speed_tx": 0.0, "speed_rx": 0.0, "speed_conn": 0.0,
     "total_connections": 0,
     "top_domains": {}, "top_ips": {},
+    "domain_stats": {},   # {domain: {"ext": int, "int": int}}
     "recent_connections": [],
     "bans": [],
     "speed_history": {"labels": [], "tx": [], "rx": [], "conn": []},
@@ -138,13 +140,16 @@ def _process_lines(lines: list[str]) -> int:
             continue
         d = m.groupdict()
         tx, rx = int(d["tx"]), int(d["rx"])
-        if tx == 0 and rx == 0:
+        src_ip_for_check = d["src_ip"]
+        if tx == 0 and rx == 0 and not _is_external(src_ip_for_check):
             continue
         domain = d["domain"] or d.get("dest_ip") or "unknown"
         src_ip = d["src_ip"]
-        dest = f"{d['dest_ip']}:{d['dest_port']}" if d.get("dest_ip") else "NONE"
-        proxy_port = int(d.get("proxy_port") or 0)
-        proto = "https" if proxy_port == 443 else "http"
+        dest = f"{d['dest_ip']}:{d['dest_port']}"
+        dest_port = int(d.get("dest_port") or 0)
+        # nginx stream proxy listens exclusively on port 443 → all connections are HTTPS
+        # dest_port is the upstream backend port, not the listener port
+        proto = "https"
 
         now = time.time()
         conn = {
@@ -152,8 +157,7 @@ def _process_lines(lines: list[str]) -> int:
             "date": d["date"],
             "epoch": now,
             "src_ip": src_ip,
-            "src_port": d["src_port"],
-            "proxy_port": proxy_port,
+            "proxy_port": dest_port,
             "dest": dest,
             "domain": domain,
             "tx": tx,
@@ -179,7 +183,7 @@ def _process_lines(lines: list[str]) -> int:
                         "type": "attack",
                         "ts": ts,
                         "src_ip": src_ip,
-                        "dst_port": proxy_port,
+                        "dst_port": dest_port,
                         "protocol": proto,
                         "country": country,
                         "lat": lat, "lon": lon,
@@ -212,6 +216,7 @@ def _recompute_24h():
     ]
     top_d: dict = {}
     top_i: dict = {}
+    dom_stats: dict = {}
     for c in data_store["recent_connections"]:
         d = c["domain"]
         ip = c["src_ip"]
@@ -221,8 +226,15 @@ def _recompute_24h():
         top_i[ip]["tx"] += c["tx"]
         top_i[ip]["rx"] += c["rx"]
         top_i[ip]["hits"] += 1
+        if d not in dom_stats:
+            dom_stats[d] = {"ext": 0, "int": 0}
+        if _is_external(ip):
+            dom_stats[d]["ext"] += 1
+        else:
+            dom_stats[d]["int"] += 1
     data_store["top_domains"] = top_d
     data_store["top_ips"] = top_i
+    data_store["domain_stats"] = dom_stats
 
 
 def _save_stats():
@@ -312,11 +324,11 @@ def start(server: str, ssh_user: str, log_files: list, ssh_key: str):
     data_store["server"] = server
 
     if not _server:
-        data_store["last_error"] = "No proxy server configured — set sniproxy.server in sentinel-alert.conf"
+        data_store["last_error"] = "No proxy server configured — set proxy.server in sentinel-alert.conf"
         return
 
     _load_stats()
     threading.Thread(target=_poll_worker,  daemon=True).start()
     threading.Thread(target=_speed_worker, daemon=True).start()
     threading.Thread(target=_save_stats,   daemon=True).start()
-    print(f"sniproxy: monitoring {_server} logs: {', '.join(_log_files)}")
+    print(f"proxy: monitoring {_server} logs: {', '.join(_log_files)}")

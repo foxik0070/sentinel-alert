@@ -56,13 +56,13 @@ COLLECTOR_MONITOR_HOSTS = [
     h.strip() for h in _s("collector", "monitor_hosts", "").split(",") if h.strip()
 ]
 
-# [sniproxy]
-SNIPROXY_SERVER   = _s("sniproxy", "server",   "")
-SNIPROXY_SSH_USER = _s("sniproxy", "ssh_user", "root")
-SNIPROXY_LOG_FILES = [
+# [proxy]
+PROXY_SERVER   = _s("proxy", "server",   "")
+PROXY_SSH_USER = _s("proxy", "ssh_user", "root")
+PROXY_LOG_FILES = [
     f.strip() for f in _s(
-        "sniproxy", "log_files",
-        "/var/log/sniproxy/https_access.log,/var/log/sniproxy/http_access.log"
+        "proxy", "log_files",
+        "/var/log/nginx/proxy_public.log,/var/log/nginx/proxy_internal.log"
     ).split(",") if f.strip()
 ]
 

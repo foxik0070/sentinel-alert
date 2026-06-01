@@ -2239,6 +2239,31 @@ function pscInit() {
         }
     });
 
+    _pscCharts.extint = new Chart(document.getElementById('psc-ext-int-chart'), {
+        type: 'bar',
+        data: { labels: [], datasets: [
+            { label: 'Internal', data: [], backgroundColor: 'rgba(77,116,121,0.85)', borderRadius: 2 },
+            { label: 'External', data: [], backgroundColor: 'rgba(249,115,22,0.90)', borderRadius: 2 },
+        ]},
+        options: {
+            maintainAspectRatio: false, animation: false,
+            plugins: {
+                legend: { labels: { color: '#4d7479', font: { size: 9 }, boxWidth: 10 } },
+                datalabels: {
+                    color: '#fff', font: { size: 8, weight: 'bold' },
+                    display: ctx => ctx.dataset.data[ctx.dataIndex] > 0,
+                    formatter: v => v > 0 ? v : ''
+                }
+            },
+            scales: {
+                x: { stacked: true, grid: { display: false },
+                     ticks: { color: '#4d7479', font: { size: 9 }, maxRotation: 35, minRotation: 15 } },
+                y: { stacked: true, grid: { color: '#0e2226' },
+                     ticks: { color: '#4d7479', font: { size: 9 } } }
+            }
+        }
+    });
+
     _pscInterval = setInterval(pscUpdate, 2000);
 }
 
@@ -2301,6 +2326,15 @@ async function pscUpdate() {
         _pscCharts.domain.data.datasets[0].data = domSorted.map(([, v]) => (v / 1024 / 1024).toFixed(2));
         _pscCharts.domain.update('none');
 
+        // Ext/Int stacked bar — top 15 domains by total connections
+        const domStatsSorted = Object.entries(data.domain_stats || {})
+            .sort((a, b) => (b[1].ext + b[1].int) - (a[1].ext + a[1].int))
+            .slice(0, 15);
+        _pscCharts.extint.data.labels = domStatsSorted.map(([d]) => d.replace('.foxik-iot.cz', ''));
+        _pscCharts.extint.data.datasets[0].data = domStatsSorted.map(([, v]) => v.int);
+        _pscCharts.extint.data.datasets[1].data = domStatsSorted.map(([, v]) => v.ext);
+        _pscCharts.extint.update('none');
+
         // IP doughnut — top 8 clients by total bytes
         const ipSorted = Object.entries(data.top_ips)
             .sort((a, b) => (b[1].tx + b[1].rx) - (a[1].tx + a[1].rx)).slice(0, 8);
@@ -2322,7 +2356,7 @@ async function pscUpdate() {
         document.getElementById('psc-live').innerHTML = (data.recent_connections || []).map(c => `
             <tr>
                 <td style="color:var(--muted)">${escape(c.time)}</td>
-                <td style="color:var(--accent)">${escape(c.src_ip)}:${escape(c.src_port)}</td>
+                <td style="color:var(--accent)">${escape(c.src_ip)}</td>
                 <td style="color:var(--fg);font-weight:bold">${escape(c.domain)}</td>
                 <td style="text-align:right;color:#38bdf8">${pscFmtBytes(c.tx)}</td>
                 <td style="text-align:right;color:var(--green)">${pscFmtBytes(c.rx)}</td>

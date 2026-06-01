@@ -24,7 +24,7 @@ import db_init
 import fsc
 import geoip
 import honeypot
-import sniproxy
+import proxy_monitor
 import tasks
 import workmode
 
@@ -118,10 +118,11 @@ async def lifespan(app: FastAPI):
                         http_port=conf.HONEYPOT_HTTP_PORT)
     fsc.start()
     blocklist.start()
-    sniproxy.start(
-        server=conf.SNIPROXY_SERVER,
-        ssh_user=conf.SNIPROXY_SSH_USER,
-        log_files=conf.SNIPROXY_LOG_FILES,
+    _loop = asyncio.get_event_loop()
+    proxy_monitor.start(
+        server=conf.PROXY_SERVER,
+        ssh_user=conf.PROXY_SSH_USER,
+        log_files=conf.PROXY_LOG_FILES,
         ssh_key=os.path.join(BASE_DIR, "conf", "id_ed25519"),
     )
 
@@ -163,16 +164,16 @@ async def lifespan(app: FastAPI):
         except asyncio.QueueFull:
             pass
 
-    sniproxy.set_attack_callback(_sniproxy_attack)
+    proxy_monitor.set_attack_callback(_sniproxy_attack)
 
-    def _sniproxy_warn(ev: dict):
+    def _proxy_warn(ev: dict):
         try:
             _broadcast_queue.put_nowait(ev)
         except asyncio.QueueFull:
             pass
-        asyncio.create_task(bridge.forward(ev))
+        asyncio.run_coroutine_threadsafe(bridge.forward(ev), _loop)
 
-    sniproxy.set_warn_callback(_sniproxy_warn)
+    proxy_monitor.set_warn_callback(_proxy_warn)
 
     async def _ban_watcher():
         """Watch ban_history and active_users for changes; emit log events."""
@@ -319,7 +320,7 @@ def get_config():
         # Feature flags for tab visibility
         "scanner_enabled": conf.SCANNER_ENABLED,
         "fsc_enabled": conf.FSC_ENABLED,
-        "sniproxy_enabled": bool(conf.SNIPROXY_SERVER),
+        "sniproxy_enabled": bool(conf.PROXY_SERVER),
         "blocklist_enabled": bool(conf.BLOCKLIST_FILE or conf.MODE_IPS_FILE),
         "blocklist_stats": blocklist.stats(),
         # Work mode
@@ -537,7 +538,7 @@ def system_status(request: Request):
         "modules": {
             "scanner":         conf.SCANNER_ENABLED,
             "security_center": conf.FSC_ENABLED,
-            "sniproxy":        bool(conf.SNIPROXY_SERVER),
+            "sniproxy":        bool(conf.PROXY_SERVER),
             "blocklist":       bool(conf.BLOCKLIST_FILE),
             "sentinel":        bool(conf.SENTINEL_URL),
         },
@@ -671,7 +672,7 @@ def report_data():
         "bans_24h":     bans_24h,
         "countries":    countries,
         "devices":      devices,
-        "proxy":        sniproxy.data_store if conf.SNIPROXY_SERVER else {},
+        "proxy":        proxy_monitor.data_store if conf.PROXY_SERVER else {},
         "fsc":          fsc.data_store      if conf.FSC_ENABLED else {},
         "logs":         list(_log_buffer)[-100:],
         "proxy_attacks_24h": list(_proxy_attack_history),
@@ -873,27 +874,27 @@ async def fsc_hosts_toggle(payload: dict = Body(...)):
 
 @app.get("/api/sniproxy/data")
 def sniproxy_data():
-    return sniproxy.data_store
+    return proxy_monitor.data_store
 
 
 @app.get("/api/sniproxy/debug")
 def sniproxy_debug():
     """Diagnostic: run SSH now, return raw lines + regex match info."""
-    lines = sniproxy._fetch_lines(20)
+    lines = proxy_monitor._fetch_lines(20)
     if lines is None:
-        return {"ok": False, "error": sniproxy.data_store.get("last_error", "SSH failed"), "lines": []}
+        return {"ok": False, "error": proxy_monitor.data_store.get("last_error", "SSH failed"), "lines": []}
     sample = []
     for line in lines[:10]:
-        m = sniproxy._PATTERN.search(line)
+        m = proxy_monitor._PATTERN.search(line)
         sample.append({"line": line, "matched": bool(m)})
     return {
         "ok": True,
         "fetched": len(lines),
-        "matched": sum(1 for l in lines if sniproxy._PATTERN.search(l)),
-        "server": sniproxy._server,
-        "ssh_user": sniproxy._ssh_user,
-        "ssh_key": sniproxy._ssh_key,
-        "log_files": sniproxy._log_files,
+        "matched": sum(1 for l in lines if proxy_monitor._PATTERN.search(l)),
+        "server": proxy_monitor._server,
+        "ssh_user": proxy_monitor._ssh_user,
+        "ssh_key": proxy_monitor._ssh_key,
+        "log_files": proxy_monitor._log_files,
         "sample": sample,
     }
 
@@ -902,7 +903,7 @@ def sniproxy_debug():
 async def sniproxy_ban(payload: dict = Body(...)):
     import time as _time
     payload.setdefault("time", _time.strftime("%d.%m.%Y %H:%M:%S"))
-    sniproxy.add_ban(payload)
+    proxy_monitor.add_ban(payload)
     return {"ok": True}
 
 
