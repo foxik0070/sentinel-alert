@@ -56,6 +56,16 @@ COLLECTOR_MONITOR_HOSTS = [
     h.strip() for h in _s("collector", "monitor_hosts", "").split(",") if h.strip()
 ]
 
+# [pihole]
+PIHOLE_HOSTS    = [h.strip() for h in _s("pihole", "hosts",    "").split(",") if h.strip()]
+PIHOLE_PRIMARY  = _s("pihole", "primary",  "")
+PIHOLE_PASSWORD = _s("pihole", "password", "")
+
+# [mikrotik]
+MIKROTIK_HOST      = _s("mikrotik", "host",       "")
+MIKROTIK_SSH_USER  = _s("mikrotik", "ssh_user",   "sentinel-user")
+MIKROTIK_AUTO_BLOCK = _c.getboolean("mikrotik", "auto_block", fallback=False)
+
 # [proxy]
 PROXY_SERVER   = _s("proxy", "server",   "")
 PROXY_SSH_USER = _s("proxy", "ssh_user", "root")

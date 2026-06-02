@@ -24,6 +24,8 @@ import db_init
 import fsc
 import geoip
 import honeypot
+import mikrotik
+import pihole
 import proxy_monitor
 import tasks
 import workmode
@@ -76,6 +78,7 @@ _clients: Set[WebSocket] = set()
 _broadcast_queue: asyncio.Queue = asyncio.Queue(maxsize=2048)
 _log_buffer: deque = deque(maxlen=400)
 _proxy_attack_history: deque = deque(maxlen=500)  # last 24h proxy attacks
+_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _query(sql, params=()):
@@ -118,12 +121,23 @@ async def lifespan(app: FastAPI):
                         http_port=conf.HONEYPOT_HTTP_PORT)
     fsc.start()
     blocklist.start()
+    global _loop
     _loop = asyncio.get_event_loop()
     proxy_monitor.start(
         server=conf.PROXY_SERVER,
         ssh_user=conf.PROXY_SSH_USER,
         log_files=conf.PROXY_LOG_FILES,
         ssh_key=os.path.join(BASE_DIR, "conf", "id_ed25519"),
+    )
+    mikrotik.start(
+        host=conf.MIKROTIK_HOST,
+        ssh_user=conf.MIKROTIK_SSH_USER,
+        ssh_key=os.path.join(BASE_DIR, "conf", "id_ed25519"),
+    )
+    pihole.start(
+        hosts=conf.PIHOLE_HOSTS,
+        primary=conf.PIHOLE_PRIMARY,
+        password=conf.PIHOLE_PASSWORD,
     )
 
     def _sniproxy_attack(ev: dict):
@@ -321,6 +335,8 @@ def get_config():
         "scanner_enabled": conf.SCANNER_ENABLED,
         "fsc_enabled": conf.FSC_ENABLED,
         "sniproxy_enabled": bool(conf.PROXY_SERVER),
+        "mikrotik_enabled": bool(conf.MIKROTIK_HOST),
+        "pihole_enabled":   bool(conf.PIHOLE_HOSTS),
         "blocklist_enabled": bool(conf.BLOCKLIST_FILE or conf.MODE_IPS_FILE),
         "blocklist_stats": blocklist.stats(),
         # Work mode
@@ -905,6 +921,88 @@ async def sniproxy_ban(payload: dict = Body(...)):
     payload.setdefault("time", _time.strftime("%d.%m.%Y %H:%M:%S"))
     proxy_monitor.add_ban(payload)
     return {"ok": True}
+
+
+# ── MikroTik ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/mikrotik/data")
+def mikrotik_data():
+    return mikrotik.data_store
+
+
+@app.post("/api/mikrotik/block")
+async def mikrotik_block(payload: dict = Body(...)):
+    ip      = (payload.get("ip") or "").strip()
+    comment = (payload.get("comment") or "sentinel").strip()
+    timeout = (payload.get("timeout") or "1w").strip()
+    if not ip:
+        return JSONResponse({"ok": False, "error": "ip required"}, status_code=400)
+    ok, err = mikrotik.block_ip(ip, comment, timeout)
+    if ok:
+        asyncio.run_coroutine_threadsafe(
+            _notify_block(ip, comment, timeout), _loop
+        )
+    return {"ok": ok, "error": err if not ok else ""}
+
+
+async def _notify_block(ip: str, comment: str, timeout: str):
+    """Send block event to Sentinel bridge + broadcast to WS clients."""
+    # Look up attacker info from DB
+    rows = _query(
+        "SELECT country, isp, lat, lon, protocol, dst_port, ts FROM attacks "
+        "WHERE src_ip = ? ORDER BY ts DESC LIMIT 1", (ip,)
+    )
+    info = rows[0] if rows else {}
+    ev = {
+        "type":     "log",
+        "level":    "warn",
+        "source":   "mikrotik",
+        "ts":       datetime.now(timezone.utc).isoformat(),
+        "msg":      f"BLOCKED {ip} on MikroTik ({comment}, {timeout or 'permanent'})"
+                    + (f" — {info.get('country','')} {info.get('isp','')}" if info else ""),
+        "ip":       ip,
+        "comment":  comment,
+        "timeout":  timeout,
+        "country":  info.get("country", ""),
+        "isp":      info.get("isp", ""),
+        "lat":      info.get("lat", 0),
+        "lon":      info.get("lon", 0),
+        "protocol": info.get("protocol", ""),
+        "dst_port": info.get("dst_port", 0),
+        "attacker_last_seen": info.get("ts", ""),
+    }
+    try:
+        _broadcast_queue.put_nowait(ev)
+    except asyncio.QueueFull:
+        pass
+    await bridge.forward(ev)
+
+
+@app.post("/api/mikrotik/unblock")
+async def mikrotik_unblock(payload: dict = Body(...)):
+    ip = (payload.get("ip") or "").strip()
+    if not ip:
+        return JSONResponse({"ok": False, "error": "ip required"}, status_code=400)
+    ok, err = mikrotik.unblock_ip(ip)
+    return {"ok": ok, "error": err if not ok else ""}
+
+
+@app.post("/api/mikrotik/rule/toggle")
+async def mikrotik_rule_toggle(payload: dict = Body(...)):
+    rule_type = (payload.get("type") or "").strip()
+    index     = payload.get("index")
+    enable    = bool(payload.get("enable", True))
+    if rule_type not in ("filter", "nat") or index is None:
+        return JSONResponse({"ok": False, "error": "type and index required"}, status_code=400)
+    ok, err = mikrotik.toggle_rule(rule_type, int(index), enable)
+    return {"ok": ok, "error": err if not ok else ""}
+
+
+# ── PiHole ───────────────────────────────────────────────────────────────────
+
+@app.get("/api/pihole/data")
+def pihole_data():
+    return pihole.data_store
 
 
 # ── Service Monitor ───────────────────────────────────────────────────────────

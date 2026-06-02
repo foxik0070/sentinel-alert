@@ -1,12 +1,14 @@
 # Sentinel-Alert
 
-1. Projit zmenu a aktualizovat CLAUDE.md
-2. 192.168.2.1 je mikrotik, najit zpusob jak z nej ziskat blokovane IP a take zpusob jak tam pridat IP k zablkovani z f2b, ssh, http a https utoku. Predelat na zalozku lokal network a presunout vse thread map tykajici se local network sem + sem pridat mikrotik napojeni -> vizualizace, blokace (automaticka i rucni) - tato zalozka pouze pro HOME instanci
-3. local network v thread map nahradit jinym pohledem tykajici se f2b, http, https a ssh utoku...
-4. security crt -> os infrastructure graph zmenit barvy, neprehledne
-5. pridat zalozku pihole -> napojeni na pihole instance -> zadani IP kde bezi, muze bezet vice (1, 2, klidne i 3 a vice), definovat primary a secundary u vice adres, vizualizovat data z pihole. toto zobrazeni take pouze pro HOME instanci.
-6. zvednout verzi na 2026.06.001
-7. dukladna analyza, sepsani readme, dokumentaci, history. commit 
+## TODO
+
+1. ✅ Aktualizovat CLAUDE.md (hotovo)
+2. **MikroTik (192.168.2.1)** — získat blokované IP, přidat IP z f2b/ssh/http/https, přesunout vše kolem LAN do záložky LOCAL NETWORK, MikroTik vizualizace + ruční/auto blokace — pouze HOME instance
+3. **Threat map** — local network pohled nahradit pohledem zaměřeným na f2b/http/https/ssh útoky
+4. ✅ Security CRT → OS infrastructure graph — barvy opraveny (hotovo)
+5. **PiHole záložka** — napojení na PiHole instance (zadání IP, primary/secondary pro více instancí), vizualizace dat — pouze HOME instance
+6. ✅ Verze → 2026.06.001 (hotovo)
+7. README, dokumentace, commit
 
 ## Popis
 
@@ -25,10 +27,24 @@ Sentinel-Alert je nástroj pro monitoring domácí sítě a vizualizaci honeypot
 1. **honeypot.py** — Fake SSH (port 2222) a HTTP (port 8080) server. Každé připojení z externí IP zaznamená, obohatí o GeoIP data a uloží do DB.
 2. **scanner.py** — ARP sweep + TCP port probe. Detekuje zařízení v síti, jejich dostupnost a otevřené porty.
 3. **fsc.py** — Service checker (HTTP/TCP/Ping/DNS/Heartbeat). Konfigurace v `data/services.json`.
-4. **sniproxy.py** — SSH monitor vzdáleného SNI proxy, statistiky za posledních 24h.
+4. **proxy_monitor.py** — Monitor nginx stream proxy (SNI). Čte logy z `/var/log/nginx/proxy_*.log` přes SSH, statistiky za posledních 24h. Log formát: `IP [datum] "doména" -> backend:port tx/rx durace s`.
 5. **app.py** — FastAPI server, WebSocket streaming, REST API.
 6. **bridge.py** — Odesílání událostí do hlavní Sentinel instance.
 7. **geoip.py** — GeoIP lookup (GeoLite2-City.mmdb + ip-api.com fallback).
+8. **collector.py** — SSH sběr dat z hostů (OS, CVE, fail2ban, firewall, zdroje).
+9. **blocklist.py** — Správa IP blocklists (GeoIP + fail2ban bans).
+10. **workmode.py** — Přepínání home/work módu (mění accent barvu a layout).
+
+## Konfigurace
+
+`/etc/sentinel/sentinel-alert.conf` — hlavní konfigurace (INI formát):
+- `[proxy]` server, ssh_user, log_files
+- `[auth]` username, password, secret (persistentní — nesmí chybět, jinak se generuje random secret a uživatel je vylogován po každém restartu)
+- `[honeypot]` ssh_port, http_port
+- `[collector]` ssh_user, monitor_hosts
+- `[security_center]` ha_url, ha_token, ignore_ips
+- `[scanner]` enabled
+- `[mode]` type (home/work), ips_file, who_file
 
 ---
 

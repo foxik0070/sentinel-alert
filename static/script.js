@@ -451,8 +451,53 @@ function pushAttack(a, isNew = true) {
         // Auto-centering removed — disrupts flow when many attacks arrive in batch
 
         attackCount++;
-        hudAttacks.textContent = attackCount;
+        if (hudAttacks) hudAttacks.textContent = attackCount;
     }
+}
+
+function attackStatsUpdate() {
+    const barsEl  = $('ast-proto-bars');
+    const ipsEl   = $('ast-top-ips');
+    const totalEl = $('ast-total');
+    if (!barsEl) return;
+
+    const counts = { ssh: 0, http: 0, https: 0, fail2ban: 0 };
+    const ipMap = {};
+    _attackHistory.forEach(a => {
+        const p = a.protocol || 'fail2ban';
+        counts[p] = (counts[p] || 0) + 1;
+        if (a.src_ip) ipMap[a.src_ip] = (ipMap[a.src_ip] || { count: 0, country: a.country, protocol: p });
+        if (a.src_ip) ipMap[a.src_ip].count++;
+    });
+    const total = Object.values(counts).reduce((s, v) => s + v, 0);
+    if (totalEl) totalEl.textContent = total;
+
+    const maxCount = Math.max(...Object.values(counts), 1);
+    const PROTO_BAR_COLOR = { ssh: '#ffe83b', http: '#ff6e00', https: '#e6003c', fail2ban: '#d228ff' };
+    barsEl.innerHTML = Object.entries(counts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([p, n]) => {
+            const pct = Math.round(n / maxCount * 100);
+            const color = PROTO_BAR_COLOR[p] || 'var(--accent)';
+            return `<div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:9px;letter-spacing:1px;color:var(--muted);width:52px;">${p.toUpperCase()}</span>
+                <div style="flex:1;height:12px;background:#06121a;position:relative;border:1px solid #14333a;">
+                    <div style="height:100%;width:${pct}%;background:${color};opacity:0.8;"></div>
+                </div>
+                <span style="font-size:10px;font-weight:700;color:${color};width:38px;text-align:right;">${n}</span>
+            </div>`;
+        }).join('');
+
+    const topIps = Object.entries(ipMap)
+        .sort((a, b) => b[1].count - a[1].count).slice(0, 10);
+    ipsEl.innerHTML = topIps.map(([ip, v]) => {
+        const color = PROTO_BAR_COLOR[v.protocol] || 'var(--accent)';
+        return `<div style="display:flex;align-items:center;gap:6px;padding:3px 8px;border-bottom:1px solid #06121a;">
+            <span style="flex:1;font-family:monospace;font-size:10px;color:var(--accent);">${ip}</span>
+            <span style="font-size:9px;color:#4d7479;">${v.country || '?'}</span>
+            <span style="font-size:10px;font-weight:700;color:${color};">×${v.count}</span>
+        </div>`;
+    }).join('') || '<div style="padding:8px;color:#4d7479;font-size:10px;">No attacks recorded yet.</div>';
 }
 
 function _ipToNum(ip) {
@@ -490,7 +535,7 @@ function renderDevices(list) {
     const onlineGroups = _groups.filter(g => g.some(d => d.is_online)).length;
     const totalGroups = _groups.length + vswitches.length;
     netCountEl.textContent = `${onlineGroups} / ${totalGroups}`;
-    hudLan.textContent = `${onlineGroups} / ${totalGroups}`;
+    if (hudLan) hudLan.textContent = `${onlineGroups} / ${totalGroups}`;
 
     const vswHtml = vswitches.map(sw => `
         <div class="row dev clickable" data-vsw="${escape(sw.id)}" style="border-left:2px solid #38bdf8;">
@@ -937,12 +982,19 @@ function renderAttackHistory() {
     }
     const _PROTO_LABEL = { fail2ban: 'F2B', ssh: 'SSH', http: 'HTTP', https: 'HTTPS' };
     const _sorted = [...filtered].sort((a, b) => (b.ts || '') > (a.ts || '') ? 1 : -1);
+    const showBlock = !_workMode && _lastCfg?.mikrotik_enabled;
     attackHistEl.innerHTML = _sorted.slice(0, 10).map(b => {
         const { time, date } = _fmtLocalTs(b.ts);
         const proto = b.protocol || 'fail2ban';
         const label = _PROTO_LABEL[proto] || proto.toUpperCase();
         const col   = PROTO_COLOR[proto] || 'var(--accent)';
         const cnt   = _ipCounts.get(b.src_ip) || 1;
+        const blockBtn = showBlock
+            ? `<button class="hist-block-btn" data-ip="${escape(b.src_ip)}" data-proto="${proto}"
+                       style="flex-shrink:0;background:none;border:1px solid #14333a;color:#4d7479;
+                              font-size:9px;padding:1px 6px;cursor:pointer;font-family:inherit;
+                              letter-spacing:1px;align-self:center;" title="Block on MikroTik">⊘</button>`
+            : '';
         return `<div class="row ban clickable" data-lat="${b.lat}" data-lon="${b.lon}"
                      data-ip="${escape(b.src_ip)}" data-country="${escape(b.country)}"
                      data-isp="${escape(b.isp)}" data-port="${b.dst_port}" data-protocol="${proto}">
@@ -957,11 +1009,63 @@ function renderAttackHistory() {
                     <span style="color:#4d7479;font-size:10px;white-space:nowrap;">${cnt>1?time+' '+date:date}</span>
                 </div>
             </div>
+            ${blockBtn}
         </div>`;
     }).join('');
     attackHistEl.querySelectorAll('.ban.clickable').forEach(row => {
-        row.addEventListener('click', () => _attackHistClick(row));
+        row.addEventListener('click', e => {
+            if (e.target.closest('.hist-block-btn')) return;
+            _attackHistClick(row);
+        });
     });
+    attackHistEl.querySelectorAll('.hist-block-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            _histBlockConfirm(btn);
+        });
+    });
+}
+
+function _histBlockConfirm(btn) {
+    const ip    = btn.dataset.ip;
+    const proto = btn.dataset.proto;
+    if (btn.dataset.confirming) {
+        // Second click = confirm
+        clearTimeout(btn._confirmTimer);
+        btn.textContent = '…';
+        btn.style.color = '#4d7479';
+        btn.disabled = true;
+        fetch('/api/mikrotik/block', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ ip, comment: `sentinel-hist-${proto}`, timeout: '1w' })
+        }).then(r => r.json()).then(r => {
+            if (r.ok) {
+                btn.textContent = '✓';
+                btn.style.color = 'var(--green)';
+                btn.style.borderColor = 'var(--green)';
+            } else {
+                btn.textContent = '✗';
+                btn.style.color = 'var(--red)';
+                btn.disabled = false;
+                btn.dataset.confirming = '';
+            }
+        }).catch(() => {
+            btn.textContent = '✗'; btn.style.color = 'var(--red)'; btn.disabled = false;
+        });
+    } else {
+        // First click = ask for confirmation
+        btn.dataset.confirming = '1';
+        btn.textContent = 'BLOCK?';
+        btn.style.color = 'var(--red)';
+        btn.style.borderColor = 'var(--red)';
+        // Auto-cancel after 4s
+        btn._confirmTimer = setTimeout(() => {
+            btn.textContent = '⊘';
+            btn.style.color = '#4d7479';
+            btn.style.borderColor = '#14333a';
+            btn.dataset.confirming = '';
+        }, 4000);
+    }
 }
 
 // Wire attack history filter buttons
@@ -1135,8 +1239,7 @@ function applyTabVisibility(cfg) {
         // In work mode attacks table is empty — hide the tab, ban_history is the default
         const dbvTabAttacks = $('dbv-tab-attacks');
         if (dbvTabAttacks) dbvTabAttacks.style.display = 'none';
-        // lan-panel never shows in work mode
-        if (lanPanel)    lanPanel.style.display    = 'none';
+        // lan-panel is inside tab-network which is hidden in work mode — no explicit action needed
         // Auth-gated panels
         if (usersPanel)  usersPanel.style.display  = _isAuthenticated ? SHOW : 'none';
         if (logPanel)    logPanel.style.display    = _isAuthenticated ? SHOW : 'none';
@@ -1151,18 +1254,20 @@ function applyTabVisibility(cfg) {
             mainGrid.classList.add('work-layout');
         }
         document.body.classList.add('work-mode');
-        // Hide sensitive counters in work mode
-        const strip = document.querySelector('#countries-panel .status-strip');
-        if (strip) strip.style.display = 'none';
         // Sync globe canvas to new container size after layout change.
         requestAnimationFrame(() => globe.width(globeEl.clientWidth).height(globeEl.clientHeight));
     } else {
         // Home mode: auth + config flags
         if (btnSecurity) btnSecurity.style.display = (_isAuthenticated && cfg.fsc_enabled !== false) ? '' : 'none';
         if (btnProxy)    btnProxy.style.display    = (_isAuthenticated && cfg.sniproxy_enabled)      ? '' : 'none';
-        if (btnNetwork)  btnNetwork.style.display  = (_isAuthenticated && cfg.scanner_enabled)       ? '' : 'none';
+        if (btnNetwork)  btnNetwork.style.display  = (_isAuthenticated && (cfg.scanner_enabled || cfg.mikrotik_enabled)) ? '' : 'none';
+        const btnPihole = $('tab-btn-pihole');
+        if (btnPihole) btnPihole.style.display = (_isAuthenticated && cfg.pihole_enabled) ? '' : 'none';
         if (settingsBtn) settingsBtn.style.display  = _isAuthenticated ? '' : 'none';
-        if (lanPanel)    lanPanel.style.display    = (_isAuthenticated && cfg.scanner_enabled)       ? SHOW : 'none';
+        // lan-panel is now inside tab-network — show/hide based on scanner_enabled
+        if (lanPanel) lanPanel.style.display = cfg.scanner_enabled ? '' : 'none';
+        const mtSection = $('mikrotik-section');
+        if (mtSection) mtSection.classList.toggle('hidden', !(_isAuthenticated && cfg.mikrotik_enabled));
         if (usersPanel)  usersPanel.style.display  = _isAuthenticated ? SHOW : 'none';
         if (logPanel)    logPanel.style.display    = _isAuthenticated ? SHOW : 'none';
         if (mainGrid) {
@@ -1170,8 +1275,6 @@ function applyTabVisibility(cfg) {
             mainGrid.classList.toggle('no-scanner', !cfg.scanner_enabled && _isAuthenticated);
         }
         document.body.classList.remove('work-mode');
-        const strip = document.querySelector('#countries-panel .status-strip');
-        if (strip) strip.style.display = '';
     }
 }
 
@@ -1206,6 +1309,7 @@ function connectWS() {
             _globePaused = false; _histPaused = false;
             _globeFlush(); renderAttackHistory();
             refreshCountryPolygons();
+            attackStatsUpdate();
             // In work mode the attacks table is empty; recompute countries from ban data.
             if (_workMode) renderCountries(_computeCountriesFromHistory());
             (m.logs          || []).forEach(l => pushLog(l, false));
@@ -1310,8 +1414,71 @@ function _statusDot(ok, labelOn, labelOff) {
         <span style="width:7px;height:7px;border-radius:50%;background:${color};display:inline-block;"></span>${label}</span>`;
 }
 
+function _cfgThemeBlock() {
+    const curTheme  = localStorage.getItem('sentinel-theme')  || 'dark';
+    const curAccent = localStorage.getItem('sentinel-accent') || 'orange';
+    const swatches = ACCENT_PALETTE.map(c => {
+        const sel = c.name === curAccent ? `outline:2px solid #fff;outline-offset:2px;` : '';
+        return `<div onclick="applyAccent('${c.name}');document.querySelectorAll('.accent-swatch').forEach(s=>s.style.outline='');this.style.outline='2px solid #fff';this.style.outlineOffset='2px';"
+                     class="accent-swatch" title="${c.name}"
+                     style="width:24px;height:24px;border-radius:3px;background:${c.hex};cursor:pointer;border:1px solid rgba(255,255,255,0.2);${sel}flex-shrink:0;"></div>`;
+    }).join('');
+    return `
+    <div class="cfg-field-group">
+        <div class="cfg-field-group-title">APPEARANCE</div>
+        <div class="cfg-toggle-row" style="margin-bottom:10px;">
+            <span class="cfg-toggle-label">LIGHT MODE</span>
+            <label class="cfg-toggle">
+                <input type="checkbox" id="cfg-theme-toggle"${curTheme==='light'?' checked':''}
+                       onchange="applyTheme(this.checked?'light':'dark')">
+                <span class="cfg-toggle-slider"></span>
+            </label>
+        </div>
+        <div style="margin-bottom:4px;font-size:9px;letter-spacing:1px;color:var(--muted);">ACCENT COLOR</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;padding:4px 0 8px;">${swatches}</div>
+    </div>`;
+}
+
+function _cfgField(section, key, val) {
+    const SENSITIVE = new Set(['token', 'ha_token', 'password', 'secret', 'api_key', 'key']);
+    const BOOLEANS  = new Set(['enabled', 'auto_block']);
+    const isBool = BOOLEANS.has(key);
+    const isPass = SENSITIVE.has(key);
+    const checked = String(val).toLowerCase() === 'true';
+    if (isBool) return `
+        <div class="cfg-toggle-row">
+            <span class="cfg-toggle-label">${key.toUpperCase().replace(/_/g,' ')}</span>
+            <label class="cfg-toggle">
+                <input type="checkbox" data-section="${section}" data-key="${key}" data-bool="1"${checked?' checked':''}>
+                <span class="cfg-toggle-slider"></span>
+            </label>
+        </div>`;
+    return `
+        <div class="cfg-field">
+            <label>${key.toUpperCase().replace(/_/g,' ')}</label>
+            <input type="${isPass?'password':'text'}" data-section="${section}" data-key="${key}"
+                   value="${escape(String(val))}">
+        </div>`;
+}
+
+function _cfgGroup(title, sections, data) {
+    const inner = sections.flatMap(sec => {
+        const keys = data[sec];
+        if (!keys) return [];
+        const SEC_LABELS = { server:'SERVER', auth:'AUTHENTICATION', home:'HOME LOCATION',
+            scanner:'SCANNER', mikrotik:'MIKROTIK ROUTER', pihole:'PIHOLE', honeypot:'HONEYPOT',
+            security_center:'SECURITY CENTER', threat:'THREAT INTEL',
+            sentinel:'SENTINEL LINK', proxy:'NGINX PROXY', collector:'COLLECTOR' };
+        return [`<div class="cfg-field-group">
+            <div class="cfg-field-group-title">${SEC_LABELS[sec]||sec.toUpperCase()}</div>
+            ${Object.entries(keys).map(([k,v])=>_cfgField(sec,k,v)).join('')}
+        </div>`];
+    });
+    return inner.join('');
+}
+
 async function openSettings() {
-    const cfgBody = $('cfg-body');
+    const cfgBody   = $('cfg-body');
     const cfgResult = $('cfg-result');
     cfgBody.innerHTML = '<div style="padding:16px;color:#4d7479;">Loading…</div>';
     cfgResult.textContent = ''; cfgResult.className = 'cfg-result';
@@ -1321,56 +1488,57 @@ async function openSettings() {
         fetch('/api/config/full').then(r => r.json()).catch(() => null),
         fetch('/api/status').then(r => r.json()).catch(() => null),
     ]);
+    if (!data) { cfgBody.innerHTML = `<div style="color:var(--red);padding:16px;">Failed to load config.</div>`; return; }
 
-    if (!data) {
-        cfgBody.innerHTML = `<div style="color:#ff2a5e;padding:16px;">Failed to load config.</div>`; return;
-    }
-
-    // Status section
-    let statusHtml = '';
+    // STATUS pane
+    let statusPane = '<div style="color:#4d7479;font-size:11px;">No status data.</div>';
     if (status && !status.error) {
         const m = status.modules || {}, g = status.geoip || {}, db = status.database || {}, cf = status.config_file || {};
-        statusHtml = `
-        <div style="margin-bottom:16px;">
-            <div style="font-size:9px;font-weight:800;letter-spacing:3px;color:#4d7479;border-bottom:1px solid #14333a;padding-bottom:3px;margin-bottom:10px;">SYSTEM STATUS</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;">
-                <div>${_statusDot(g.city_db==='ok',  'GeoIP DB OK',        'GeoIP DB MISSING')}</div>
-                <div>${_statusDot(g.asn_db==='ok',   'ASN DB OK',          'ASN DB MISSING')}</div>
-                <div>${_statusDot(m.scanner,          'Scanner ON',         'Scanner OFF')}</div>
-                <div>${_statusDot(m.security_center,  'Security Center ON', 'Security Center OFF')}</div>
-                <div>${_statusDot(m.sniproxy,         'SNIProxy ON',        'SNIProxy OFF')}</div>
-                <div>${_statusDot(m.sentinel,         'Sentinel ON',        'Sentinel OFF')}</div>
-                <div>${_statusDot(m.blocklist,        'Blocklist ON',       'Blocklist OFF')}</div>
-                <div>${_statusDot(cf.exists,          'Config file found',  'Config file missing — using defaults')}</div>
+        statusPane = `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;margin-bottom:14px;">
+                ${_statusDot(g.city_db==='ok',  'GeoIP City DB',         'GeoIP City DB MISSING')}
+                ${_statusDot(g.asn_db==='ok',   'GeoIP ASN DB',          'GeoIP ASN DB MISSING')}
+                ${_statusDot(m.scanner,          'Scanner ON',            'Scanner OFF')}
+                ${_statusDot(m.security_center,  'Security Center ON',    'Security Center OFF')}
+                ${_statusDot(m.sniproxy,         'Proxy Monitor ON',      'Proxy Monitor OFF')}
+                ${_statusDot(m.sentinel,         'Sentinel link ON',      'Sentinel link OFF')}
+                ${_statusDot(m.blocklist,        'Blocklist ON',          'Blocklist — not configured')}
+                ${_statusDot(cf.exists,          'Config file OK',        'Config file MISSING')}
             </div>
-            <div style="margin-top:10px;font-size:10px;color:#4d7479;display:flex;gap:16px;flex-wrap:wrap;">
+            <div style="font-size:10px;color:#4d7479;display:flex;gap:14px;flex-wrap:wrap;border-top:1px solid #14333a;padding-top:10px;">
                 <span>DB: <b style="color:var(--fg)">${db.size_kb} KB</b></span>
                 <span>Attacks: <b style="color:var(--fg)">${db.attacks}</b></span>
                 <span>Bans: <b style="color:var(--fg)">${db.bans}</b></span>
                 <span>Devices: <b style="color:var(--fg)">${db.devices}</b></span>
                 <span>ISP cache: <b style="color:var(--fg)">${g.isp_cache}</b></span>
-                ${g.unknown_isp_records > 0 ? `<span style="color:#ffb347;">⚠ ${g.unknown_isp_records} records missing ISP</span>` : ''}
-            </div>
-        </div>`;
+                ${g.unknown_isp_records > 0 ? `<span style="color:#ffb347;">⚠ ${g.unknown_isp_records} missing ISP</span>` : ''}
+            </div>`;
     }
 
-    const SENSITIVE = new Set(['token', 'ha_token', 'password', 'api_key', 'key']);
-    const LABELS = { server:'SERVER', home:'HOME LOCATION', sentinel:'SENTINEL LINK',
-        honeypot:'HONEYPOT', collector:'COLLECTOR', sniproxy:'SNIPROXY PROXY',
-        scanner:'SCANNER', security_center:'SECURITY CENTER', threat:'THREAT INTEL' };
-    const configHtml = Object.entries(data).map(([section, keys]) => `
-        <div style="margin-bottom:14px;">
-            <div style="font-size:9px;font-weight:800;letter-spacing:3px;color:#4d7479;border-bottom:1px solid #14333a;padding-bottom:3px;margin-bottom:8px;">${LABELS[section]||section.toUpperCase()}</div>
-            ${Object.entries(keys).map(([key, val]) => `
-                <div style="margin-bottom:6px;">
-                    <div style="font-size:9px;letter-spacing:1px;color:#4d7479;margin-bottom:2px;">${key.toUpperCase()}</div>
-                    <input type="${SENSITIVE.has(key)?'password':'text'}" data-section="${section}" data-key="${key}"
-                        value="${escape(String(val))}"
-                        style="width:100%;padding:4px 7px;background:#0a1418;color:var(--fg);border:1px solid #1a4046;font-family:inherit;font-size:11px;outline:none;">
-                </div>`).join('')}
-        </div>`).join('');
+    // Tab definitions — network tab hidden in work mode
+    const isWork = _workMode;
+    const tabs = [
+        { id: 'status',      label: 'STATUS',      html: statusPane },
+        { id: 'system',      label: 'SYSTEM',      html: _cfgThemeBlock() + _cfgGroup('SYSTEM', ['server','auth'], data) },
+        { id: 'network',     label: 'NETWORK',     html: _cfgGroup('NETWORK',     ['home','scanner','mikrotik','pihole'], data), homeOnly: true },
+        { id: 'security',    label: 'SECURITY',    html: _cfgGroup('SECURITY',    ['honeypot','security_center','threat'], data) },
+        { id: 'connectivity',label: 'CONNECTIVITY',html: _cfgGroup('CONNECTIVITY',['sentinel','proxy','collector'], data) },
+    ].filter(t => !t.homeOnly || !isWork);
 
-    cfgBody.innerHTML = statusHtml + configHtml;
+    const tabBtns  = tabs.map((t,i) => `<button class="cfg-tab-btn${i===0?' active':''}" data-tab="${t.id}">${t.label}</button>`).join('');
+    const tabPanes = tabs.map((t,i) => `<div class="cfg-tab-pane${i===0?' active':''}" id="cfg-pane-${t.id}">${t.html}</div>`).join('');
+
+    cfgBody.innerHTML = `<div class="cfg-tabs">${tabBtns}</div>${tabPanes}`;
+
+    cfgBody.querySelectorAll('.cfg-tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            cfgBody.querySelectorAll('.cfg-tab-btn').forEach(b => b.classList.remove('active'));
+            cfgBody.querySelectorAll('.cfg-tab-pane').forEach(p => p.classList.remove('active'));
+            btn.classList.add('active');
+            const pane = cfgBody.querySelector(`#cfg-pane-${btn.dataset.tab}`);
+            if (pane) pane.classList.add('active');
+        });
+    });
 }
 
 $('settings-btn').addEventListener('click', openSettings);
@@ -1383,7 +1551,7 @@ $('cfg-save').addEventListener('click', async () => {
     $('cfg-body').querySelectorAll('input[data-section]').forEach(inp => {
         const s = inp.dataset.section, k = inp.dataset.key;
         if (!payload[s]) payload[s] = {};
-        payload[s][k] = inp.value;
+        payload[s][k] = inp.dataset.bool ? String(inp.checked) : inp.value;
     });
     try {
         const res = await fetch('/api/config/update', {
@@ -1509,6 +1677,44 @@ $('logout-btn').addEventListener('click', async () => {
 });
 
 checkAuth().then(() => loadStatic().then(connectWS));
+
+// ================================================================
+// THEME + ACCENT COLOR
+// ================================================================
+const ACCENT_PALETTE = [
+    { name: 'orange',  hex: '#f97316', rgb: '249,115,22',   hex2: '#fb923c' },
+    { name: 'teal',    hex: '#00ffd5', rgb: '0,255,213',    hex2: '#18ffff' },
+    { name: 'blue',    hex: '#38bdf8', rgb: '56,189,248',   hex2: '#7dd3fc' },
+    { name: 'green',   hex: '#2dffa1', rgb: '45,255,161',   hex2: '#4fffb8' },
+    { name: 'yellow',  hex: '#ffe83b', rgb: '255,232,59',   hex2: '#ffed70' },
+    { name: 'purple',  hex: '#b878ff', rgb: '184,120,255',  hex2: '#cc99ff' },
+    { name: 'pink',    hex: '#ec4899', rgb: '236,72,153',   hex2: '#f472b6' },
+    { name: 'red',     hex: '#ff2a5e', rgb: '255,42,94',    hex2: '#ff5580' },
+];
+
+function applyAccent(name) {
+    const c = ACCENT_PALETTE.find(p => p.name === name) || ACCENT_PALETTE[0];
+    const r = document.documentElement;
+    r.style.setProperty('--accent',     c.hex);
+    r.style.setProperty('--accent-2',   c.hex2);
+    r.style.setProperty('--accent-rgb', c.rgb);
+    localStorage.setItem('sentinel-accent', name);
+}
+
+function applyTheme(theme) {
+    document.body.classList.toggle('light-mode', theme === 'light');
+    localStorage.setItem('sentinel-theme', theme);
+}
+
+function loadThemePrefs() {
+    const theme  = localStorage.getItem('sentinel-theme')  || 'dark';
+    const accent = localStorage.getItem('sentinel-accent') || 'orange';
+    applyTheme(theme);
+    // Don't override work-mode accent; it's set by applyTabVisibility
+    if (!document.body.classList.contains('work-mode')) applyAccent(accent);
+}
+
+loadThemePrefs();
 
 // Globe rotation toggle
 $('globe-rotate-btn').addEventListener('click', () => _setRotation(_rotationLocked));
@@ -1731,7 +1937,7 @@ detailModal.addEventListener('click', (e) => {
 // ================================================================
 // TAB SWITCHING
 // ================================================================
-const TAB_IDS = { threat: 'tab-threat', security: 'tab-security', proxy: 'tab-proxy', network: 'tab-network', services: 'tab-services' };
+const TAB_IDS = { threat: 'tab-threat', security: 'tab-security', proxy: 'tab-proxy', network: 'tab-network', services: 'tab-services', pihole: 'tab-pihole' };
 let _activeTab = 'threat';
 
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -1754,8 +1960,10 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
         });
         if (tab === 'security') { fscInit(); fscUpdate(); fscLoadHosts(); }
         if (tab === 'proxy')    { pscInit(); pscUpdate(); }
-        if (tab === 'network')  { netInit(); }
+        if (tab === 'threat')   { attackStatsUpdate(); }
+        if (tab === 'network')  { netInit(); mtUpdate(); }
         if (tab === 'services') { svcInit(); }
+        if (tab === 'pihole')   { phInit(); phUpdate(); }
     });
 });
 
@@ -1799,7 +2007,7 @@ function fscInit() {
         type: 'doughnut',
         data: {
             labels: [],
-            datasets: [{ data: [], backgroundColor: ['#00ffd5','#2dffa1','#ffe83b','#b878ff','#ff2a5e','#38bdf8'], borderWidth: 0 }]
+            datasets: [{ data: [], backgroundColor: ['#38bdf8','#f97316','#2dffa1','#ffe83b','#b878ff','#ff2a5e'], borderWidth: 0 }]
         },
         options: {
             responsive: true, maintainAspectRatio: false,
@@ -3873,4 +4081,357 @@ function svcRender() {
         </tr></thead>
         <tbody>${_svcData.map(_svcRow).join('')}</tbody>
     </table></div>`;
+}
+
+// ================================================================
+// MIKROTIK
+// ================================================================
+let _mtInterval = null;
+let _mtActiveList = null;
+let _mtData = null;
+
+async function mtUpdate() {
+    const section = $('mikrotik-section');
+    if (!section || section.classList.contains('hidden')) return;
+    try {
+        const data = await fetch('/api/mikrotik/data').then(r => r.json());
+        _mtData = data;
+
+        $('mt-host').textContent = data.server || 'not configured';
+        const statusEl = $('mt-status');
+        if (data.connected) {
+            statusEl.textContent = 'CONNECTED'; statusEl.style.color = 'var(--green)';
+        } else {
+            statusEl.textContent = data.last_error ? 'ERROR' : 'CONNECTING...';
+            statusEl.style.color = 'var(--red)';
+        }
+        const errCell = $('mt-error-cell');
+        if (data.last_error) {
+            $('mt-error-msg').textContent = data.last_error;
+            errCell.style.display = '';
+        } else {
+            errCell.style.display = 'none';
+        }
+
+        const s = data.summary || {};
+        $('mt-blocked-count').textContent  = s['blocked_ips'] || 0;
+        $('mt-portscan-count').textContent = s['Port_Scanner'] || 0;
+        $('mt-syn-count').textContent      = s['Syn_Flooder'] || 0;
+
+        // Summary cards
+        const sumEl = $('mt-summary');
+        const listColors = { 'blocked_ips': 'var(--red)', 'Port_Scanner': 'var(--yellow)',
+                             'Syn_Flooder': 'var(--purple)', 'spammers': 'var(--accent)' };
+        sumEl.innerHTML = Object.entries(s)
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, cnt]) => `
+            <div class="mt-sum-card">
+                <span class="lbl">${escape(name.replace('_',' '))}</span>
+                <span class="val" style="color:${listColors[name]||'var(--fg)'}">${cnt}</span>
+            </div>`).join('');
+
+        // List tabs
+        const lists = [...new Set((data.lists || []).map(e => e.list))];
+        if (!_mtActiveList || !lists.includes(_mtActiveList)) _mtActiveList = lists[0] || null;
+        $('mt-list-tabs').innerHTML = lists.map(l => `
+            <button class="mt-list-tab${l === _mtActiveList ? ' active' : ''}"
+                    onclick="mtSetList('${escape(l)}')">${escape(l.replace('_',' '))}</button>`).join('');
+
+        mtRenderTable(data.lists || []);
+        if (_mtMainTab === 'filter') mtRenderFilter(data.filter_rules || []);
+        if (_mtMainTab === 'nat')    mtRenderNat(data.nat_rules || []);
+
+        if (!_mtInterval) _mtInterval = setInterval(mtUpdate, 15000);
+    } catch (e) {
+        console.error('mtUpdate failed:', e);
+    }
+}
+
+function mtSetList(list) {
+    _mtActiveList = list;
+    if (_mtData) mtRenderTable(_mtData.lists || []);
+    document.querySelectorAll('.mt-list-tab').forEach(b => {
+        b.classList.toggle('active', b.textContent.trim() === list.replace('_', ' '));
+    });
+}
+
+function mtRenderTable(entries) {
+    const filtered = _mtActiveList ? entries.filter(e => e.list === _mtActiveList) : entries;
+    $('mt-list-tbody').innerHTML = filtered.map(e => `
+        <tr>
+            <td style="color:var(--accent);font-weight:bold;">${escape(e.address)}</td>
+            <td style="color:var(--muted);">${escape(e.list)}</td>
+            <td style="color:var(--muted);font-size:10px;">${escape(e.creation_time)}</td>
+            <td style="color:${e.timeout ? 'var(--yellow)' : 'var(--muted)'};">${escape(e.timeout || '∞')}</td>
+            <td style="color:var(--muted);font-size:10px;">${escape(e.comment || '')}</td>
+            <td style="text-align:right;">
+                ${e.list === 'blocked_ips' && !e.dynamic
+                    ? `<button class="btn ghost" style="font-size:9px;padding:2px 6px;"
+                               onclick="mtUnblockIP('${escape(e.address)}')">UNBLOCK</button>`
+                    : `<button class="btn ghost" style="font-size:9px;padding:2px 6px;"
+                               onclick="mtBlockFromList('${escape(e.address)}')">+ BLOCK</button>`}
+            </td>
+        </tr>`).join('') || `<tr><td colspan="6" class="empty">No entries.</td></tr>`;
+}
+
+async function mtBlockIP() {
+    const ip      = ($('mt-block-ip').value || '').trim();
+    const timeout = $('mt-block-timeout').value;
+    const res     = $('mt-block-result');
+    if (!ip) { res.textContent = 'Enter an IP address.'; res.style.color = 'var(--red)'; return; }
+    res.textContent = 'Blocking...'; res.style.color = 'var(--muted)';
+    try {
+        const r = await fetch('/api/mikrotik/block', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ ip, comment: 'sentinel-manual', timeout: timeout || '' })
+        }).then(r => r.json());
+        if (r.ok) {
+            res.textContent = `✓ ${ip} blocked`; res.style.color = 'var(--green)';
+            $('mt-block-ip').value = '';
+            setTimeout(mtUpdate, 1500);
+        } else {
+            res.textContent = `✗ ${r.error}`; res.style.color = 'var(--red)';
+        }
+    } catch (e) { res.textContent = `✗ ${e}`; res.style.color = 'var(--red)'; }
+}
+
+async function mtBlockFromList(ip) {
+    const timeout = '1w';
+    try {
+        const r = await fetch('/api/mikrotik/block', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ ip, comment: 'sentinel-from-list', timeout })
+        }).then(r => r.json());
+        if (r.ok) { setTimeout(mtUpdate, 1500); }
+    } catch {}
+}
+
+async function mtUnblockIP(ip) {
+    try {
+        const r = await fetch('/api/mikrotik/unblock', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ ip })
+        }).then(r => r.json());
+        if (r.ok) { setTimeout(mtUpdate, 1500); }
+    } catch {}
+}
+
+// MikroTik main tab switching (LISTS | FILTER | NAT)
+let _mtMainTab = 'lists';
+
+function mtSetMainTab(tab) {
+    _mtMainTab = tab;
+    ['lists','filter','nat'].forEach(t => {
+        const pane = $('mt-pane-' + t);
+        const btn  = $('mt-tab-' + t);
+        if (pane) pane.style.display = t === tab ? '' : 'none';
+        if (btn)  btn.classList.toggle('active', t === tab);
+    });
+    if (_mtData) {
+        if (tab === 'filter') mtRenderFilter(_mtData.filter_rules || []);
+        if (tab === 'nat')    mtRenderNat(_mtData.nat_rules || []);
+    }
+}
+
+function _mtRuleMatch(r) {
+    const parts = [];
+    if (r.protocol)        parts.push(`proto:${r.protocol}`);
+    if (r.src_address)     parts.push(`src:${r.src_address}`);
+    if (r.dst_address)     parts.push(`dst:${r.dst_address}`);
+    if (r.dst_port)        parts.push(`:${r.dst_port}`);
+    if (r.src_port)        parts.push(`src-port:${r.src_port}`);
+    if (r.in_interface)    parts.push(`in:${r.in_interface}`);
+    if (r.out_interface)   parts.push(`out:${r.out_interface}`);
+    if (r.src_address_list) parts.push(`src-list:${r.src_address_list}`);
+    if (r.dst_address_list) parts.push(`dst-list:${r.dst_address_list}`);
+    if (r.address_list)    parts.push(`list:${r.address_list}`);
+    if (r.connection_state) parts.push(`state:${r.connection_state}`);
+    return parts.join(' · ') || '—';
+}
+
+function _mtRuleTarget(r) {
+    const parts = [];
+    if (r.to_addresses) parts.push(r.to_addresses);
+    if (r.to_ports)     parts.push(`:${r.to_ports}`);
+    return parts.join(' ') || '—';
+}
+
+function _mtToggleBtn(type, r) {
+    if (r.dynamic) return '<span style="font-size:9px;color:#4d7479;">DYNAMIC</span>';
+    const enabled = !r.disabled;
+    const color = enabled ? 'var(--green)' : 'var(--muted)';
+    const label = enabled ? 'ON' : 'OFF';
+    return `<button class="btn ghost" style="font-size:9px;padding:2px 8px;color:${color};border-color:${color};"
+                    onclick="mtToggleRule('${type}',${r.index},${!enabled})">${label}</button>`;
+}
+
+function mtRenderFilter(rules) {
+    const ACTION_COLOR = { accept:'var(--green)', drop:'var(--red)', reject:'var(--red)',
+        'add-src-to-address-list':'var(--yellow)', jump:'var(--accent)',
+        passthrough:'var(--muted)', fasttrack_connection:'#38bdf8' };
+    $('mt-filter-tbody').innerHTML = rules.map(r => {
+        const ac = ACTION_COLOR[r.action] || 'var(--fg)';
+        const rowStyle = r.disabled ? 'opacity:0.4;' : '';
+        return `<tr style="${rowStyle}">
+            <td style="color:var(--muted);">${r.index}</td>
+            <td style="color:#38bdf8;">${r.chain || '—'}</td>
+            <td style="color:${ac};font-weight:bold;">${(r.action||'').replace(/_/g,'-')}</td>
+            <td style="font-size:10px;color:var(--muted);">${escape(_mtRuleMatch(r))}</td>
+            <td style="font-size:10px;color:#4d7479;font-style:italic;">${escape(r.comment||'')}</td>
+            <td style="text-align:right;">${_mtToggleBtn('filter', r)}</td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="6" class="empty">No rules.</td></tr>';
+}
+
+function mtRenderNat(rules) {
+    const ACTION_COLOR = { 'dst-nat':'var(--accent)', masquerade:'var(--yellow)',
+        'src-nat':'#38bdf8', redirect:'var(--purple)' };
+    $('mt-nat-tbody').innerHTML = rules.map(r => {
+        const ac = ACTION_COLOR[r.action] || 'var(--fg)';
+        const rowStyle = r.disabled ? 'opacity:0.4;' : '';
+        return `<tr style="${rowStyle}">
+            <td style="color:var(--muted);">${r.index}</td>
+            <td style="color:#38bdf8;">${r.chain || '—'}</td>
+            <td style="color:${ac};font-weight:bold;">${r.action || '—'}</td>
+            <td style="font-size:10px;color:var(--muted);">${escape(_mtRuleMatch(r))}</td>
+            <td style="font-size:10px;color:var(--accent);">${escape(_mtRuleTarget(r))}</td>
+            <td style="font-size:10px;color:#4d7479;font-style:italic;">${escape(r.comment||'')}</td>
+            <td style="text-align:right;">${_mtToggleBtn('nat', r)}</td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="7" class="empty">No rules.</td></tr>';
+}
+
+async function mtToggleRule(type, index, enable) {
+    try {
+        const r = await fetch('/api/mikrotik/rule/toggle', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ type, index, enable })
+        }).then(r => r.json());
+        if (r.ok) {
+            setTimeout(() => {
+                mtUpdate().then(() => {
+                    if (_mtMainTab === 'filter') mtRenderFilter(_mtData?.filter_rules || []);
+                    if (_mtMainTab === 'nat')    mtRenderNat(_mtData?.nat_rules || []);
+                });
+            }, 1500);
+        }
+    } catch {}
+}
+
+// ================================================================
+// PIHOLE
+// ================================================================
+let _phCharts = {};
+let _phInitDone = false;
+let _phInterval = null;
+
+function phInit() {
+    if (_phInitDone) return;
+    _phInitDone = true;
+
+    _phCharts.overtime = new Chart($('ph-overtime-chart'), {
+        type: 'line',
+        data: { labels: [], datasets: [
+            { label: 'Total',   data: [], borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.08)', fill: true, tension: 0.3, pointRadius: 0 },
+            { label: 'Blocked', data: [], borderColor: '#ff2a5e', backgroundColor: 'rgba(255,42,94,0.08)',  fill: true, tension: 0.3, pointRadius: 0 },
+        ]},
+        options: {
+            maintainAspectRatio: false, animation: false,
+            plugins: { legend: { labels: { color: '#4d7479', font: { size: 9 }, boxWidth: 10 } }, datalabels: { display: false } },
+            scales: {
+                x: { grid: { display: false }, ticks: { color: '#4d7479', font: { size: 9 }, maxTicksLimit: 12 } },
+                y: { min: 0, grid: { color: 'var(--grid-line)' }, ticks: { color: '#4d7479', font: { size: 9 } } }
+            }
+        }
+    });
+
+    _phCharts.breakdown = new Chart($('ph-breakdown-chart'), {
+        type: 'doughnut',
+        data: { labels: ['Allowed', 'Blocked', 'Cached'], datasets: [{ data: [], backgroundColor: ['#38bdf8','#ff2a5e','#ffe83b'], borderWidth: 0 }] },
+        options: {
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'right', labels: { color: '#4d7479', font: { size: 9 }, boxWidth: 10 } },
+                datalabels: { color: '#fff', font: { weight: 'bold', size: 9 },
+                    formatter: (v, ctx) => { const s = ctx.dataset.data.reduce((a,b)=>a+b,0); const p=v*100/s; return p>5?Math.round(p)+'%':''; } }
+            },
+            cutout: '65%'
+        }
+    });
+
+    _phInterval = setInterval(phUpdate, 30000);
+}
+
+async function phUpdate() {
+    try {
+        const data = await fetch('/api/pihole/data').then(r => r.json());
+        const instances = Object.values(data.instances || {});
+
+        $('ph-instance-count').textContent = instances.length;
+
+        // Aggregate from primary (or first connected)
+        const primary = instances.find(i => i.primary && i.connected) || instances.find(i => i.connected);
+        if (primary?.stats) {
+            const s = primary.stats;
+            $('ph-queries').textContent  = s.queries_today?.toLocaleString() || '0';
+            $('ph-blocked').textContent  = s.blocked_today?.toLocaleString() || '0';
+            $('ph-pct').textContent      = s.percent_blocked + '%';
+            $('ph-domains').textContent  = s.domains_blocked?.toLocaleString() || '0';
+            $('ph-error-cell').style.display = 'none';
+        }
+
+        // Instance cards
+        $('ph-instances').innerHTML = instances.map(inst => {
+            const s = inst.stats || {};
+            const color = inst.connected ? 'var(--green)' : 'var(--red)';
+            const badge = inst.primary ? ' <span style="font-size:8px;color:var(--accent);border:1px solid var(--accent);padding:0 4px;">PRIMARY</span>' : '';
+            return `<div class="panel" style="flex:1;min-width:200px;padding:10px 14px;">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                    <span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block;"></span>
+                    <span style="font-size:10px;font-weight:700;color:var(--fg);">${inst.host}</span>${badge}
+                    ${inst.version ? `<span style="font-size:9px;color:var(--muted);margin-left:auto;">${inst.version}</span>` : ''}
+                </div>
+                ${inst.connected ? `
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:10px;">
+                    <span style="color:var(--muted);">Queries</span><span style="color:var(--fg);text-align:right;">${(s.queries_today||0).toLocaleString()}</span>
+                    <span style="color:var(--muted);">Blocked</span><span style="color:var(--red);text-align:right;">${(s.blocked_today||0).toLocaleString()} (${s.percent_blocked||0}%)</span>
+                    <span style="color:var(--muted);">Clients</span><span style="color:var(--fg);text-align:right;">${s.unique_clients||0}</span>
+                    <span style="color:var(--muted);">Status</span><span style="color:${s.status==='enabled'?'var(--green)':'var(--red)'};text-align:right;">${s.status||'?'}</span>
+                </div>` : `<div style="color:var(--red);font-size:10px;">${inst.last_error||'Disconnected'}</div>`}
+            </div>`;
+        }).join('');
+
+        // Overtime chart (from primary)
+        if (primary?.overtime?.length) {
+            const ot = primary.overtime;
+            _phCharts.overtime.data.labels = ot.map(e => {
+                const d = new Date(e.ts * 1000);
+                return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+            });
+            _phCharts.overtime.data.datasets[0].data = ot.map(e => e.total);
+            _phCharts.overtime.data.datasets[1].data = ot.map(e => e.blocked);
+            _phCharts.overtime.update('none');
+        }
+
+        // Breakdown doughnut
+        if (primary?.stats) {
+            const s = primary.stats;
+            const allowed = (s.queries_today || 0) - (s.blocked_today || 0) - (s.queries_cached || 0);
+            _phCharts.breakdown.data.datasets[0].data = [Math.max(0,allowed), s.blocked_today||0, s.queries_cached||0];
+            _phCharts.breakdown.update('none');
+        }
+
+        // Top domains
+        const tops  = primary?.top_domains  || [];
+        const topbl = primary?.top_blocked  || [];
+        $('ph-top-domains').innerHTML = tops.map(d =>
+            `<tr><td style="color:var(--fg);">${escape(d.domain||d.name||d)}</td>
+             <td style="text-align:right;color:#38bdf8;font-weight:bold;">${(d.count||d.hits||0).toLocaleString()}</td></tr>`
+        ).join('') || '<tr><td colspan="2" class="empty">No data.</td></tr>';
+        $('ph-top-blocked').innerHTML = topbl.map(d =>
+            `<tr><td style="color:var(--fg);">${escape(d.domain||d.name||d)}</td>
+             <td style="text-align:right;color:var(--red);font-weight:bold;">${(d.count||d.hits||0).toLocaleString()}</td></tr>`
+        ).join('') || '<tr><td colspan="2" class="empty">No data.</td></tr>';
+
+    } catch(e) { console.error('phUpdate failed:', e); }
 }
