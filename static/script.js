@@ -1595,16 +1595,19 @@ function applyAuthState(authenticated) {
         btn.style.display = authenticated ? '' : 'none';
     });
 
-    const lanPanel   = $('lan-panel');
-    const logPanel   = $('log-panel');
-    const usersPanel = $('users-panel');
+    const lanPanel        = $('lan-panel');
+    const logPanel        = $('log-panel');
+    const usersPanel      = $('users-panel');
+    const attackStatsPanel = $('attack-stats-panel');
+    const SHOW = 'flex';
 
     if (!authenticated) {
-        // Explicit hide of auth-gated panels (CSS default already hides them,
-        // this ensures they're re-hidden after logout)
-        if (lanPanel)   lanPanel.style.display   = 'none';
-        if (logPanel)   logPanel.style.display   = 'none';
-        if (usersPanel) usersPanel.style.display = 'none';
+        if (lanPanel)         lanPanel.style.display         = 'none';
+        if (logPanel)         logPanel.style.display         = 'none';
+        if (usersPanel)       usersPanel.style.display       = 'none';
+        if (attackStatsPanel) attackStatsPanel.style.display = 'none';
+    } else {
+        if (attackStatsPanel) attackStatsPanel.style.display = SHOW;
     }
 
     if (_workMode) {

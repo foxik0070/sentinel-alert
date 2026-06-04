@@ -113,12 +113,12 @@ html, body {
 
 /* Top HUD bar */
 .hud-top {
-    height: 52px;
-    display: flex; align-items: center; gap: 14px;
-    padding: 0 14px;
+    height: 52px; flex-shrink: 0;
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 10px;
     background: linear-gradient(180deg, rgba(var(--accent-rgb),0.10), rgba(var(--accent-rgb),0.02));
     border-bottom: 1px solid #0e2c30;
-    position: relative;
+    position: relative; overflow: hidden;
 }
 .hud-cell { display: flex; gap: 6px; align-items: center; font-size: 11px; }
 .hud-cell.right { margin-left: auto; }
@@ -189,7 +189,7 @@ html, body {
 
 /* Auth-gated panels — hidden by default; JS shows them after auth check.
    This ensures panels stay hidden even if JS partially fails. */
-#log-panel { display: none; }
+#log-panel, #attack-stats-panel { display: none; }
 
 /* Grid */
 .grid {
@@ -710,18 +710,17 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
     html, body { height: auto; overflow-y: auto; }
     .grid {
         grid-template-columns: 1fr 1fr;
-        grid-template-rows: 340px auto auto auto;
+        grid-template-rows: 340px minmax(180px, auto) minmax(120px, auto) minmax(180px, auto);
         grid-template-areas:
             "yellow    yellow"
             "red       green"
             "red       users-area"
             "purple    grey";
         height: auto;
-        min-height: calc(100vh - 74px);
     }
     .grid.no-scanner {
         grid-template-columns: 1fr 1fr;
-        grid-template-rows: 340px auto auto auto;
+        grid-template-rows: 340px minmax(180px, auto) minmax(120px, auto) minmax(180px, auto);
         grid-template-areas:
             "yellow    yellow"
             "purple    green"
@@ -734,11 +733,11 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
             "yellow"
             "green"
             "grey";
-        grid-template-rows: 340px auto auto;
+        grid-template-rows: 340px minmax(160px, auto) minmax(160px, auto);
     }
     .grid.work-layout {
         grid-template-columns: 1fr 1fr;
-        grid-template-rows: 340px auto auto;
+        grid-template-rows: 340px minmax(180px, auto) minmax(180px, auto);
         grid-template-areas:
             "yellow     yellow"
             "red        green"
@@ -778,22 +777,22 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
     /* Main grid — single column */
     .grid {
         grid-template-columns: 1fr;
-        grid-template-rows: 280px auto auto auto auto auto;
+        grid-template-rows: 280px minmax(160px,auto) minmax(140px,auto) minmax(80px,auto) minmax(120px,auto) minmax(140px,auto);
         grid-template-areas: "yellow" "red" "green" "users-area" "purple" "grey";
         height: auto;
     }
     .grid.no-scanner {
-        grid-template-rows: 280px auto auto auto auto;
+        grid-template-rows: 280px minmax(160px,auto) minmax(140px,auto) minmax(80px,auto) minmax(140px,auto);
         grid-template-areas: "yellow" "purple" "green" "users-area" "grey";
     }
     .grid.work-layout {
         grid-template-columns: 1fr;
-        grid-template-rows: 280px auto auto auto auto;
+        grid-template-rows: 280px minmax(160px,auto) minmax(140px,auto) minmax(120px,auto) minmax(140px,auto);
         grid-template-areas: "yellow" "red" "green" "purple" "grey";
     }
     .grid.no-auth {
         grid-template-columns: 1fr;
-        grid-template-rows: 280px auto auto;
+        grid-template-rows: 280px minmax(160px,auto) minmax(140px,auto);
         grid-template-areas: "yellow" "green" "grey";
     }
     .globe-panel { height: 280px; }
@@ -847,6 +846,7 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
 /* Medium: 641–1100px — title overlaps header elements on these widths */
 @media (min-width: 641px) and (max-width: 1100px) {
     .hud-title { display: none; }
+    .hud-top { gap: 8px; }
 }
 
 /* Medium: 641–768px */
