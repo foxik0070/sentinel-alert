@@ -1235,7 +1235,9 @@ function applyTabVisibility(cfg) {
         if (btnSecurity) btnSecurity.style.display = 'none';
         if (btnProxy)    btnProxy.style.display    = 'none';
         if (btnNetwork)  btnNetwork.style.display  = 'none';
-        if (settingsBtn) settingsBtn.style.display  = 'none';
+        if (settingsBtn) settingsBtn.style.display  = "none";
+        const btnPihole = $("tab-btn-pihole");
+        if (btnPihole)   btnPihole.style.display   = "none";
         // In work mode attacks table is empty — hide the tab, ban_history is the default
         const dbvTabAttacks = $('dbv-tab-attacks');
         if (dbvTabAttacks) dbvTabAttacks.style.display = 'none';
