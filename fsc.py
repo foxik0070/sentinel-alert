@@ -15,10 +15,7 @@ HA_URL = os.environ.get("FSC_HA_URL") or _conf.FSC_HA_URL or ""
 HA_TOKEN = os.environ.get("FSC_HA_TOKEN") or _conf.FSC_HA_TOKEN or ""
 
 _DEFAULT_IGNORE = [
-    "192.168.2.1",
-    "192.168.2.120", "192.168.2.121", "192.168.2.122",
-    "192.168.2.123", "192.168.2.124", "192.168.2.125",
-    "192.168.2.202",
+    "192.168.1.1",
 ]
 IGNORE_IPS = _conf.FSC_IGNORE_IPS if _conf.FSC_IGNORE_IPS else _DEFAULT_IGNORE
 

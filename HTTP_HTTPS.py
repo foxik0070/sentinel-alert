@@ -277,7 +277,7 @@ def write_http_ips_log(seen: dict):
 
 def main():
     env    = _load_env()
-    os_url = env.get("SIEM_OPENSEARCH_URL", "https://10.5.21.21:9200")
+    os_url = env.get("SIEM_OPENSEARCH_URL", "https://opensearch.example.com:9200")
     user   = env.get("SIEM_OPENSEARCH_USER", "apitester")
     pw     = env.get("SIEM_OPENSEARCH_PASS", "")
     verify = env.get("SIEM_VERIFY_SSL", "false").lower() in ("1", "true", "yes")
