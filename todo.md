@@ -87,4 +87,10 @@ u každé priorita (P1 = největší efekt/poměr práce, P3 = nice-to-have).
 + zdravý základ kódu před dalším růstem.
 
 Původní TODO z CLAUDE.md (MikroTik #2, Threat map #3, PiHole #5, dokumentace #7)
-zůstávají v platnosti a mají přednost, pokud nebude řečeno jinak.
+— vše hotovo (commity f19e239, cc01762, 5e968d0).
+
+### Náměty do budoucna
+
+- **WebGL fallback** — pokud selže vytvoření WebGL kontextu (staré/headless
+  prohlížeče), spadne celý 01-globe.js a dashboard je nepoužitelný (pre-existing
+  chování). Obalit globe init try/catch a zobrazit 2D fallback / skrýt globe panel.
