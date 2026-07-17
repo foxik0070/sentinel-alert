@@ -1377,3 +1377,15 @@ body.fx-on::before {
     .sum-cell { min-width: 92px; padding: 4px 8px; }
     .sum-val { font-size: 12px; }
 }
+
+/* ── KIOSK MÓD ─────────────────────────────────────────────────── */
+body.kiosk-mode .hud-cell.right,
+body.kiosk-mode #summary-bar .sum-cell:last-child { }
+body.kiosk-mode { cursor: none; }
+body.kiosk-mode .tab-bar { pointer-events: none; opacity: 0.6; }
+body.kiosk-mode::after {
+    content: '◤ KIOSK'; position: fixed; top: 6px; right: 10px; z-index: 940;
+    font-size: 9px; letter-spacing: 2px; color: var(--accent);
+    border: 1px solid var(--accent); padding: 2px 8px; pointer-events: none;
+    background: var(--panel-2);
+}

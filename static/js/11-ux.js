@@ -46,6 +46,8 @@ function _cpStaticActions() {
         { label: 'ATTACK TRENDS — 7 / 30 DNÍ', run: () => trendsOpen(30) },
         { label: 'DAILY REPORTS',             run: () => reportsOpen() },
         { label: 'REPLAY 24H NA GLOBUSU',     run: () => { _cpTab('threat'); replayStart(); } },
+        { label: 'KIOSK MÓD — AUTO-CYKLENÍ TABŮ', run: () => kioskToggle() },
+        { label: 'BACKUP DATABÁZE',           run: () => { window.location.href = '/api/backup'; } },
         { label: 'HELP / SHORTCUTS',    hint: '?', run: () => helpToggle(true) },
     ];
 }
@@ -536,3 +538,53 @@ function summarySyncVisibility() {
 document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', summarySyncVisibility));
 summarySyncVisibility();
 setInterval(summaryUpdate, 30000);
+
+// ================================================================
+// KIOSK MÓD — auto-cyklení tabů pro nástěnný display (?kiosk nebo palette)
+// ================================================================
+const _kiosk = { active: false, timer: null, wakeLock: null, idx: 0, intervalS: 20 };
+
+async function kioskStart(intervalS = 20) {
+    if (_kiosk.active) return;
+    _kiosk.active = true;
+    _kiosk.intervalS = intervalS;
+    document.body.classList.add('kiosk-mode');
+    // Wake lock — display neusne (podpora jen v secure contextu)
+    try { _kiosk.wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
+
+    const tabs = () => [...document.querySelectorAll('.tab-btn')].filter(b => b.offsetParent !== null);
+    _kiosk.idx = Math.max(0, tabs().findIndex(b => b.classList.contains('active')));
+    _kiosk.timer = setInterval(() => {
+        const t = tabs();
+        if (!t.length) return;
+        _kiosk.idx = (_kiosk.idx + 1) % t.length;
+        t[_kiosk.idx].click();
+    }, intervalS * 1000);
+
+    showToast({ title: 'KIOSK MÓD', body: `Auto-cyklení tabů po ${intervalS}s · ESC ukončí`, color: 'var(--accent)' });
+}
+
+function kioskStop() {
+    if (!_kiosk.active) return;
+    _kiosk.active = false;
+    clearInterval(_kiosk.timer);
+    document.body.classList.remove('kiosk-mode');
+    _kiosk.wakeLock?.release?.().catch(() => {});
+    _kiosk.wakeLock = null;
+}
+
+function kioskToggle() { _kiosk.active ? kioskStop() : kioskStart(); }
+
+// Re-acquire wake lock po návratu na záložku (browser ho při skrytí uvolní)
+document.addEventListener('visibilitychange', async () => {
+    if (_kiosk.active && !document.hidden && !_kiosk.wakeLock) {
+        try { _kiosk.wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
+    }
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && _kiosk.active) kioskStop(); });
+
+// Auto-start přes ?kiosk nebo ?kiosk=30
+{
+    const kp = new URLSearchParams(location.search).get('kiosk');
+    if (kp !== null) window.addEventListener('load', () => kioskStart(parseInt(kp) || 20));
+}

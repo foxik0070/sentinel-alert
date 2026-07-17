@@ -302,6 +302,39 @@ async def lifespan(app: FastAPI):
             except Exception:
                 pass
 
+    async def _anomaly_watcher():
+        """Detekce spike — útoky za posledních 10 min výrazně nad baseline (24h průměr)."""
+        await asyncio.sleep(180)  # nech nasbírat data
+        last_alert = 0.0
+        while True:
+            await asyncio.sleep(300)  # kontrola po 5 min
+            try:
+                recent = _query(
+                    "SELECT COUNT(*) AS n FROM attacks WHERE ts >= datetime('now','-10 minutes')"
+                )[0]["n"]
+                # baseline: průměr na 10 min za posledních 24h (bez posledních 10 min)
+                base_total = _query(
+                    "SELECT COUNT(*) AS n FROM attacks "
+                    "WHERE ts >= datetime('now','-24 hours') AND ts < datetime('now','-10 minutes')"
+                )[0]["n"]
+                baseline = base_total / (143 or 1)  # 143 desetiminutových oken ve 24h
+            except Exception:
+                continue
+            # spike: aspoň 10 útoků a ≥3× baseline; anti-spam 30 min
+            if (recent >= 10 and baseline >= 1 and recent >= 3 * baseline
+                    and time.time() - last_alert > 1800):
+                last_alert = time.time()
+                factor = round(recent / baseline, 1)
+                alerts.notify("ATTACK SPIKE",
+                              f"{recent} útoků za 10 min ({factor}× nad normál)")
+                try:
+                    _broadcast_queue.put_nowait({
+                        "type": "log", "level": "attack", "source": "anomaly",
+                        "ts": datetime.now().isoformat(),
+                        "msg": f"⚠ ATTACK SPIKE: {recent} útoků/10min ({factor}× baseline)"})
+                except asyncio.QueueFull:
+                    pass
+
     async def _alerts_watcher():
         """Nové zařízení v LAN / zařízení offline → log event + push notifikace."""
         prev_macs: set | None = None
@@ -397,6 +430,7 @@ async def lifespan(app: FastAPI):
     bg = [
         asyncio.create_task(_broadcaster()),
         asyncio.create_task(_alerts_watcher()),
+        asyncio.create_task(_anomaly_watcher()),
         asyncio.create_task(_daily_jobs()),
         asyncio.create_task(_heartbeat_loop()),
         asyncio.create_task(tasks.periodic_scanner(_broadcast_queue)),

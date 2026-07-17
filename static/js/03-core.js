@@ -225,6 +225,10 @@ function connectWS() {
                 browserNotify('ALERT', m.msg);
             } else if (m.source === 'selftest' && m.level === 'warn') {
                 showToast({ title: 'SELF-TEST', body: m.msg, color: 'var(--yellow)', ttl: 8000, dedupKey: 'st:' + m.msg });
+            } else if (m.source === 'anomaly') {
+                showToast({ title: 'ATTACK SPIKE', body: m.msg, color: 'var(--red)', ttl: 12000, dedupKey: 'anom:' + m.msg });
+                playBeep('alarm');
+                browserNotify('ATTACK SPIKE', m.msg);
             }
         }
     };

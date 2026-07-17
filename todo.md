@@ -124,6 +124,6 @@ Původní TODO z CLAUDE.md (MikroTik #2, Threat map #3, PiHole #5, dokumentace #
 
 ### Bezpečnost / display
 - [ ] **2FA / TOTP login** — volitelné, QR setup v Settings, ověření po hesle
-- [ ] **Kiosk / auto-cycle** — cyklení tabů, skrytí ovládání, wake-lock (?kiosk)
-- [ ] **Anomaly alert (spike)** — detekce náhlého nárůstu útoků → toast + push
+- [x] **Kiosk / auto-cycle** — cyklení tabů, skrytí ovládání, wake-lock (?kiosk)
+- [x] **Anomaly alert (spike)** — detekce náhlého nárůstu útoků → toast + push
 - [ ] **Read-only API token** — token pro read-only /api přístup, správa v Settings
