@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#02060a"/>
+  <circle cx="256" cy="256" r="150" fill="none" stroke="#f97316" stroke-width="10" opacity="0.85"/>
+  <circle cx="256" cy="256" r="100" fill="none" stroke="#f97316" stroke-width="4" opacity="0.5"/>
+  <circle cx="256" cy="256" r="50" fill="none" stroke="#f97316" stroke-width="3" opacity="0.35"/>
+  <line x1="256" y1="86" x2="256" y2="426" stroke="#f97316" stroke-width="2" opacity="0.4"/>
+  <line x1="86" y1="256" x2="426" y2="256" stroke="#f97316" stroke-width="2" opacity="0.4"/>
+  <line x1="256" y1="256" x2="386" y2="146" stroke="#ffbe00" stroke-width="6"/>
+  <circle cx="386" cy="146" r="14" fill="#ff2a5e"/>
+  <circle cx="256" cy="256" r="18" fill="#f97316"/>
+  <text x="256" y="470" font-family="monospace" font-size="42" font-weight="bold" fill="#f97316" text-anchor="middle" letter-spacing="4">SENTINEL</text>
+</svg>

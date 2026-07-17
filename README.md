@@ -43,6 +43,17 @@ Additional capabilities:
 - **DB maintenance** — nightly retention prune + VACUUM; **audit log** of all
   sensitive actions (login, block, config) browsable in the DB viewer
 - **Login rate-limit** — max 5 attempts/minute per IP
+- **Dashboard summary bar** — today vs. yesterday attacks, top vector, hot zone,
+  devices online, PiHole block % — above the Threat Map
+- **Hot zones** — pulsing red rings on the countries with most attacks in the last hour
+- **CSV / JSON export** — from the DB viewer and IP intelligence card (all attacks of an IP)
+- **PWA** — installable (manifest + service worker); app shell works offline,
+  API/WebSocket always go to the network
+- **Health check** — `GET /healthz` (DB, modules, uptime, WS clients) for monitoring
+- **Security headers** — CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy;
+  globe textures self-hosted (no external CDN); gzip on large JSON responses
+- **WebGL fallback** — if the browser can't create a WebGL context, the globe panel
+  shows a 2D live attack feed and the rest of the dashboard keeps working
 
 ---
 
@@ -520,6 +531,9 @@ All endpoints returning sensitive data require authentication (session cookie).
 | POST | `/api/mikrotik/block` | no | Block IP on MikroTik |
 | POST | `/api/mikrotik/unblock` | no | Remove IP from address list |
 | GET | `/api/pihole/data` | no | PiHole instance stats |
+| GET | `/healthz` | no | Health check — DB, modules, uptime |
+| GET | `/api/stats/summary` | no | Dashboard summary — today vs. yesterday, top vector, hot zone |
+| GET | `/api/export/{table}` | yes | Export table to CSV/JSON (`fmt`, optional `ip` filter) |
 | WS | `/ws/live` | no | Live event stream |
 
 ---

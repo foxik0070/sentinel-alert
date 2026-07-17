@@ -200,3 +200,12 @@ function wlDel(entry) {
             return j;
         });
 }
+
+// ================================================================
+// PWA — registrace service workeru (offline shell, installable)
+// ================================================================
+if ('serviceWorker' in navigator && !new URLSearchParams(location.search).get('solo')) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {}); // tichý fail (http/localhost bez TLS)
+    });
+}

@@ -572,6 +572,19 @@ def index():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
+@app.get("/sw.js")
+def service_worker():
+    # SW musí běžet z root scope, aby pokryl celou aplikaci
+    return FileResponse(os.path.join(STATIC_DIR, "sw.js"), media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+
+@app.get("/manifest.webmanifest")
+def manifest():
+    return FileResponse(os.path.join(STATIC_DIR, "manifest.webmanifest"),
+                        media_type="application/manifest+json")
+
+
 @app.get("/api/config")
 def get_config():
     s = bridge.status()

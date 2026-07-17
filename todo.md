@@ -109,5 +109,5 @@ Původní TODO z CLAUDE.md (MikroTik #2, Threat map #3, PiHole #5, dokumentace #
 ### Funkce
 - [x] **Hot zones na mapě** — červeně pulzující země s nejvíce útoky za poslední hodinu
 - [x] **Export CSV/JSON** — z DB vieweru i IP intel karty
-- [ ] **PWA / installable** — manifest.json + service worker, offline shell
+- [x] **PWA / installable** — manifest.json + service worker, offline shell
 - [x] **Dashboard souhrn** — horní přehledový pruh (dnes vs. včera, top vektor, online, block %)
