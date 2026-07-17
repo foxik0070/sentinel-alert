@@ -104,7 +104,7 @@ Původní TODO z CLAUDE.md (MikroTik #2, Threat map #3, PiHole #5, dokumentace #
 - [x] **WS reconnect s backoffem** — exponenciální backoff + jitter místo fixních 3s, re-sync snapshotu po obnově
 - [x] **Health endpoint + gzip** — `/healthz` (DB, moduly, uptime) + GZip middleware na velké JSON
 - [x] **Bezpečnostní hlavičky** (+ globe textury self-hosted) — CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy na všechny odpovědi
-- [ ] **Rozšířit testy** — alerts.py (watchlist IP/prefix/CIDR), geoip, trends agregace, auth rate-limit
+- [x] **Rozšířit testy** (22 nových: alerts/watchlist, geoip, healthz, trends, rate-limit — celkem 74) — alerts.py (watchlist IP/prefix/CIDR), geoip, trends agregace, auth rate-limit
 
 ### Funkce
 - [ ] **Hot zones na mapě** — červeně pulzující země s nejvíce útoky za poslední hodinu
