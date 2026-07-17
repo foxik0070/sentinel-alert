@@ -91,6 +91,7 @@ Původní TODO z CLAUDE.md (MikroTik #2, Threat map #3, PiHole #5, dokumentace #
 
 ### Náměty do budoucna
 
-- **WebGL fallback** — pokud selže vytvoření WebGL kontextu (staré/headless
-  prohlížeče), spadne celý 01-globe.js a dashboard je nepoužitelný (pre-existing
-  chování). Obalit globe init try/catch a zobrazit 2D fallback / skrýt globe panel.
+- [x] **WebGL fallback** — hotovo: globe init v try/catch, při selhání Proxy stub
+  (všechna globe.* volání no-op), v panelu 2D live feed útoků, radar (canvas 2D)
+  běží dál. Ověřeno headless: bez WebGL 0 JS chyb + feed, se SwiftShader WebGL
+  normální globus.

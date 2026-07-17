@@ -126,7 +126,59 @@ function pickTexture() {
 }
 
 const _isMobile = window.innerWidth <= 1100;
-const globe = Globe()(globeEl)
+
+// ── WebGL fallback ────────────────────────────────────────────────
+// Bez WebGL kontextu (staré/headless prohlížeče) globe init vyhodí výjimku.
+// Stub udělá ze všech globe.* volání no-op, dashboard běží dál a v panelu
+// se místo globusu zobrazí 2D live feed útoků (radar je canvas 2D — funguje).
+let GLOBE_OK = true;
+
+function _makeGlobeStub() {
+    const stub = new Proxy(function () {}, {
+        get: (_t, prop) => {
+            if (prop === 'controls') return () => ({});
+            return () => stub;
+        },
+        apply: () => stub,
+    });
+    return stub;
+}
+
+function _globeFallbackInit() {
+    globeEl.innerHTML = `
+        <div id="globe-fallback">
+            <div class="gf-title">◤ WEBGL UNAVAILABLE</div>
+            <div class="gf-sub">3D globus vyžaduje WebGL — zobrazuji 2D live feed. Statistiky běží v okolních panelech.</div>
+            <div id="gf-feed"></div>
+        </div>`;
+    ['globe-rotate-btn', 'globe-view-btn', 'globe-replay-btn', 'globe-mode'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+    });
+}
+
+function _globeFallbackPush(a) {
+    const feed = document.getElementById('gf-feed');
+    if (!feed) return;
+    const row = document.createElement('div');
+    row.className = 'gf-row';
+    const proto = document.createElement('span');
+    proto.style.color = PROTO_COLOR[a.protocol] || 'var(--accent)';
+    proto.style.fontWeight = '700';
+    proto.textContent = (a.protocol || '?').toUpperCase();
+    const ip = document.createElement('span');
+    ip.className = 'gf-ip';
+    ip.textContent = a.src_ip || '?';
+    const meta = document.createElement('span');
+    meta.className = 'gf-meta';
+    meta.textContent = `${a.country || '?'}${a.isp ? ' · ' + a.isp : ''}`;
+    row.append(proto, ip, meta);
+    feed.prepend(row);
+    while (feed.children.length > 14) feed.lastChild.remove();
+}
+
+function _initGlobe() {
+    return Globe()(globeEl)
     .globeImageUrl(pickTexture())
     .backgroundColor('rgba(0,0,0,0)')
     .showAtmosphere(!_isMobile)
@@ -208,6 +260,17 @@ const globe = Globe()(globeEl)
         pushAttack._t = setTimeout(() => card.classList.remove('hot'), 10000);
         centerGlobeOn(arc.startLat, arc.startLng);
     });
+}
+
+let globe;
+try {
+    globe = _initGlobe();
+} catch (e) {
+    console.warn('WebGL unavailable — globe fallback active:', e);
+    GLOBE_OK = false;
+    globe = _makeGlobeStub();
+    _globeFallbackInit();
+}
 
 globe.controls().autoRotate = true;
 globe.controls().autoRotateSpeed = 0.8;
@@ -342,6 +405,7 @@ function refreshCountryPolygons() {
 }
 
 async function loadCountryPolygons() {
+    if (!GLOBE_OK) return;     // fallback mód — bez WebGL nemá smysl stahovat geojson
     if (_countriesGeo) return; // already loaded, skip
     if (_isMobile) return;     // skip on mobile — 180 country meshes are too heavy
     try {
@@ -434,6 +498,7 @@ function pushAttack(a, isNew = true) {
     }
 
     if (!_globePaused) _scheduleGlobeFlush();
+    if (!GLOBE_OK) _globeFallbackPush(a); // 2D feed plní i historie ze snapshotu
 
     if (isNew) {
         const [r, g, b] = PROTO_RGB[proto] || _DEFAULT_RGB;
@@ -607,7 +672,9 @@ const RADAR_BLIP_TTL = 8000;
 
 function _radarFrame(ts) {
     requestAnimationFrame(_radarFrame);
-    if (!_radarCv || document.hidden || _activeTab !== 'threat') return;
+    if (!_radarCv || document.hidden) return;
+    // _activeTab žije v 04-topology.js — rAF může vystřelit před jeho načtením
+    if (typeof _activeTab !== 'undefined' && _activeTab !== 'threat') return;
     if (ts - _radarLast < 40) return; // ~25 fps stačí
     _radarLast = ts;
     const w = _radarCv.clientWidth, h = _radarCv.clientHeight;
