@@ -52,3 +52,6 @@ Thumbs.db
 
 # Logs
 *.log
+data/backups/
+data/reports/
+data/watchlist.json

@@ -62,6 +62,33 @@ function showToast({ title, body = '', color = 'var(--accent)', ttl = 6000, dedu
 }
 
 // ================================================================
+// BROWSER NOTIFIKACE — native Notification API, opt-in
+// ================================================================
+let _notifyEnabled = UIState.get('browser-notify', false);
+
+function browserNotifyEnabled() { return _notifyEnabled && Notification?.permission === 'granted'; }
+
+async function setBrowserNotify(on) {
+    if (on && Notification?.permission !== 'granted') {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') { _notifyEnabled = false; UIState.set('browser-notify', false); return false; }
+    }
+    _notifyEnabled = on;
+    UIState.set('browser-notify', on);
+    return on;
+}
+
+// Pošle native notifikaci jen když je záložka na pozadí (jinak stačí toast)
+function browserNotify(title, body) {
+    if (!browserNotifyEnabled() || !document.hidden) return;
+    try {
+        const n = new Notification('◤ ' + title, { body, tag: 'sentinel', renotify: false });
+        n.onclick = () => { window.focus(); n.close(); };
+        setTimeout(() => n.close(), 8000);
+    } catch {}
+}
+
+// ================================================================
 // VISUAL FX MODE — CRT flicker, glitch, hex-grid, přechody tabů
 // ================================================================
 function applyFx(on) {

@@ -214,13 +214,17 @@ function connectWS() {
             fetch('/api/devices').then(r => r.json()).then(renderDevices);
         } else if (m.type === 'log') {
             pushLog(m, true);
-            // Alerting engine + watchlist — výrazný toast a alarm
+            // Alerting engine + watchlist — výrazný toast, alarm, browser notifikace
             if (m.source === 'watchlist') {
                 showToast({ title: 'WATCHLIST HIT', body: m.msg, color: 'var(--yellow)', ttl: 10000 });
                 playBeep('alarm');
+                browserNotify('WATCHLIST HIT', m.msg);
             } else if (m.source === 'alerts') {
                 showToast({ title: 'ALERT', body: m.msg, color: 'var(--red)', ttl: 10000, dedupKey: 'al:' + m.msg });
                 playBeep('alarm');
+                browserNotify('ALERT', m.msg);
+            } else if (m.source === 'selftest' && m.level === 'warn') {
+                showToast({ title: 'SELF-TEST', body: m.msg, color: 'var(--yellow)', ttl: 8000, dedupKey: 'st:' + m.msg });
             }
         }
     };
@@ -352,6 +356,14 @@ function _cfgThemeBlock() {
             <label class="cfg-toggle">
                 <input type="checkbox"${UIState.get('sound', false)?' checked':''}
                        onchange="setSound(this.checked)">
+                <span class="cfg-toggle-slider"></span>
+            </label>
+        </div>
+        <div class="cfg-toggle-row" style="margin-bottom:10px;">
+            <span class="cfg-toggle-label">BROWSER NOTIFIKACE <span style="color:var(--muted);font-weight:400;">(alerty i na pozadí)</span></span>
+            <label class="cfg-toggle">
+                <input type="checkbox"${UIState.get('browser-notify', false)?' checked':''}
+                       onchange="setBrowserNotify(this.checked).then(ok=>{if(!ok)this.checked=false;})">
                 <span class="cfg-toggle-slider"></span>
             </label>
         </div>
@@ -537,6 +549,10 @@ $('cfg-test').addEventListener('click', async () => {
 });
 
 $('cfg-export').addEventListener('click', () => { window.location.href = '/api/config/export'; });
+$('cfg-backup')?.addEventListener('click', () => {
+    showResult(true, 'Připravuji zálohu DB…');
+    window.location.href = '/api/backup';
+});
 
 setInterval(() => { hudClock.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }, 1000);
 setInterval(loadStatic, 60000);

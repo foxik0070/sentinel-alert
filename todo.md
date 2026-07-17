@@ -111,3 +111,19 @@ Původní TODO z CLAUDE.md (MikroTik #2, Threat map #3, PiHole #5, dokumentace #
 - [x] **Export CSV/JSON** — z DB vieweru i IP intel karty
 - [x] **PWA / installable** — manifest.json + service worker, offline shell
 - [x] **Dashboard souhrn** — horní přehledový pruh (dnes vs. včera, top vektor, online, block %)
+
+---
+
+## Třetí vlna námětů (schváleno)
+
+### Provoz / integrace
+- [x] **Prometheus /metrics** — útoky podle vektoru, zařízení online, PiHole, uptime
+- [x] **Backup & restore DB** — download zálohy alerts.db + noční auto-záloha s retencí
+- [x] **Config self-test na startu** — ověřit PiHole/MikroTik/proxy/collector hosty, do logu + /healthz
+- [x] **Browser notifikace** — native Notification API, opt-in, watchlist/host offline
+
+### Bezpečnost / display
+- [ ] **2FA / TOTP login** — volitelné, QR setup v Settings, ověření po hesle
+- [ ] **Kiosk / auto-cycle** — cyklení tabů, skrytí ovládání, wake-lock (?kiosk)
+- [ ] **Anomaly alert (spike)** — detekce náhlého nárůstu útoků → toast + push
+- [ ] **Read-only API token** — token pro read-only /api přístup, správa v Settings

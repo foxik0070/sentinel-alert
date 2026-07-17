@@ -353,7 +353,7 @@ async def lifespan(app: FastAPI):
         while True:
             now = datetime.now()
             jobs = []
-            for hh, mm, kind in ((4, 30, "db"), (6, 0, "report")):
+            for hh, mm, kind in ((4, 0, "backup"), (4, 30, "db"), (6, 0, "report")):
                 t = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
                 if t <= now:
                     t += timedelta(days=1)
@@ -370,6 +370,14 @@ async def lifespan(app: FastAPI):
                     conn.execute("VACUUM")
                     conn.close()
                     msg = f"DB maintenance: pruned {n1} attacks, {n2} bans (retention {conf.DB_RETENTION_DAYS}d), VACUUM done"
+                elif kind == "backup":
+                    path = await asyncio.to_thread(_make_db_backup)
+                    # retence: nech posledních 7 záloh
+                    backs = sorted(f for f in os.listdir(BACKUP_DIR) if f.endswith(".db"))
+                    for old in backs[:-7]:
+                        os.remove(os.path.join(BACKUP_DIR, old))
+                    size_mb = os.path.getsize(path) / 1e6
+                    msg = f"DB backup: {os.path.basename(path)} ({size_mb:.1f} MB), keeping last 7"
                 else:
                     os.makedirs(REPORTS_DIR, exist_ok=True)
                     name = f"report-{datetime.now():%Y-%m-%d}.html"
@@ -400,11 +408,62 @@ async def lifespan(app: FastAPI):
     ]
     _log_buffer.append({"type": "log", "level": "good", "source": "system",
                         "ts": datetime.now().isoformat(), "msg": "Sentinel-Alert online"})
+    asyncio.create_task(_config_selftest())
     try:
         yield
     finally:
         for t in bg:
             t.cancel()
+
+
+# Výsledek self-testu konfigurace (naplní _config_selftest, čte /healthz)
+_selftest: dict = {"ran": False, "checks": []}
+
+
+async def _tcp_ok(host: str, port: int, timeout: float = 4.0) -> bool:
+    try:
+        fut = asyncio.open_connection(host, port)
+        reader, writer = await asyncio.wait_for(fut, timeout=timeout)
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+async def _config_selftest():
+    """Po startu ověří dostupnost nakonfigurovaných hostů; výsledek do logu + /healthz."""
+    await asyncio.sleep(5)  # nech moduly nastartovat
+    checks = []
+
+    async def _check(name: str, enabled: bool, host: str, port: int):
+        if not enabled or not host:
+            return
+        ok = await _tcp_ok(host, port)
+        checks.append({"name": name, "host": f"{host}:{port}", "ok": ok})
+        if not ok:
+            _log_buffer.append({
+                "type": "log", "level": "warn", "source": "selftest",
+                "ts": datetime.now().isoformat(),
+                "msg": f"SELF-TEST: {name} nedostupný ({host}:{port})"})
+
+    await _check("mikrotik", bool(conf.MIKROTIK_HOST), conf.MIKROTIK_HOST, 22)
+    await _check("proxy", bool(conf.PROXY_SERVER), conf.PROXY_SERVER, 22)
+    for h in conf.PIHOLE_HOSTS:
+        await _check(f"pihole:{h}", True, h, 443)
+
+    _selftest["ran"] = True
+    _selftest["checks"] = checks
+    _selftest["ts"] = datetime.now().isoformat()
+    bad = [c["name"] for c in checks if not c["ok"]]
+    _log_buffer.append({
+        "type": "log", "level": "warn" if bad else "good", "source": "selftest",
+        "ts": datetime.now().isoformat(),
+        "msg": (f"SELF-TEST: {len(bad)} host(ů) nedostupných — {', '.join(bad)}"
+                if bad else f"SELF-TEST: všech {len(checks)} hostů OK")})
 
 
 _START_TIME = time.time()
@@ -468,6 +527,7 @@ def healthz():
                 "mikrotik": bool(conf.MIKROTIK_HOST),
                 "ws_clients": len(_clients),
             },
+            "selftest": _selftest,
         },
         status_code=200 if ok else 503,
     )
@@ -1308,6 +1368,90 @@ def export_table(table: str, request: Request, fmt: str = "csv", ip: str = ""):
     return Response(
         buf.getvalue(), media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{base}.csv"'})
+
+
+BACKUP_DIR = os.path.join(BASE_DIR, "data", "backups")
+
+
+def _make_db_backup() -> str:
+    """Konzistentní SQLite .backup do BACKUP_DIR. Vrací cestu k souboru."""
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = os.path.join(BACKUP_DIR, f"alerts-{stamp}.db")
+    src = sqlite3.connect(DB_PATH)
+    try:
+        dst = sqlite3.connect(dest)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+    return dest
+
+
+@app.get("/api/backup")
+def backup_download(request: Request):
+    """Vytvoří a stáhne konzistentní zálohu DB (SQLite .backup)."""
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    path = _make_db_backup()
+    _audit(_client_ip(request), "db_backup", os.path.basename(path))
+    return FileResponse(path, media_type="application/octet-stream",
+                        filename=os.path.basename(path))
+
+
+@app.get("/metrics")
+def metrics():
+    """Prometheus expozice — text/plain, bez auth (typicky za reverse proxy)."""
+    def _cnt(sql, p=()):
+        r = _query(sql, p)
+        return r[0]["n"] if r else 0
+
+    lines = [
+        "# HELP sentinel_uptime_seconds Process uptime.",
+        "# TYPE sentinel_uptime_seconds gauge",
+        f"sentinel_uptime_seconds {int(time.time() - _START_TIME)}",
+        "# HELP sentinel_attacks_total Attacks recorded, by vector.",
+        "# TYPE sentinel_attacks_total counter",
+    ]
+    for row in _query(
+            "SELECT COALESCE(protocol,'unknown') AS p, COUNT(*) AS n FROM attacks GROUP BY p"):
+        proto = str(row["p"]).replace('"', "").replace("\\", "")
+        lines.append(f'sentinel_attacks_total{{vector="{proto}"}} {row["n"]}')
+
+    today = _cnt("SELECT COUNT(*) AS n FROM attacks WHERE ts >= datetime('now','start of day')")
+    last1h = _cnt("SELECT COUNT(*) AS n FROM attacks WHERE ts >= datetime('now','-1 hour')")
+    dev = _query("SELECT COUNT(*) AS total, COALESCE(SUM(is_online),0) AS online FROM devices")
+    devrow = dev[0] if dev else {"total": 0, "online": 0}
+    ph = pihole.data_store.get("instances", {})
+    ph_conn = sum(1 for i in ph.values() if i.get("connected"))
+    primary = next((i for i in ph.values() if i.get("primary") and i.get("connected")),
+                   next((i for i in ph.values() if i.get("connected")), None))
+    ph_pct = (primary or {}).get("stats", {}).get("percent_blocked", 0) or 0
+
+    lines += [
+        "# HELP sentinel_attacks_today Attacks since local midnight.",
+        "# TYPE sentinel_attacks_today gauge",
+        f"sentinel_attacks_today {today}",
+        "# HELP sentinel_attacks_last_hour Attacks in the last hour.",
+        "# TYPE sentinel_attacks_last_hour gauge",
+        f"sentinel_attacks_last_hour {last1h}",
+        "# HELP sentinel_devices Devices by online state.",
+        "# TYPE sentinel_devices gauge",
+        f'sentinel_devices{{state="online"}} {devrow["online"]}',
+        f'sentinel_devices{{state="total"}} {devrow["total"]}',
+        "# HELP sentinel_pihole_instances_connected Connected PiHole instances.",
+        "# TYPE sentinel_pihole_instances_connected gauge",
+        f"sentinel_pihole_instances_connected {ph_conn}",
+        "# HELP sentinel_pihole_block_percent Primary PiHole block %.",
+        "# TYPE sentinel_pihole_block_percent gauge",
+        f"sentinel_pihole_block_percent {ph_pct}",
+        "# HELP sentinel_ws_clients Connected WebSocket clients.",
+        "# TYPE sentinel_ws_clients gauge",
+        f"sentinel_ws_clients {len(_clients)}",
+    ]
+    return Response("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
 @app.get("/api/stats/summary")
