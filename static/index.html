@@ -764,6 +764,8 @@
         <div style="display:flex;gap:8px;align-items:center;padding:8px 0 6px;">
             <input id="dbv-search" type="text" placeholder="Search…" style="flex:1;background:#0c2024;border:1px solid #1f4a52;color:var(--accent);padding:4px 8px;font-size:11px;font-family:inherit;">
             <span id="dbv-count" style="color:var(--muted);font-size:10px;white-space:nowrap;min-width:80px;text-align:right;"></span>
+            <button class="btn" id="dbv-export-csv" onclick="dbvExport('csv')" style="font-size:10px;padding:3px 10px;">⬇ CSV</button>
+            <button class="btn" id="dbv-export-json" onclick="dbvExport('json')" style="font-size:10px;padding:3px 10px;">⬇ JSON</button>
             <button class="btn danger" id="dbv-delete-btn" onclick="dbvDeleteSelected()" style="font-size:10px;padding:3px 10px;display:none;">DELETE SELECTED</button>
         </div>
         <div style="flex:1;overflow:auto;">

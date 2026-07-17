@@ -336,6 +336,7 @@ async function ipIntelOpen(ip) {
         <button class="btn" id="ipm-globe-btn">◎ GLOBE</button>
         <a class="btn" href="https://www.abuseipdb.com/check/${ip}" target="_blank" style="text-decoration:none;">ABUSEIPDB ⧉</a>
         <a class="btn" href="https://bgp.he.net/ip/${ip}" target="_blank" style="text-decoration:none;">WHOIS ⧉</a>
+        <a class="btn" href="/api/export/attacks?fmt=csv&ip=${encodeURIComponent(ip)}" style="text-decoration:none;">⬇ CSV</a>
         <button class="btn" id="ipm-copy-btn">⎘ COPY</button>`;
 
     $('ipm-watch-btn').addEventListener('click', async () => {

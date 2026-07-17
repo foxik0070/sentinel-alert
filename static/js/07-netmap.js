@@ -816,6 +816,16 @@ async function dbvDeleteSelected() {
     }
 }
 
+// Export aktuální tabulky do CSV/JSON (logs jsou jen in-memory buffer — bez exportu)
+function dbvExport(fmt) {
+    const EXPORTABLE = new Set(['attacks', 'ban_history', 'devices', 'active_users', 'audit_log']);
+    if (!EXPORTABLE.has(_dbv.table)) {
+        showToast({ title: 'EXPORT N/A', body: `Tabulka „${_dbv.table}" nejde exportovat`, color: 'var(--muted)' });
+        return;
+    }
+    window.location.href = `/api/export/${_dbv.table}?fmt=${fmt}`;
+}
+
 let _dbvSearchTimer = null;
 $('dbv-search').addEventListener('input', e => {
     clearTimeout(_dbvSearchTimer);

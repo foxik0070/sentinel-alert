@@ -1265,6 +1265,38 @@ async def mikrotik_rule_toggle(payload: dict = Body(...)):
 REPORTS_DIR = os.path.join(BASE_DIR, "data", "reports")
 
 
+@app.get("/api/export/{table}")
+def export_table(table: str, request: Request, fmt: str = "csv", ip: str = ""):
+    """Export attacks/ban_history/devices do CSV/JSON. `ip` filtruje útoky dané IP."""
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    if table not in _DB_TABLES:
+        return JSONResponse({"error": "unknown table"}, 400)
+    _, cols = _DB_TABLES[table]
+    ip_col = {"attacks": "src_ip", "ban_history": "ip"}.get(table)
+    where, params = "", []
+    if ip and ip_col:
+        where = f" WHERE {ip_col} = ?"
+        params = [ip]
+    rows = _query(f"SELECT {', '.join(cols)} FROM {table}{where} LIMIT 50000", params)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    base = f"{table}{'-' + ip if ip else ''}-{stamp}"
+    if fmt == "json":
+        return Response(
+            _json_mod.dumps(rows, indent=1, default=str),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{base}.json"'})
+    # CSV
+    import csv, io
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+    w.writeheader()
+    w.writerows(rows)
+    return Response(
+        buf.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{base}.csv"'})
+
+
 @app.get("/api/stats/summary")
 def stats_summary():
     """Přehledový pruh — dnes vs. včera, top vektor, zařízení, hot country."""
