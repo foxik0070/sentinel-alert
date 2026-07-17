@@ -29,6 +29,7 @@ import mikrotik
 import pihole
 import proxy_monitor
 import tasks
+import totp
 import workmode
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -593,8 +594,22 @@ def _verify_token(token: str | None) -> bool:
         return False
 
 
-def _is_authed(request: Request) -> bool:
-    return _verify_token(request.cookies.get(_AUTH_COOKIE))
+def _has_api_token(request: Request) -> bool:
+    """Read-only API token z hlavičky X-API-Token nebo query ?token=."""
+    if not conf.AUTH_API_TOKEN:
+        return False
+    tok = request.headers.get("X-API-Token") or request.query_params.get("token") or ""
+    return bool(tok) and hmac.compare_digest(tok, conf.AUTH_API_TOKEN)
+
+
+def _is_authed(request: Request, allow_token: bool = True) -> bool:
+    """Plný přístup přes session cookie. Read-only API token platí jen pro GET
+    a jen na endpointech, které povolí allow_token (ne backup/config/export)."""
+    if _verify_token(request.cookies.get(_AUTH_COOKIE)):
+        return True
+    if allow_token and request.method == "GET" and _has_api_token(request):
+        return True
+    return False
 
 
 def _client_ip(request: Request) -> str:
@@ -631,6 +646,17 @@ def login(request: Request, payload: dict = Body(...), response: Response = None
                             status_code=429)
     if (payload.get("username") == conf.AUTH_USERNAME
             and payload.get("password") == conf.AUTH_PASSWORD):
+        # 2FA — pokud je nastaven TOTP secret, vyžádat kód
+        if conf.AUTH_TOTP_SECRET:
+            code = str(payload.get("totp", "")).strip()
+            if not code:
+                return JSONResponse({"ok": False, "totp_required": True}, status_code=401)
+            if not totp.verify(conf.AUTH_TOTP_SECRET, code):
+                attempts.append(now)
+                _login_attempts[ip] = attempts
+                _audit(ip, "login_totp_fail", payload.get("username", ""))
+                return JSONResponse({"ok": False, "totp_required": True,
+                                     "error": "Invalid 2FA code"}, status_code=401)
         token = _make_token()
         response.set_cookie(_AUTH_COOKIE, token, max_age=_TOKEN_TTL, httponly=True, samesite="lax")
         _login_attempts.pop(ip, None)
@@ -640,6 +666,96 @@ def login(request: Request, payload: dict = Body(...), response: Response = None
     _login_attempts[ip] = attempts
     _audit(ip, "login_fail", payload.get("username", ""))
     return JSONResponse({"ok": False, "error": "Invalid credentials"}, status_code=401)
+
+
+# ── 2FA (TOTP) + read-only API token ──────────────────────────────────────────
+_pending_totp: dict = {}  # jednorázový setup secret před potvrzením kódem
+
+
+@app.get("/api/2fa/status")
+def totp_status(request: Request):
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    return {"enabled": bool(conf.AUTH_TOTP_SECRET)}
+
+
+@app.post("/api/2fa/setup")
+def totp_setup(request: Request):
+    """Vygeneruje nový secret (zatím neuloží) + otpauth URI pro QR/ruční zadání."""
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    secret = totp.generate_secret()
+    _pending_totp[conf.AUTH_USERNAME] = secret
+    return {"secret": secret,
+            "uri": totp.provisioning_uri(secret, conf.AUTH_USERNAME)}
+
+
+@app.post("/api/2fa/enable")
+def totp_enable(request: Request, payload: dict = Body(...)):
+    """Potvrdí setup ověřením prvního kódu a uloží secret do konfigurace."""
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    secret = _pending_totp.get(conf.AUTH_USERNAME)
+    if not secret:
+        return JSONResponse({"ok": False, "error": "Spusť nejdřív setup"}, status_code=400)
+    if not totp.verify(secret, str(payload.get("code", ""))):
+        return JSONResponse({"ok": False, "error": "Neplatný kód"}, status_code=400)
+    _set_conf_value("auth", "totp_secret", secret)
+    conf.AUTH_TOTP_SECRET = secret
+    _pending_totp.pop(conf.AUTH_USERNAME, None)
+    _audit(_client_ip(request), "2fa_enabled", "")
+    return {"ok": True}
+
+
+@app.post("/api/2fa/disable")
+def totp_disable(request: Request):
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    _set_conf_value("auth", "totp_secret", "")
+    conf.AUTH_TOTP_SECRET = ""
+    _audit(_client_ip(request), "2fa_disabled", "")
+    return {"ok": True}
+
+
+@app.get("/api/token")
+def api_token_get(request: Request):
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    return {"token": conf.AUTH_API_TOKEN or None}
+
+
+@app.post("/api/token/generate")
+def api_token_generate(request: Request):
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    tok = os.urandom(24).hex()
+    _set_conf_value("auth", "api_token", tok)
+    conf.AUTH_API_TOKEN = tok
+    _audit(_client_ip(request), "api_token_generated", "")
+    return {"token": tok}
+
+
+@app.post("/api/token/revoke")
+def api_token_revoke(request: Request):
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    _set_conf_value("auth", "api_token", "")
+    conf.AUTH_API_TOKEN = ""
+    _audit(_client_ip(request), "api_token_revoked", "")
+    return {"ok": True}
+
+
+def _set_conf_value(section: str, key: str, value: str):
+    """Zapíše jednu hodnotu do INI konfigurace (persistentní)."""
+    import configparser
+    c = configparser.ConfigParser(interpolation=None)
+    c.read(conf.CONF_PATH)
+    if not c.has_section(section):
+        c.add_section(section)
+    c.set(section, key, value)
+    os.makedirs(os.path.dirname(conf.CONF_PATH), exist_ok=True)
+    with open(conf.CONF_PATH, "w") as f:
+        c.write(f)
 
 
 @app.post("/api/logout")
@@ -828,7 +944,7 @@ def get_logs(limit: int = 200):
 
 @app.get("/api/config/full")
 def config_full(request: Request):
-    if not _is_authed(request):
+    if not _is_authed(request, allow_token=False):
         return JSONResponse({"error": "unauthorized"}, 401)
     import configparser
     c = configparser.ConfigParser(interpolation=None)
@@ -869,7 +985,7 @@ async def config_update(request: Request, payload: dict = Body(...)):
 
 @app.get("/api/config/export")
 def config_export(request: Request):
-    if not _is_authed(request):
+    if not _is_authed(request, allow_token=False):
         return JSONResponse({"error": "unauthorized"}, 401)
     from fastapi.responses import FileResponse as FR
     if os.path.exists(conf.CONF_PATH):
@@ -1375,7 +1491,7 @@ REPORTS_DIR = os.path.join(BASE_DIR, "data", "reports")
 @app.get("/api/export/{table}")
 def export_table(table: str, request: Request, fmt: str = "csv", ip: str = ""):
     """Export attacks/ban_history/devices do CSV/JSON. `ip` filtruje útoky dané IP."""
-    if not _is_authed(request):
+    if not _is_authed(request, allow_token=False):
         return JSONResponse({"error": "unauthorized"}, 401)
     if table not in _DB_TABLES:
         return JSONResponse({"error": "unknown table"}, 400)
@@ -1427,7 +1543,7 @@ def _make_db_backup() -> str:
 @app.get("/api/backup")
 def backup_download(request: Request):
     """Vytvoří a stáhne konzistentní zálohu DB (SQLite .backup)."""
-    if not _is_authed(request):
+    if not _is_authed(request, allow_token=False):
         return JSONResponse({"error": "unauthorized"}, 401)
     path = _make_db_backup()
     _audit(_client_ip(request), "db_backup", os.path.basename(path))

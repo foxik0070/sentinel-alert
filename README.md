@@ -54,6 +54,15 @@ Additional capabilities:
   globe textures self-hosted (no external CDN); gzip on large JSON responses
 - **WebGL fallback** — if the browser can't create a WebGL context, the globe panel
   shows a 2D live attack feed and the rest of the dashboard keeps working
+- **Prometheus metrics** — `GET /metrics` (attacks by vector, devices, PiHole, uptime)
+- **DB backup** — one-click download + nightly auto-backup (keeps last 7)
+- **Config self-test** — on startup checks MikroTik/proxy/PiHole reachability
+- **Browser notifications** — native alerts even when the tab is in the background (opt-in)
+- **Attack spike detection** — anomaly watcher flags sudden bursts (≥3× baseline)
+- **Kiosk mode** — `?kiosk` (or `?kiosk=30`) auto-cycles tabs with a wake-lock for wall displays
+- **2FA (TOTP)** — optional, RFC 6238, works with Google/Aegis Authenticator; setup in Settings
+- **Read-only API token** — grants GET `/api` access (dashboard embeds, scripts) without
+  sharing the password; excludes backup/config/export; managed in Settings
 
 ---
 
@@ -142,6 +151,10 @@ username = admin
 password = admin
 # HMAC secret for session tokens — leave blank to auto-generate on each start
 secret   =
+# 2FA (TOTP) — managed from Settings; blank = disabled
+totp_secret =
+# Read-only API token — managed from Settings; blank = disabled
+api_token   =
 
 [mode]
 # Deployment mode: "home" (default) or "work"
@@ -534,6 +547,11 @@ All endpoints returning sensitive data require authentication (session cookie).
 | GET | `/healthz` | no | Health check — DB, modules, uptime |
 | GET | `/api/stats/summary` | no | Dashboard summary — today vs. yesterday, top vector, hot zone |
 | GET | `/api/export/{table}` | yes | Export table to CSV/JSON (`fmt`, optional `ip` filter) |
+| GET | `/metrics` | no | Prometheus metrics exposition |
+| GET | `/api/backup` | yes | Download a consistent SQLite backup |
+| GET | `/api/2fa/status` | yes | Whether TOTP 2FA is enabled |
+| POST | `/api/2fa/setup` `enable` `disable` | yes | TOTP setup / confirm / disable |
+| GET/POST | `/api/token`, `/api/token/generate\|revoke` | yes | Read-only API token management |
 | WS | `/ws/live` | no | Live event stream |
 
 ---

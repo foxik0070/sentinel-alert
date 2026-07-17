@@ -378,6 +378,85 @@ function _cfgThemeBlock() {
     </div>`;
 }
 
+function _cfgSecurityBlock() {
+    setTimeout(_cfgSecRender, 50);
+    return `
+    <div class="cfg-field-group">
+        <div class="cfg-field-group-title">SECURITY — 2FA & API TOKEN</div>
+        <div id="cfg-2fa-box" style="padding:4px 0 8px;font-size:11px;color:var(--muted);">Načítám…</div>
+        <div id="cfg-token-box" style="padding:4px 0 8px;font-size:11px;color:var(--muted);border-top:1px dashed var(--border);margin-top:6px;"></div>
+    </div>`;
+}
+
+async function _cfgSecRender() {
+    const box = $('cfg-2fa-box'), tbox = $('cfg-token-box');
+    if (!box) return;
+    const st = await fetch('/api/2fa/status').then(r => r.json()).catch(() => ({}));
+    if (st.enabled) {
+        box.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;">
+            <span style="color:var(--green);">✓ 2FA (TOTP) je aktivní</span>
+            <button class="btn ghost" style="color:var(--red);font-size:10px;" onclick="_cfg2faDisable()">VYPNOUT</button></div>`;
+    } else {
+        box.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;">
+            <span>2FA (TOTP) vypnuté</span>
+            <button class="btn" style="font-size:10px;" onclick="_cfg2faSetup()">NASTAVIT 2FA</button></div>
+            <div id="cfg-2fa-setup"></div>`;
+    }
+    const tk = await fetch('/api/token').then(r => r.json()).catch(() => ({}));
+    tbox.innerHTML = `<div style="font-size:9px;letter-spacing:1px;color:var(--muted);margin-bottom:4px;">READ-ONLY API TOKEN <span style="color:var(--muted);">(GET /api, ne backup/config)</span></div>`
+        + (tk.token
+            ? `<div style="display:flex;gap:6px;align-items:center;">
+                 <input readonly value="${escape(tk.token)}" style="flex:1;background:var(--input-bg);border:1px solid var(--border);color:var(--fg);padding:4px 8px;font-family:monospace;font-size:10px;">
+                 <button class="btn" style="font-size:9px;" onclick="navigator.clipboard?.writeText('${escape(tk.token)}');this.textContent='✓'">⎘</button>
+                 <button class="btn ghost" style="color:var(--red);font-size:9px;" onclick="_cfgTokenRevoke()">REVOKE</button></div>`
+            : `<button class="btn" style="font-size:10px;" onclick="_cfgTokenGen()">VYGENEROVAT TOKEN</button>`);
+}
+
+async function _cfg2faSetup() {
+    const d = await fetch('/api/2fa/setup', { method: 'POST' }).then(r => r.json());
+    const el = $('cfg-2fa-setup');
+    if (!el || !d.secret) return;
+    el.innerHTML = `<div style="margin-top:8px;padding:8px;background:var(--input-bg);border:1px solid var(--border-2);">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">1) Přidej do authenticatoru (secret nebo otpauth URI):</div>
+        <div style="font-family:monospace;font-size:12px;color:var(--yellow);word-break:break-all;margin-bottom:6px;">${escape(d.secret)}</div>
+        <div style="font-size:9px;color:var(--muted);word-break:break-all;margin-bottom:8px;">${escape(d.uri)}</div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">2) Zadej vygenerovaný kód pro potvrzení:</div>
+        <div style="display:flex;gap:6px;">
+            <input id="cfg-2fa-code" type="text" inputmode="numeric" maxlength="6" placeholder="000000"
+                style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--fg);padding:5px 8px;font-family:monospace;font-size:14px;letter-spacing:4px;text-align:center;">
+            <button class="btn primary" style="font-size:10px;" onclick="_cfg2faEnable()">POTVRDIT</button>
+        </div>
+        <div id="cfg-2fa-err" style="font-size:10px;color:var(--red);min-height:14px;margin-top:4px;"></div>
+    </div>`;
+    $('cfg-2fa-code')?.focus();
+}
+
+async function _cfg2faEnable() {
+    const code = $('cfg-2fa-code')?.value || '';
+    const r = await fetch('/api/2fa/enable', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+    }).then(x => x.json()).catch(() => ({}));
+    if (r.ok) { showToast({ title: '2FA AKTIVOVÁNO', color: 'var(--green)' }); _cfgSecRender(); }
+    else { const e = $('cfg-2fa-err'); if (e) e.textContent = r.error || 'Chyba'; }
+}
+
+async function _cfg2faDisable() {
+    if (!confirm('Vypnout 2FA?')) return;
+    await fetch('/api/2fa/disable', { method: 'POST' });
+    showToast({ title: '2FA VYPNUTO', color: 'var(--yellow)' });
+    _cfgSecRender();
+}
+
+async function _cfgTokenGen() {
+    await fetch('/api/token/generate', { method: 'POST' });
+    _cfgSecRender();
+}
+async function _cfgTokenRevoke() {
+    await fetch('/api/token/revoke', { method: 'POST' });
+    _cfgSecRender();
+}
+
 function _cfgWatchlistBlock() {
     // seznam se plní async po vykreslení (viz _cfgWlRender)
     setTimeout(_cfgWlRender, 50);
@@ -501,7 +580,7 @@ async function openSettings() {
     const isWork = _workMode;
     const tabs = [
         { id: 'status',      label: 'STATUS',      html: statusPane },
-        { id: 'system',      label: 'SYSTEM',      html: _cfgThemeBlock() + _cfgWatchlistBlock() + _cfgGroup('SYSTEM', ['server','auth','alerts'], data) },
+        { id: 'system',      label: 'SYSTEM',      html: _cfgThemeBlock() + _cfgSecurityBlock() + _cfgWatchlistBlock() + _cfgGroup('SYSTEM', ['server','auth','alerts'], data) },
         { id: 'network',     label: 'NETWORK',     html: _cfgGroup('NETWORK',     ['home','scanner','mikrotik','pihole'], data), homeOnly: true },
         { id: 'security',    label: 'SECURITY',    html: _cfgGroup('SECURITY',    ['honeypot','security_center','threat'], data) },
         { id: 'connectivity',label: 'CONNECTIVITY',html: _cfgGroup('CONNECTIVITY',['sentinel','proxy','collector'], data) },
@@ -650,21 +729,30 @@ _loginSubmit.addEventListener('click', async () => {
     _loginErr.textContent = '';
     _loginSubmit.disabled = true;
     _loginSubmit.textContent = '…';
+    const body = { username: $('login-user').value, password: $('login-pass').value };
+    const totpEl = $('login-totp');
+    if (totpEl && totpEl.value) body.totp = totpEl.value;
     const r = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: $('login-user').value, password: $('login-pass').value }),
+        body: JSON.stringify(body),
     }).then(x => x.json()).catch(() => ({ ok: false, error: 'Network error' }));
     _loginSubmit.disabled = false;
     _loginSubmit.textContent = 'LOGIN';
     if (r.ok) {
+        if (totpEl) totpEl.style.display = 'none';
         applyAuthState(true);
         applyTabVisibility(_lastCfg);
+    } else if (r.totp_required) {
+        // Zobraz pole pro 2FA kód
+        if (totpEl) { totpEl.style.display = ''; totpEl.focus(); }
+        _loginErr.textContent = r.error || 'Zadej 2FA kód z authenticatoru';
     } else {
         _loginErr.textContent = r.error || 'Invalid credentials';
     }
 });
 $('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') _loginSubmit.click(); });
+$('login-totp')?.addEventListener('keydown', e => { if (e.key === 'Enter') _loginSubmit.click(); });
 
 $('logout-btn').addEventListener('click', async () => {
     await fetch('/api/logout', { method: 'POST' });

@@ -25,6 +25,8 @@
                 style="background:#0a1418;border:1px solid #1a4046;color:var(--fg);padding:7px 10px;font-family:inherit;font-size:12px;outline:none;letter-spacing:1px;">
             <input id="login-pass" type="password" placeholder="PASSWORD" autocomplete="current-password"
                 style="background:#0a1418;border:1px solid #1a4046;color:var(--fg);padding:7px 10px;font-family:inherit;font-size:12px;outline:none;letter-spacing:1px;">
+            <input id="login-totp" type="text" inputmode="numeric" maxlength="6" placeholder="2FA CODE (6 číslic)" autocomplete="one-time-code"
+                style="display:none;background:#0a1418;border:1px solid var(--yellow);color:var(--fg);padding:7px 10px;font-family:inherit;font-size:14px;outline:none;letter-spacing:4px;text-align:center;">
             <div id="login-err" style="font-size:10px;color:var(--red);min-height:14px;"></div>
             <button id="login-submit" class="btn primary" style="width:100%;">LOGIN</button>
         </div>

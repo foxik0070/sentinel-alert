@@ -33,6 +33,8 @@ SERVER_PORT = _i("server", "port", 5056)
 AUTH_USERNAME = _s("auth", "username", "admin")
 AUTH_PASSWORD = _s("auth", "password", "admin")
 AUTH_SECRET   = _s("auth", "secret",   "") or os.urandom(32).hex()
+AUTH_TOTP_SECRET = _s("auth", "totp_secret", "")          # prázdné = 2FA vypnuté
+AUTH_API_TOKEN   = _s("auth", "api_token",   "")          # read-only token pro GET /api
 
 # [home]
 HOME_LAT = _f("home", "lat", 0.0)   # 0.0 = auto-detect from public IP
