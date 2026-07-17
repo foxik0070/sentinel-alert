@@ -151,12 +151,17 @@ async function loadBlocklist() {
     } catch {}
 }
 
+let _wsRetries = 0;
+let _wsReconnectTimer = null;
+
 function connectWS() {
+    clearTimeout(_wsReconnectTimer);
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${proto}//${location.host}/ws/live`);
     ws.onopen = () => {
         if (wsStatusEl.textContent === 'OFFLINE')
             showToast({ title: 'SYS LINK RESTORED', color: 'var(--green)', ttl: 4000 });
+        _wsRetries = 0;
         document.body.classList.remove('sys-offline');
         wsStatusEl.textContent = 'ONLINE'; wsStatusEl.classList.add('live');
     };
@@ -166,13 +171,21 @@ function connectWS() {
             playBeep('alarm');
         }
         document.body.classList.add('sys-offline');
-        wsStatusEl.textContent = 'OFFLINE'; wsStatusEl.classList.remove('live'); setTimeout(connectWS, 3000);
+        wsStatusEl.textContent = 'OFFLINE'; wsStatusEl.classList.remove('live');
+        // Exponenciální backoff 1→30 s + jitter; server po připojení pošle fresh snapshot
+        const base = Math.min(30000, 1000 * 2 ** Math.min(_wsRetries, 5));
+        const delay = base + Math.random() * 1000;
+        _wsRetries++;
+        _wsReconnectTimer = setTimeout(connectWS, delay);
     };
     ws.onerror = () => ws.close();
     ws.onmessage = (ev) => {
         const m = JSON.parse(ev.data);
         if (m.type === 'snapshot') {
             _globePaused = true; _histPaused = true;
+            // Re-sync: vyčisti stav, aby snapshot po reconnectu nezdvojoval data
+            arcs.length = 0; arcTimestamps.length = 0; points.length = 0; labels.length = 0;
+            _attackHistory = []; _ipCounts.clear();
             // Per-type quota: each type gets MAX_ARCS/3 slots so all are visible
             const _q = Math.floor(MAX_ARCS / 3);
             (m.bans          || []).slice(-_q).forEach(b => { pushAttack(b, false); pushAttackHistory(b); });

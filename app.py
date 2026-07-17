@@ -407,7 +407,72 @@ async def lifespan(app: FastAPI):
             t.cancel()
 
 
+_START_TIME = time.time()
+
 app = FastAPI(lifespan=lifespan)
+
+# GZip velké JSON odpovědi (fsc/data, pihole, trends…)
+from fastapi.middleware.gzip import GZipMiddleware
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+
+# Bezpečnostní hlavičky na všechny odpovědi. CSP je volnější kvůli inline
+# stylům/skriptům a globe textuře z unpkg.com — utažení by chtělo refaktor.
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Referrer-Policy": "no-referrer",
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "img-src 'self' data: https:; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self' ws: wss: https:; "
+        "frame-ancestors 'self'"
+    ),
+}
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    for k, v in _SECURITY_HEADERS.items():
+        resp.headers.setdefault(k, v)
+    return resp
+
+
+@app.get("/healthz")
+def healthz():
+    """Health check pro monitoring — DB, moduly, uptime. Bez auth."""
+    db_ok = False
+    attacks = devices = 0
+    try:
+        rows = _query("SELECT (SELECT COUNT(*) FROM attacks) AS a, "
+                      "(SELECT COUNT(*) FROM devices) AS d")
+        attacks, devices = rows[0]["a"], rows[0]["d"]
+        db_ok = True
+    except Exception:
+        pass
+    ph = pihole.data_store.get("instances", {})
+    ph_connected = sum(1 for i in ph.values() if i.get("connected"))
+    ok = db_ok
+    return JSONResponse(
+        {
+            "status": "ok" if ok else "degraded",
+            "uptime_s": int(time.time() - _START_TIME),
+            "db": {"ok": db_ok, "attacks": attacks, "devices": devices},
+            "modules": {
+                "honeypot": True,
+                "pihole_instances": len(ph),
+                "pihole_connected": ph_connected,
+                "mikrotik": bool(conf.MIKROTIK_HOST),
+                "ws_clients": len(_clients),
+            },
+        },
+        status_code=200 if ok else 503,
+    )
+
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # ── Auth helpers ──────────────────────────────────────────────────────────────

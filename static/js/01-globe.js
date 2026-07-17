@@ -113,8 +113,9 @@ let _countriesGeo = null;
 let _countryAttackMap = {};
 let _lastCfg = {};
 
-const TX_NIGHT = '//unpkg.com/three-globe/example/img/earth-night.jpg';
-const TX_DAY   = '//unpkg.com/three-globe/example/img/earth-blue-marble.jpg';
+// Textury self-hosted (dřív unpkg.com) — offline provoz + CSP bez externího CDN
+const TX_NIGHT = '/static/vendor/earth-night.jpg';
+const TX_DAY   = '/static/vendor/earth-blue-marble.jpg';
 
 let _manualDay = UIState.get('globe-day', null); // null = auto (time-based), true/false = user override
 

@@ -95,3 +95,19 @@ Původní TODO z CLAUDE.md (MikroTik #2, Threat map #3, PiHole #5, dokumentace #
   (všechna globe.* volání no-op), v panelu 2D live feed útoků, radar (canvas 2D)
   běží dál. Ověřeno headless: bez WebGL 0 JS chyb + feed, se SwiftShader WebGL
   normální globus.
+
+---
+
+## Druhá vlna námětů (schváleno)
+
+### Robustnost / kvalita
+- [x] **WS reconnect s backoffem** — exponenciální backoff + jitter místo fixních 3s, re-sync snapshotu po obnově
+- [x] **Health endpoint + gzip** — `/healthz` (DB, moduly, uptime) + GZip middleware na velké JSON
+- [x] **Bezpečnostní hlavičky** (+ globe textury self-hosted) — CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy na všechny odpovědi
+- [ ] **Rozšířit testy** — alerts.py (watchlist IP/prefix/CIDR), geoip, trends agregace, auth rate-limit
+
+### Funkce
+- [ ] **Hot zones na mapě** — červeně pulzující země s nejvíce útoky za poslední hodinu
+- [ ] **Export CSV/JSON** — z DB vieweru i IP intel karty
+- [ ] **PWA / installable** — manifest.json + service worker, offline shell
+- [ ] **Dashboard souhrn** — horní přehledový pruh (dnes vs. včera, top vektor, online, block %)
