@@ -107,7 +107,7 @@ Původní TODO z CLAUDE.md (MikroTik #2, Threat map #3, PiHole #5, dokumentace #
 - [x] **Rozšířit testy** (22 nových: alerts/watchlist, geoip, healthz, trends, rate-limit — celkem 74) — alerts.py (watchlist IP/prefix/CIDR), geoip, trends agregace, auth rate-limit
 
 ### Funkce
-- [ ] **Hot zones na mapě** — červeně pulzující země s nejvíce útoky za poslední hodinu
+- [x] **Hot zones na mapě** — červeně pulzující země s nejvíce útoky za poslední hodinu
 - [ ] **Export CSV/JSON** — z DB vieweru i IP intel karty
 - [ ] **PWA / installable** — manifest.json + service worker, offline shell
-- [ ] **Dashboard souhrn** — horní přehledový pruh (dnes vs. včera, top vektor, online, block %)
+- [x] **Dashboard souhrn** — horní přehledový pruh (dnes vs. včera, top vektor, online, block %)

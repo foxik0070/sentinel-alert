@@ -491,3 +491,47 @@ $('rp-gen').addEventListener('click', async () => {
     if (j.ok) { showToast({ title: 'REPORT GENERATED', body: j.name, color: 'var(--green)' }); reportsOpen(); }
     else showToast({ title: 'REPORT FAILED', body: j.error || 'auth required', color: 'var(--red)' });
 });
+
+// ================================================================
+// DASHBOARD SUMMARY BAR — přehled nad Threat Map (dnes vs. včera…)
+// ================================================================
+const _PROTO_LABEL_SUM = { ssh: 'SSH', http: 'HTTP', https: 'HTTPS', fail2ban: 'F2B' };
+
+async function summaryUpdate() {
+    const bar = $('summary-bar');
+    if (!bar || bar.classList.contains('hidden')) return;
+    let s;
+    try { s = await fetch('/api/stats/summary').then(r => r.json()); }
+    catch { return; }
+
+    $('sum-today').textContent = (s.attacks_today ?? 0).toLocaleString();
+    const dEl = $('sum-delta');
+    if (s.attacks_yesterday > 0) {
+        const d = Math.round((s.attacks_today - s.attacks_yesterday) / s.attacks_yesterday * 100);
+        dEl.textContent = `${d > 0 ? '+' : ''}${d}% ${d > 0 ? '↑' : d < 0 ? '↓' : ''} vs včera`;
+        dEl.className = 'sum-delta ' + (d > 0 ? 'up' : d < 0 ? 'down' : '');
+    } else { dEl.textContent = ''; dEl.className = 'sum-delta'; }
+
+    $('sum-1h').textContent  = (s.attacks_last_hour ?? 0).toLocaleString();
+    $('sum-vec').textContent = s.top_vector
+        ? `${_PROTO_LABEL_SUM[s.top_vector] || s.top_vector.toUpperCase()} (${s.top_vector_n})` : '—';
+    $('sum-vec').style.color = s.top_vector ? (PROTO_COLOR[s.top_vector] || 'var(--accent)') : 'var(--accent)';
+    $('sum-hot').textContent = s.hot_country ? `${s.hot_country} (${s.hot_country_n})` : '—';
+    $('sum-dev').textContent = `${s.devices_online ?? 0}/${s.devices_total ?? 0}`;
+
+    const phCell = $('sum-ph-cell');
+    if (s.pihole_block_pct != null) { phCell.style.display = ''; $('sum-ph').textContent = s.pihole_block_pct + '%'; }
+    else phCell.style.display = 'none';
+}
+
+// Bar patří jen na Threat Map — sync s aktivním tabem
+function summarySyncVisibility() {
+    const bar = $('summary-bar');
+    if (!bar) return;
+    const show = (typeof _activeTab === 'undefined') || _activeTab === 'threat';
+    bar.classList.toggle('hidden', !show);
+    if (show) summaryUpdate();
+}
+document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', summarySyncVisibility));
+summarySyncVisibility();
+setInterval(summaryUpdate, 30000);

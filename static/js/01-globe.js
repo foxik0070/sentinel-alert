@@ -108,6 +108,9 @@ const userArcs = [], userPoints = [];
 const arcTimestamps = []; // track arc creation time for age-based coloring
 const homeRings = [];   // permanent target indicator
 const homePoints = [];  // permanent target dot
+const hotRings = [];     // pulzující "hot zones" — země s nejvíce útoky za 1h
+
+function _allRings() { return [...rings, ...homeRings, ...hotRings]; }
 
 let _countriesGeo = null;
 let _countryAttackMap = {};
@@ -231,7 +234,7 @@ function _initGlobe() {
     .labelText(d => d.country)
     .labelSize(0.6).labelDotRadius(0.25)
     .labelColor(() => '#ffe83b').labelResolution(2)
-    .ringsData([...rings, ...homeRings])
+    .ringsData(_allRings())
     .ringLat(d => d.lat).ringLng(d => d.lon)
     .ringColor(d => d.color || (t => `rgba(255,42,94,${1 - t})`))
     .ringMaxRadius(d => d.maxR ?? 4)
@@ -506,10 +509,10 @@ function pushAttack(a, isNew = true) {
         if (!_isMobile) {
             const addRing = (ring, ttl) => {
                 rings.push(ring);
-                globe.ringsData([...rings, ...homeRings]);
+                globe.ringsData(_allRings());
                 setTimeout(() => {
                     const i = rings.indexOf(ring); if (i >= 0) rings.splice(i, 1);
-                    globe.ringsData([...rings, ...homeRings]);
+                    globe.ringsData(_allRings());
                 }, ttl);
             };
             // 3-wave shockwave burst at attack origin
@@ -834,3 +837,37 @@ function replayStop() {
 
 $('globe-replay-btn')?.addEventListener('click', () => _replay.active ? replayStop() : replayStart());
 $('replay-stop')?.addEventListener('click', replayStop);
+
+// ================================================================
+// HOT ZONES — pulzující červené kroužky u top zemí za poslední hodinu
+// ================================================================
+function updateHotZones() {
+    if (_replay.active) return; // během replaye nerušit
+    const cutoff = Date.now() - 3600 * 1000;
+    const byCountry = new Map(); // country → { n, lat, lon }
+    for (const a of _attackHistory || []) {
+        if (!a.country || a.protocol === 'who') continue;
+        if (a.ts && new Date(a.ts).getTime() < cutoff) continue;
+        if (!a.lat && !a.lon) continue;
+        const e = byCountry.get(a.country) || { n: 0, lat: a.lat, lon: a.lon };
+        e.n++;
+        byCountry.set(a.country, e);
+    }
+    const top = [...byCountry.entries()]
+        .sort((x, y) => y[1].n - x[1].n)
+        .slice(0, 5)
+        .filter(([, e]) => e.n >= 2); // aspoň 2 útoky, ať to není šum
+
+    hotRings.length = 0;
+    const maxN = top.length ? top[0][1].n : 1;
+    top.forEach(([, e]) => {
+        const intensity = 0.4 + 0.5 * (e.n / maxN);
+        hotRings.push({
+            lat: e.lat, lon: e.lon,
+            maxR: 3 + 4 * (e.n / maxN), speed: 1.6, period: 1400,
+            color: t => `rgba(255,40,60,${((1 - t) * intensity).toFixed(2)})`,
+        });
+    });
+    if (GLOBE_OK && !_globePaused) globe.ringsData(_allRings());
+}
+setInterval(updateHotZones, 20000);

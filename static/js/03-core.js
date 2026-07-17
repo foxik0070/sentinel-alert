@@ -195,6 +195,7 @@ function connectWS() {
             _globeFlush(); renderAttackHistory();
             refreshCountryPolygons();
             attackStatsUpdate();
+            if (typeof updateHotZones === 'function') updateHotZones();
             // In work mode the attacks table is empty; recompute countries from ban data.
             if (_workMode) renderCountries(_computeCountriesFromHistory());
             (m.logs          || []).forEach(l => pushLog(l, false));

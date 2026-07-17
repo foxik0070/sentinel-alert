@@ -1265,6 +1265,45 @@ async def mikrotik_rule_toggle(payload: dict = Body(...)):
 REPORTS_DIR = os.path.join(BASE_DIR, "data", "reports")
 
 
+@app.get("/api/stats/summary")
+def stats_summary():
+    """Přehledový pruh — dnes vs. včera, top vektor, zařízení, hot country."""
+    def _cnt(sql, p=()):
+        r = _query(sql, p)
+        return r[0]["n"] if r else 0
+
+    today = _cnt("SELECT COUNT(*) AS n FROM attacks WHERE ts >= datetime('now','start of day')")
+    yday = _cnt("SELECT COUNT(*) AS n FROM attacks "
+                "WHERE ts >= datetime('now','start of day','-1 day') "
+                "AND ts < datetime('now','start of day')")
+    last1h = _cnt("SELECT COUNT(*) AS n FROM attacks WHERE ts >= datetime('now','-1 hour')")
+    top_vec = _query(
+        "SELECT COALESCE(protocol,'?') AS p, COUNT(*) AS n FROM attacks "
+        "WHERE ts >= datetime('now','-1 day') GROUP BY p ORDER BY n DESC LIMIT 1")
+    hot = _query(
+        "SELECT country, COUNT(*) AS n FROM attacks "
+        "WHERE ts >= datetime('now','-1 hour') AND country NOT IN ('','LAN','Unknown','?') "
+        "GROUP BY country ORDER BY n DESC LIMIT 1")
+    dev = _query("SELECT COUNT(*) AS total, COALESCE(SUM(is_online),0) AS online FROM devices")
+    devrow = dev[0] if dev else {"total": 0, "online": 0}
+    ph = pihole.data_store.get("instances", {})
+    primary = next((i for i in ph.values() if i.get("primary") and i.get("connected")),
+                   next((i for i in ph.values() if i.get("connected")), None))
+    pct = primary.get("stats", {}).get("percent_blocked") if primary else None
+    return {
+        "attacks_today": today,
+        "attacks_yesterday": yday,
+        "attacks_last_hour": last1h,
+        "top_vector": (top_vec[0]["p"] if top_vec else None),
+        "top_vector_n": (top_vec[0]["n"] if top_vec else 0),
+        "hot_country": (hot[0]["country"] if hot else None),
+        "hot_country_n": (hot[0]["n"] if hot else 0),
+        "devices_online": devrow["online"],
+        "devices_total": devrow["total"],
+        "pihole_block_pct": pct,
+    }
+
+
 @app.get("/api/stats/trends")
 def stats_trends(days: int = 30):
     days = max(1, min(days, 90))
