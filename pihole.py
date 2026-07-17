@@ -47,16 +47,21 @@ def _api(host: str, path: str, method: str = "GET", body: dict | None = None) ->
         return False, {"error": str(e)}
 
 
-def _auth(host: str) -> bool:
-    """Authenticate and store session SID. Returns True on success."""
+def _auth(host: str) -> tuple[bool, str]:
+    """Authenticate and store session SID. Returns (ok, error_message)."""
     if not _password:
-        return True  # no-auth mode (open PiHole)
+        return True, ""  # no-auth mode (open PiHole)
     ok, resp = _api(host, "/api/auth", "POST", {"password": _password})
     if ok and resp.get("session", {}).get("sid"):
         _sessions[host] = resp["session"]["sid"]
-        return True
+        return True, ""
     _sessions.pop(host, None)
-    return False
+    err = resp.get("error")
+    if isinstance(err, str):          # síťová chyba z _api (timeout, refused…)
+        return False, err
+    if isinstance(err, dict) and err.get("message"):
+        return False, err["message"]  # API chyba (invalid password…)
+    return False, "Authentication failed"
 
 
 def _fetch_host(host: str) -> dict:
@@ -66,21 +71,29 @@ def _fetch_host(host: str) -> dict:
 
     # Authenticate if needed
     if host not in _sessions:
-        if not _auth(host):
-            inst["last_error"] = "Authentication failed"
+        ok_a, err_a = _auth(host)
+        if not ok_a:
+            inst["last_error"] = err_a
             return inst
 
     def get(path):
         ok, data = _api(host, path)
-        if not ok and data.get("error", {}).get("key") == "unauthorized":
+        err = data.get("error")
+        if not ok and isinstance(err, dict) and err.get("key") == "unauthorized":
             _sessions.pop(host, None)
-            if _auth(host):
+            if _auth(host)[0]:
                 ok, data = _api(host, path)
         return ok, data
 
     ok_s, stats = get("/api/stats/summary")
     if not ok_s:
-        inst["last_error"] = stats.get("error", {}).get("message", "Failed to fetch stats")
+        err_s = stats.get("error")
+        if isinstance(err_s, str):
+            inst["last_error"] = err_s
+        elif isinstance(err_s, dict):
+            inst["last_error"] = err_s.get("message", "Failed to fetch stats")
+        else:
+            inst["last_error"] = "Failed to fetch stats"
         return inst
 
     ok_t, top    = get("/api/stats/top_domains?blocked=false&count=10")

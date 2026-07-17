@@ -60,6 +60,10 @@ async function phUpdate() {
             setGauge('ph-g-pct', (s.percent_blocked || 0) / 100, 'var(--yellow)');
             $('ph-domains').textContent  = s.domains_blocked?.toLocaleString() || '0';
             $('ph-error-cell').style.display = 'none';
+        } else if (instances.length) {
+            // žádná instance nepřipojena → chyba v toolbaru
+            $('ph-error-cell').style.display = '';
+            $('ph-error-msg').textContent = instances[0].last_error || 'All instances disconnected';
         }
 
         // Instance cards
