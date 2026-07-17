@@ -166,6 +166,7 @@
 <main id="tab-threat" class="grid">
     <section class="panel red" id="attack-stats-panel">
         <div class="ph"><span>◤ ATTACK STATS — 24H</span><span class="chip danger" id="ast-total">0</span></div>
+        <div style="padding:4px 8px 0;"><canvas id="radar-canvas"></canvas></div>
         <div id="ast-proto-bars" style="padding:6px 8px;display:flex;flex-direction:column;gap:5px;"></div>
         <div class="ph" style="margin-top:6px;"><span>◤ TOP ATTACKERS</span></div>
         <div id="ast-top-ips" class="scroll" style="flex:1;"></div>
@@ -176,12 +177,20 @@
             <span>◤ GLOBAL ATTACK MAP</span>
             <div style="display:flex;gap:6px;align-items:center;">
                 <button id="globe-rotate-btn" class="chip" title="Toggle rotation" style="cursor:pointer;border:none;color:#0a1a1e;font-size:9px;padding:2px 7px;background:var(--accent);">⟳ ROT</button>
+                <button id="globe-view-btn" class="chip" title="View mode: arcs / heatmap / points" style="cursor:pointer;">ARCS</button>
+                <button id="globe-replay-btn" class="chip" title="Replay posledních 24h (1h/s)" style="cursor:pointer;">▶ 24H</button>
                 <span class="chip" id="globe-mode">NIGHT</span>
                 <button class="btn-fullscreen" data-target="globe-panel" title="Fullscreen">⛶</button>
                 <a href="?solo=globe" target="_blank" class="btn-fullscreen" title="Open globe in new tab" style="text-decoration:none;">⧉</a>
             </div>
         </div>
         <div id="globe-viz"></div>
+        <div id="replay-bar" class="hidden">
+            <span style="font-size:9px;letter-spacing:2px;color:var(--accent);">◤ REPLAY</span>
+            <div id="replay-track"><div id="replay-progress"></div></div>
+            <span id="replay-time" style="font-size:11px;font-weight:700;color:var(--fg);min-width:42px;">--:--</span>
+            <button class="btn ghost" id="replay-stop" style="font-size:9px;padding:1px 7px;">■ STOP</button>
+        </div>
         <div class="hud-overlay" id="attack-card">
             <div class="hud-row">
                 <span class="lbl">SOURCE</span>
@@ -219,10 +228,11 @@
         <div id="log-list" class="scroll log"></div>
     </section>
 
-    <section class="panel grey">
+    <section class="panel grey" id="hist-panel">
         <div class="ph" style="gap:6px;">
             <span>◤ ATTACK HISTORY</span>
-            <div style="display:flex;gap:3px;margin-left:auto;">
+            <button class="chip" onclick="trendsOpen(30)" title="Trendy 7/30 dní" style="cursor:pointer;margin-left:auto;">📈 TRENDS</button>
+            <div style="display:flex;gap:3px;">
                 <button class="hist-filter-btn active" data-filter="all" style="font-size:9px;padding:1px 6px;border:1px solid #14333a;background:#0e2228;color:var(--accent);cursor:pointer;letter-spacing:1px;">ALL</button>
                 <button class="hist-filter-btn" data-filter="fail2ban" style="font-size:9px;padding:1px 6px;border:1px solid #14333a;background:#02060a;color:#4d7479;cursor:pointer;letter-spacing:1px;">F2B</button>
                 <button class="hist-filter-btn" data-filter="http" style="font-size:9px;padding:1px 6px;border:1px solid #14333a;background:#02060a;color:#4d7479;cursor:pointer;letter-spacing:1px;">HTTP</button>
@@ -271,13 +281,13 @@
 
     <!-- Stat cards -->
     <div class="fsc-stats">
-        <div class="fsc-stat"><span class="lbl">MONITORED</span><span class="val" id="fsc-st-total">0</span></div>
-        <div class="fsc-stat fsc-stat-green"><span class="lbl">ONLINE</span><span class="val" id="fsc-st-online">0</span></div>
+        <div class="fsc-stat"><span class="lbl" title="Počet hostů zapnutých pro SSH sběr (collector)">MONITORED</span><span class="val" id="fsc-st-total">0</span></div>
+        <div class="fsc-stat fsc-stat-green"><span class="lbl">ONLINE</span><span class="val"><span class="gauge" id="fsc-g-online"></span><span id="fsc-st-online">0</span></span></div>
         <div class="fsc-stat fsc-stat-grey"><span class="lbl">OFFLINE</span><span class="val" id="fsc-st-offline">0</span></div>
-        <div class="fsc-stat fsc-stat-red"><span class="lbl">CVE / EOL</span><span class="val" id="fsc-st-sec">0</span></div>
-        <div class="fsc-stat fsc-stat-orange"><span class="lbl">EXPOSED ROOT</span><span class="val" id="fsc-st-root">0</span></div>
-        <div class="fsc-stat fsc-stat-blue"><span class="lbl">FW ACTIVE</span><span class="val" id="fsc-st-fw">0</span></div>
-        <div class="fsc-stat fsc-stat-purple"><span class="lbl">LXC / VM</span><span class="val"><span id="fsc-st-lxc">0</span><span style="color:#4d7479;font-size:14px;">/</span><span id="fsc-st-vm">0</span></span></div>
+        <div class="fsc-stat fsc-stat-red"><span class="lbl" title="Hosté s bezpečnostními updaty (CVE) nebo OS po konci podpory (EOL)">CVE / EOL</span><span class="val"><span class="gauge" id="fsc-g-sec"></span><span id="fsc-st-sec">0</span></span></div>
+        <div class="fsc-stat fsc-stat-orange"><span class="lbl" title="Hosté s povoleným SSH root loginem přes heslo">EXPOSED ROOT</span><span class="val" id="fsc-st-root">0</span></div>
+        <div class="fsc-stat fsc-stat-blue"><span class="lbl" title="Hosté s aktivním firewallem (ufw/iptables/nftables)">FW ACTIVE</span><span class="val"><span class="gauge" id="fsc-g-fw"></span><span id="fsc-st-fw">0</span></span></div>
+        <div class="fsc-stat fsc-stat-purple"><span class="lbl" title="Počet detekovaných LXC kontejnerů / QEMU virtuálů">LXC / VM</span><span class="val"><span id="fsc-st-lxc">0</span><span style="color:#4d7479;font-size:14px;">/</span><span id="fsc-st-vm">0</span></span></div>
     </div>
 
     <!-- Charts -->
@@ -303,8 +313,8 @@
                 <thead>
                     <tr>
                         <th>HOST / IP</th><th>OS / ERRORS</th><th>RESOURCES</th>
-                        <th>UPDATES <span style="color:#4d7479">(CVE/ALL)</span></th>
-                        <th>GRADE</th><th>ROOT SSH</th><th>FAIL2BAN</th>
+                        <th title="Čekající bezpečnostní updaty / všechny updaty">UPDATES <span style="color:#4d7479">(CVE/ALL)</span></th>
+                        <th title="Souhrnné bezpečnostní skóre hosta: updaty, root SSH, fail2ban, firewall">GRADE</th><th>ROOT SSH</th><th>FAIL2BAN</th>
                         <th>SERVICES</th><th style="text-align:right">LAST CHECK</th>
                     </tr>
                 </thead>
@@ -334,15 +344,15 @@
             <span class="val" id="psc-total-conn">0</span>
         </div>
         <div class="fsc-tb-cell">
-            <span class="lbl">TX</span>
+            <span class="lbl" title="Odchozí data (server → klient)">TX</span>
             <span class="val" style="color:#38bdf8" id="psc-tx">0 KB/s</span>
         </div>
         <div class="fsc-tb-cell">
-            <span class="lbl">RX</span>
+            <span class="lbl" title="Příchozí data (klient → server)">RX</span>
             <span class="val" style="color:var(--green)" id="psc-rx">0 KB/s</span>
         </div>
         <div class="fsc-tb-cell">
-            <span class="lbl">CONNS/s</span>
+            <span class="lbl" title="Nová spojení za sekundu na stream proxy">CONNS/s</span>
             <span class="val" style="color:var(--yellow)" id="psc-connrate">0</span>
         </div>
         <div class="fsc-tb-cell" id="psc-error-cell" style="display:none;flex:1;">
@@ -652,11 +662,11 @@
             <span class="val" style="color:var(--red)" id="ph-blocked">0</span>
         </div>
         <div class="fsc-tb-cell">
-            <span class="lbl">BLOCK %</span>
-            <span class="val" style="color:var(--yellow)" id="ph-pct">0%</span>
+            <span class="lbl" title="Podíl DNS dotazů zablokovaných PiHolem dnes">BLOCK %</span>
+            <span class="val" style="color:var(--yellow)"><span class="gauge" id="ph-g-pct"></span><span id="ph-pct">0%</span></span>
         </div>
         <div class="fsc-tb-cell">
-            <span class="lbl">BLOCKLIST</span>
+            <span class="lbl" title="Počet domén v blocklistech PiHole">BLOCKLIST</span>
             <span class="val" style="color:var(--muted)" id="ph-domains">0</span>
         </div>
         <div class="fsc-tb-cell" id="ph-error-cell" style="display:none;flex:1;">
@@ -737,6 +747,7 @@
                 <button class="chip" id="dbv-tab-devices"      onclick="dbvSwitch('devices')"      style="cursor:pointer;border:none;">DEVICES</button>
                 <button class="chip" id="dbv-tab-active_users" onclick="dbvSwitch('active_users')" style="cursor:pointer;border:none;">USERS</button>
                 <button class="chip" id="dbv-tab-logs"         onclick="dbvSwitch('logs')"         style="cursor:pointer;border:none;">LOGS</button>
+                <button class="chip" id="dbv-tab-audit_log"    onclick="dbvSwitch('audit_log')"    style="cursor:pointer;border:none;">AUDIT</button>
                 <button class="btn ghost" id="db-viewer-close" style="margin-left:8px;">✕</button>
             </div>
         </div>
@@ -899,7 +910,18 @@
     </div>
 </div>
 
-<script src="/static/script.js"></script>
+<script src="/static/js/00-ui.js"></script>
+<script src="/static/js/01-globe.js"></script>
+<script src="/static/js/02-devices.js"></script>
+<script src="/static/js/03-core.js"></script>
+<script src="/static/js/04-topology.js"></script>
+<script src="/static/js/05-security.js"></script>
+<script src="/static/js/06-proxy.js"></script>
+<script src="/static/js/07-netmap.js"></script>
+<script src="/static/js/08-services.js"></script>
+<script src="/static/js/09-mikrotik.js"></script>
+<script src="/static/js/10-pihole.js"></script>
+<script src="/static/js/11-ux.js"></script>
 <footer class="hud-bottom">FoxiK 2026</footer>
 </body>
 </html>

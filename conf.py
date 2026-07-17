@@ -92,6 +92,15 @@ FSC_IGNORE_IPS = [
 # [threat]
 BLOCKLIST_FILE = _s("threat", "blocks_ips_file", "")
 
+# [db]
+DB_RETENTION_DAYS = _i("db", "retention_days", 90)
+
+# [alerts]
+ALERTS_ENABLED        = _c.getboolean("alerts", "enabled", fallback=False)
+ALERTS_NTFY_URL       = _s("alerts", "ntfy_url", "")
+ALERTS_TELEGRAM_TOKEN = _s("alerts", "telegram_token", "")
+ALERTS_TELEGRAM_CHAT  = _s("alerts", "telegram_chat", "")
+
 # [mode]
 MODE_TYPE     = _s("mode", "type",     "home")  # 'home' or 'work'
 MODE_IPS_FILE = _s("mode", "ips_file", "")      # work: extra blocked-IPs file (same globe viz as blocklist)

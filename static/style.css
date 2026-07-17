@@ -1123,3 +1123,211 @@ body.has-fullscreen .grid > .panel:not(.fullscreen) { display: none; }
 .cfg-toggle input:checked + .cfg-toggle-slider::before {
     transform: translateX(18px); background: var(--accent);
 }
+
+/* ── TOAST NOTIFICATIONS ───────────────────────────────────────── */
+.toast-stack {
+    position: fixed; right: 14px; bottom: 34px; z-index: 950;
+    display: flex; flex-direction: column; gap: 8px;
+    width: 300px; max-width: calc(100vw - 28px); pointer-events: none;
+}
+.toast {
+    pointer-events: auto; cursor: pointer;
+    background: var(--panel); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: 8px 12px;
+    box-shadow: 0 0 16px rgba(0,0,0,0.55);
+    animation: toast-in 0.25s ease-out;
+}
+.toast.out { opacity: 0; transform: translateX(24px); transition: opacity 0.3s, transform 0.3s; }
+.toast-title { font-size: 10px; font-weight: 800; letter-spacing: 2px; }
+.toast-body  { font-size: 10px; color: var(--muted); margin-top: 3px; letter-spacing: 0.5px; word-break: break-all; }
+@keyframes toast-in { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: none; } }
+
+/* ── COLOR SCHEMES (sci-fi theme engine) ───────────────────────── */
+/* AMBER — Fallout terminal */
+body.scheme-amber {
+    --bg-0: #0a0602; --bg-1: #1a1206;
+    --fg: #ffce7a; --muted: #8a6a3c;
+    --accent: #ffb000; --accent-2: #ffcf40; --accent-rgb: 255,176,0;
+    --border: #3a2c14; --border-2: #4a3a1c;
+    --panel: rgba(18,12,4,0.92); --panel-2: rgba(10,6,2,0.92);
+    --input-bg: #181004; --grid-line: #221806; --scrollbar: #4a3a14;
+    background: radial-gradient(ellipse at center, #140d04 0%, #0a0602 70%, #030200 100%);
+}
+/* MATRIX — zelený terminál */
+body.scheme-matrix {
+    --bg-0: #020a04; --bg-1: #06180c;
+    --fg: #9dffb0; --muted: #3c8a54;
+    --accent: #00ff66; --accent-2: #4dff94; --accent-rgb: 0,255,102;
+    --border: #143a20; --border-2: #1c4a2a;
+    --panel: rgba(4,18,8,0.92); --panel-2: rgba(2,10,4,0.92);
+    --input-bg: #04180a; --grid-line: #062210; --scrollbar: #144a24;
+    background: radial-gradient(ellipse at center, #04140a 0%, #020a04 70%, #000300 100%);
+}
+/* RED ALERT — poplach */
+body.scheme-red {
+    --bg-0: #0a0204; --bg-1: #1a060c;
+    --fg: #ffb4c0; --muted: #8a3c50;
+    --accent: #ff2a3c; --accent-2: #ff5c6a; --accent-rgb: 255,42,60;
+    --border: #3a1420; --border-2: #4a1c2a;
+    --panel: rgba(18,4,8,0.92); --panel-2: rgba(10,2,4,0.92);
+    --input-bg: #180408; --grid-line: #220610; --scrollbar: #4a1424;
+    background: radial-gradient(ellipse at center, #14040a 0%, #0a0204 70%, #030001 100%);
+}
+.scheme-btn {
+    padding: 5px 10px; font-size: 9px; font-weight: 800; letter-spacing: 1.5px;
+    background: var(--input-bg); font-family: inherit; cursor: pointer;
+}
+
+/* ── BOOT SEQUENCE ─────────────────────────────────────────────── */
+#boot-overlay {
+    position: fixed; inset: 0; z-index: 1000; background: #000;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    cursor: pointer;
+}
+#boot-log {
+    color: var(--accent); font-size: 13px; letter-spacing: 1.5px; line-height: 1.9;
+    text-shadow: 0 0 8px rgba(var(--accent-rgb), 0.7);
+    min-width: 340px; min-height: 150px; margin: 0;
+    font-family: inherit;
+}
+#boot-skip {
+    margin-top: 24px; font-size: 9px; letter-spacing: 3px; color: var(--muted);
+    animation: boot-blink 1.2s step-end infinite;
+}
+#boot-overlay.boot-out { opacity: 0; transition: opacity 0.4s; }
+@keyframes boot-blink { 50% { opacity: 0; } }
+
+/* ── VISUAL FX (body.fx-on) ────────────────────────────────────── */
+@media (prefers-reduced-motion: no-preference) {
+    /* CRT flicker na scanlines */
+    body.fx-on .scanlines { animation: crt-flicker 9s infinite; }
+    /* chromatická aberace nadpisu — občasný záblesk */
+    body.fx-on .ht-sentinel { animation: chroma-glitch 7s infinite; }
+    /* přechod tabu — fade + posun při zobrazení main */
+    body.fx-on main { animation: tab-in 0.22s ease-out; }
+    /* glitch při výpadku spojení */
+    body.fx-on.sys-offline .hud-title { animation: glitch-shake 0.3s infinite; }
+}
+@keyframes crt-flicker {
+    0%, 91%, 94%, 100% { opacity: 1; }
+    92% { opacity: 0.55; }
+    93% { opacity: 0.85; }
+    97% { opacity: 0.75; }
+    98% { opacity: 1; }
+}
+@keyframes chroma-glitch {
+    0%, 93%, 100% { text-shadow: none; }
+    94% { text-shadow: -2px 0 #ff00d5, 2px 0 #00ffd5; }
+    95% { text-shadow: 2px 0 #ff00d5, -2px 0 #00ffd5; }
+    96% { text-shadow: -1px 0 #ff00d5, 1px 0 #00ffd5; }
+}
+@keyframes tab-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+}
+@keyframes glitch-shake {
+    0%, 100% { transform: translate(0); text-shadow: -2px 0 #ff2a3c, 2px 0 #00ffd5; }
+    25% { transform: translate(1px, -1px); }
+    50% { transform: translate(-1px, 1px); text-shadow: 2px 0 #ff2a3c, -2px 0 #00ffd5; }
+    75% { transform: translate(1px, 1px); }
+}
+
+/* ── HEX-GRID pozadí (fx-on) ───────────────────────────────────── */
+body.fx-on::before {
+    content: ''; position: fixed; inset: 0; pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z' fill='%234d7479' fill-opacity='1'/%3E%3C/svg%3E");
+    background-size: 28px 49px;
+    opacity: 0.045;
+}
+
+/* ── RADAR WIDGET ──────────────────────────────────────────────── */
+#radar-canvas { width: 100%; height: 150px; display: block; }
+
+/* ── GAUGE RING ────────────────────────────────────────────────── */
+.gauge {
+    width: 20px; height: 20px; border-radius: 50%;
+    display: inline-block; vertical-align: middle; margin-right: 7px;
+    background: conic-gradient(var(--gauge-color, var(--accent)) calc(var(--p, 0) * 1%), rgba(128,160,168,0.15) 0);
+    -webkit-mask: radial-gradient(farthest-side, transparent 60%, #000 61%);
+    mask: radial-gradient(farthest-side, transparent 60%, #000 61%);
+}
+
+/* ── COMMAND PALETTE ───────────────────────────────────────────── */
+#cmd-palette { align-items: flex-start; padding-top: 12vh; }
+#cp-box {
+    width: 560px; max-width: 94vw; background: var(--panel-2);
+    border: 1px solid var(--border-2); box-shadow: 0 0 30px rgba(0,0,0,0.7), 0 0 12px rgba(var(--accent-rgb),0.15);
+    display: flex; flex-direction: column; max-height: 62vh;
+}
+#cp-input {
+    background: var(--input-bg); border: none; border-bottom: 1px solid var(--border-2);
+    color: var(--fg); padding: 12px 14px; font-family: inherit; font-size: 13px;
+    letter-spacing: 1px; outline: none;
+}
+#cp-results { flex: 1; overflow-y: auto; min-height: 0; }
+.cp-group {
+    font-size: 8px; font-weight: 800; letter-spacing: 2px; color: var(--muted);
+    padding: 8px 14px 3px;
+}
+.cp-item {
+    display: flex; justify-content: space-between; gap: 10px;
+    padding: 6px 14px; cursor: pointer; font-size: 11px; letter-spacing: 0.5px;
+}
+.cp-item.sel { background: rgba(var(--accent-rgb),0.12); box-shadow: inset 2px 0 0 var(--accent); }
+.cp-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-hint-r { color: var(--muted); font-size: 9px; letter-spacing: 1px; flex-shrink: 0; }
+#cp-hint {
+    font-size: 9px; letter-spacing: 1px; color: var(--muted);
+    padding: 7px 14px; border-top: 1px solid var(--border);
+}
+
+/* ── SKELETON LOADING ──────────────────────────────────────────── */
+.skel {
+    height: 14px; margin: 7px 8px; border-radius: 2px;
+    background: linear-gradient(90deg, rgba(128,160,168,0.07) 25%, rgba(128,160,168,0.16) 50%, rgba(128,160,168,0.07) 75%);
+    background-size: 200% 100%;
+    animation: skel-shimmer 1.3s infinite linear;
+}
+@keyframes skel-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* ── DRAG & DROP panelů ────────────────────────────────────────── */
+.panel.dnd-src  { opacity: 0.45; }
+.panel.dnd-over { outline: 2px dashed var(--accent); outline-offset: -2px; }
+#tab-threat .panel .ph[draggable="true"] { cursor: grab; }
+
+/* ── MOBILE LAYOUT (< 700px) ───────────────────────────────────── */
+@media (max-width: 700px) {
+    .tab-bar {
+        position: fixed; bottom: 0; left: 0; right: 0; z-index: 800;
+        background: var(--bg-0); border-top: 1px solid var(--border);
+        overflow-x: auto;
+    }
+    .tab-group { display: flex; width: 100%; }
+    .tab-btn { flex: 1; padding: 11px 4px; font-size: 9px; letter-spacing: 0.5px; white-space: nowrap; }
+    main { padding-bottom: 54px !important; }
+    .hud-bottom { display: none; }
+    .toast-stack { bottom: 64px; width: 260px; }
+    /* tabulky rolují uvnitř vlastního kontejneru */
+    .fsc-table-wrap { overflow-x: auto; }
+    .fsc-table { min-width: 640px; }
+    #radar-canvas { height: 110px; }
+}
+
+/* ── TIMELINE REPLAY BAR ───────────────────────────────────────── */
+#replay-bar {
+    position: absolute; left: 10px; right: 10px; bottom: 8px; z-index: 5;
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(2, 10, 14, 0.88); border: 1px solid var(--border-2);
+    padding: 6px 12px;
+}
+#replay-bar.hidden { display: none; }
+#replay-track {
+    flex: 1; height: 6px; background: var(--bg-1); border: 1px solid var(--border);
+    position: relative;
+}
+#replay-progress {
+    height: 100%; width: 0; background: var(--accent);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.7);
+    transition: width 0.25s linear;
+}

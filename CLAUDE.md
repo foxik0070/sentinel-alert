@@ -10,6 +10,8 @@
 6. ✅ Verze → 2026.06.001 (hotovo)
 7. README, dokumentace, commit
 
+Rozšířená roadmapa (30 položek UI/UX/funkcionalita): viz `todo.md`.
+
 ## Popis
 
 Sentinel-Alert je nástroj pro monitoring domácí sítě a vizualizaci honeypot útoků. Kombinuje LAN skenování (Pi.Alert styl) s detekcí hrozeb přes honeypot (Knock-Knock styl). Běží na Ubuntu/Debian/Raspberry Pi OS.

@@ -1,0 +1,90 @@
+# Sentinel-Alert — TODO roadmap (30 položek)
+
+Cíl: nádherná, moderní, sci-fi aplikace. Položky seřazené do kategorií,
+u každé priorita (P1 = největší efekt/poměr práce, P3 = nice-to-have).
+
+## UI — sci-fi vizuál
+
+1. [x] **Theme engine** (P1) — 4 barevná schémata přes CSS variables: CYAN (současné),
+   AMBER (Fallout), MATRIX (zelená), RED ALERT. Přepínač v Settings, persist v localStorage.
+2. [x] **Boot sekvence** (P2) — animovaná "SYSTEM INIT" obrazovka při načtení:
+   terminálový log (moduly, DB, WS handshake) s psacím efektem, přeskočitelná klávesou.
+3. [x] **CRT/glitch efekty** (P3) — jemný flicker, chromatická aberace na `.ht-sentinel`
+   nadpisu, glitch animace při chybě WS. Přepínatelné (PERFORMANCE MODE off/on).
+4. [x] **Radar widget** (P2) — kruhový sonar do Threat Map panelu: rotující paprsek,
+   ping (blip) při každém novém útoku, barva podle vektoru (ssh/http/https/f2b).
+5. [x] **Animované přechody tabů** (P3) — scanline-wipe / fade při přepnutí tabu,
+   respektuje `prefers-reduced-motion`.
+6. [x] **SVG gauge / status ringy** (P2) — stat karty (FSC stats, PiHole block %,
+   proxy TX/RX) doplnit o kruhový progress ring místo plochého čísla.
+7. [x] **Toast notifikace** (P1) — sci-fi styl "◤ INCOMING — SSH BRUTE-FORCE from RU"
+   vpravo dole, fronta, auto-dismiss, klik = otevře detail IP.
+8. [x] **Globe upgrade** (P1) — heatmap mód (hustota útoků), pulzující ringy v cíli,
+   přepínač ARCS / HEAT / POINTS, den/noc textura podle reálného UTC času.
+9. [x] **Hex-grid pozadí** (P3) — jemný hexagonální pattern pod panely (CSS only),
+   decentní parallax při scrollu.
+10. [x] **Zvukové efekty** (P3) — volitelné (default OFF): tiché pípnutí při novém
+    útoku, alarm při kritické události (host down, CVE spike). Web Audio API, bez assetů.
+
+## UX
+
+11. [x] **Command palette Ctrl+K** (P1) — fuzzy akce: přepnout tab, najít zařízení,
+    block IP, force scan, otevřít nastavení. Jeden overlay, šipky + Enter.
+12. [x] **Klávesové zkratky** (P2) — 1–6 přepínání tabů, `/` search, ESC zavře modál,
+    `?` zobrazí přehled zkratek.
+13. [x] **Globální search** (integrováno do palety Ctrl+K) (P2) — jedno pole prohledá zařízení, útoky (IP/země),
+    služby i domény napříč taby; výsledky seskupené podle typu.
+14. [x] **Persist stavu UI** (P1) — aktivní tab, filtry Attack History, rotace globusu,
+    interval Services do localStorage; po reloadu se člověk vrátí, kde byl.
+15. [x] **Relativní časy** (attack history; device list už měl) (P2) — všude jednotně "3m ago" s absolutním časem v title
+    tooltipu (teď mix formátů mezi taby).
+16. [x] **Skeleton loading** (P2) — místo prázdných panelů při startu shimmer
+    placeholdery, ať layout neskáče.
+17. [x] **Tooltips metrik** (P3) — vysvětlivky u GRADE, CVE/ALL, EXPOSED ROOT,
+    BLOCK % … (title/data-tooltip, žádná knihovna).
+18. [x] **Mobile layout** (bottom tab bar, rolovací tabulky) (P2) — bottom tab bar pod 700px, karty místo tabulek
+    u FSC matrix a proxy klientů.
+19. [x] **Drag&drop panelů** (P3) — přeuspořádání panelů v Threat Map gridu,
+    layout persist do localStorage.
+20. [x] **Help overlay** (P3) — `?` otevře průvodce: co který panel zobrazuje,
+    odkud data tečou (honeypot/scanner/collector).
+
+## Funkcionalita
+
+21. [x] **IP intelligence karta** (P1) — klik na jakoukoli IP (globe, top attackers,
+    historie) otevře modál: GeoIP + ASN, historie útoků z DB, whois, tlačítka
+    ⊘ BLOCK (MikroTik) a ⧉ AbuseIPDB lookup.
+22. [x] **Alerting engine** (P1) — pravidla: nové zařízení v LAN, host offline > N min,
+    CVE nárůst, útok z watchlistu → toast + volitelně ntfy/Telegram webhook
+    (config v `[alerts]` sekci conf).
+23. [x] **Timeline replay** (P2) — time slider pod globusem: přehrání útoků za 24h
+    zrychleně (1h/s), pauza, značky špiček.
+24. [x] **Watchlist** (P2) — sledované IP/subnety/domény; výskyt kdekoli v UI se
+    zvýrazní a vyvolá alert. CRUD v Settings.
+25. [x] **Trendy 7/30 dní** (P2) — dlouhodobé grafy z alerts.db: útoky/den podle
+    vektoru, srovnání s předchozím obdobím (+12 % ↑), nový panel v Threat Map.
+26. [x] **Scheduled reporty** (P3) — denní/týdenní HTML security report (top útočníci,
+    změny v LAN, CVE stav) generovaný na disk + odkaz v UI (rozšíření REPORT tlačítka).
+
+## Zlepšení (výkon, kód, provoz)
+
+27. [x] **Rozdělit script.js** (P1) — hotovo: 10 souborů v `static/js/`
+    (01-globe … 10-pihole), klasické skripty načítané v pořadí (sdílený globální
+    scope kvůli inline onclick handlerům), bez build stepu.
+28. [x] **Výkon frontendů** (debounce historie/statistik, radar 25fps, rAF flush globusu už existoval) (P2) — batch DOM updaty přes requestAnimationFrame,
+    throttling WS zpráv (max 10/s render), virtualizace dlouhých seznamů
+    (attack history, DB viewer).
+29. [x] **DB údržba** (P2) — retence alerts.db (config, default 90 dní), indexy na
+    ip/timestamp, noční VACUUM job v tasks.py.
+30. [x] **Hardening auth** (P2) — rate-limit loginu (5 pokusů / min), indikátor
+    expirace session v HUD, audit log akcí (block IP, delete, config save) do DB.
+
+---
+
+### Doporučené pořadí (P1 vlna)
+
+1, 7, 8, 11, 14, 21, 22, 27 — největší viditelný posun k "sci-fi command center"
++ zdravý základ kódu před dalším růstem.
+
+Původní TODO z CLAUDE.md (MikroTik #2, Threat map #3, PiHole #5, dokumentace #7)
+zůstávají v platnosti a mají přednost, pokud nebude řečeno jinak.

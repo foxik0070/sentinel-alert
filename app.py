@@ -17,6 +17,7 @@ from fastapi import Body, FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+import alerts
 import blocklist
 import bridge
 import conf
@@ -102,6 +103,20 @@ async def _broadcaster():
         ev = await _broadcast_queue.get()
         if ev.get("type") == "log":
             _log_buffer.append(ev)
+        # Watchlist hit — extra log event + push notifikace
+        if ev.get("type") in ("attack", "ban"):
+            _wip = ev.get("src_ip") or ev.get("ip") or ""
+            if _wip and alerts.is_watched(_wip):
+                alerts.notify("WATCHLIST HIT",
+                              f"{_wip} — {ev.get('protocol', '?')} ({ev.get('country', '?')})")
+                try:
+                    _broadcast_queue.put_nowait({
+                        "type": "log", "level": "attack", "source": "watchlist",
+                        "ts": ev.get("ts") or datetime.now().isoformat(),
+                        "msg": f"⭐ WATCHLIST {_wip} — {ev.get('protocol', '?')} ({ev.get('country', '?')})",
+                    })
+                except asyncio.QueueFull:
+                    pass
         dead = []
         for ws in list(_clients):
             try:
@@ -115,6 +130,12 @@ async def _broadcaster():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db_init.init()
+    alerts.configure(
+        enabled=conf.ALERTS_ENABLED,
+        ntfy_url=conf.ALERTS_NTFY_URL,
+        telegram_token=conf.ALERTS_TELEGRAM_TOKEN,
+        telegram_chat=conf.ALERTS_TELEGRAM_CHAT,
+    )
     await _detect_home()
     await honeypot.start(_broadcast_queue,
                         ssh_port=conf.HONEYPOT_SSH_PORT,
@@ -244,8 +265,94 @@ async def lifespan(app: FastAPI):
             except Exception:
                 pass
 
+    async def _alerts_watcher():
+        """Nové zařízení v LAN / zařízení offline → log event + push notifikace."""
+        prev_macs: set | None = None
+        prev_online: dict = {}
+        while True:
+            await asyncio.sleep(120)
+            try:
+                rows = _query("SELECT mac, ip, hostname, is_online FROM devices")
+            except Exception:
+                continue
+            macs = {r["mac"] for r in rows}
+            if prev_macs is not None:
+                for r in rows:
+                    name = r.get("hostname") or r.get("ip") or r["mac"]
+                    if r["mac"] not in prev_macs:
+                        alerts.notify("NEW DEVICE", f"{name} ({r.get('ip', '?')}) se objevilo v LAN")
+                        try:
+                            _broadcast_queue.put_nowait({
+                                "type": "log", "level": "warn", "source": "alerts",
+                                "ts": datetime.now().isoformat(),
+                                "msg": f"NEW DEVICE in LAN: {name} ({r.get('ip', '?')})",
+                            })
+                        except asyncio.QueueFull:
+                            pass
+                    elif prev_online.get(r["mac"]) is True and not r["is_online"]:
+                        alerts.notify("DEVICE OFFLINE", f"{name} ({r.get('ip', '?')}) přestalo odpovídat")
+                        try:
+                            _broadcast_queue.put_nowait({
+                                "type": "log", "level": "warn", "source": "alerts",
+                                "ts": datetime.now().isoformat(),
+                                "msg": f"DEVICE OFFLINE: {name} ({r.get('ip', '?')})",
+                            })
+                        except asyncio.QueueFull:
+                            pass
+            prev_macs = macs
+            prev_online = {r["mac"]: bool(r["is_online"]) for r in rows}
+
+    async def _daily_jobs():
+        """04:30 DB údržba (retence, indexy, VACUUM) · 06:00 denní HTML report."""
+        from datetime import timedelta
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ban_ip ON ban_history(ip)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ban_ts ON ban_history(timestamp)")
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+        while True:
+            now = datetime.now()
+            jobs = []
+            for hh, mm, kind in ((4, 30, "db"), (6, 0, "report")):
+                t = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+                if t <= now:
+                    t += timedelta(days=1)
+                jobs.append((t, kind))
+            t, kind = min(jobs)
+            await asyncio.sleep(max(1, (t - datetime.now()).total_seconds()))
+            try:
+                if kind == "db":
+                    conn = sqlite3.connect(DB_PATH, timeout=30)
+                    cutoff = f"-{conf.DB_RETENTION_DAYS} day"
+                    n1 = conn.execute("DELETE FROM attacks WHERE ts < datetime('now', ?)", (cutoff,)).rowcount
+                    n2 = conn.execute("DELETE FROM ban_history WHERE timestamp < datetime('now', ?)", (cutoff,)).rowcount
+                    conn.commit()
+                    conn.execute("VACUUM")
+                    conn.close()
+                    msg = f"DB maintenance: pruned {n1} attacks, {n2} bans (retention {conf.DB_RETENTION_DAYS}d), VACUUM done"
+                else:
+                    os.makedirs(REPORTS_DIR, exist_ok=True)
+                    name = f"report-{datetime.now():%Y-%m-%d}.html"
+                    with open(os.path.join(REPORTS_DIR, name), "w") as f:
+                        f.write(_generate_report_html())
+                    files = sorted(f for f in os.listdir(REPORTS_DIR) if f.endswith(".html"))
+                    for old in files[:-30]:
+                        os.remove(os.path.join(REPORTS_DIR, old))
+                    msg = f"Daily report generated: {name}"
+                _broadcast_queue.put_nowait({
+                    "type": "log", "level": "good", "source": "system",
+                    "ts": datetime.now().isoformat(), "msg": msg,
+                })
+            except Exception:
+                pass
+
     bg = [
         asyncio.create_task(_broadcaster()),
+        asyncio.create_task(_alerts_watcher()),
+        asyncio.create_task(_daily_jobs()),
         asyncio.create_task(_heartbeat_loop()),
         asyncio.create_task(tasks.periodic_scanner(_broadcast_queue)),
         asyncio.create_task(tasks.periodic_collector(_broadcast_queue)),
@@ -294,13 +401,48 @@ def _is_authed(request: Request) -> bool:
     return _verify_token(request.cookies.get(_AUTH_COOKIE))
 
 
+def _client_ip(request: Request) -> str:
+    return request.client.host if request and request.client else "?"
+
+
+def _audit(ip: str, action: str, detail: str = ""):
+    """Audit log akcí (login, block, config…) do DB. Nesmí nikdy shodit volajícího."""
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS audit_log ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, ts DATETIME, ip TEXT, action TEXT, detail TEXT)")
+        conn.execute(
+            "INSERT INTO audit_log (ts, ip, action, detail) VALUES (?,?,?,?)",
+            (datetime.now().isoformat(), ip, action, str(detail)[:500]))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+_login_attempts: dict = {}  # ip -> [unix timestamps posledních pokusů]
+
+
 @app.post("/api/login")
-def login(payload: dict = Body(...), response: Response = None):
+def login(request: Request, payload: dict = Body(...), response: Response = None):
+    ip = _client_ip(request)
+    now = time.time()
+    attempts = [t for t in _login_attempts.get(ip, []) if now - t < 60]
+    if len(attempts) >= 5:
+        _audit(ip, "login_ratelimited", payload.get("username", ""))
+        return JSONResponse({"ok": False, "error": "Too many attempts — wait a minute"},
+                            status_code=429)
     if (payload.get("username") == conf.AUTH_USERNAME
             and payload.get("password") == conf.AUTH_PASSWORD):
         token = _make_token()
         response.set_cookie(_AUTH_COOKIE, token, max_age=_TOKEN_TTL, httponly=True, samesite="lax")
+        _login_attempts.pop(ip, None)
+        _audit(ip, "login_ok", payload.get("username", ""))
         return {"ok": True}
+    attempts.append(now)
+    _login_attempts[ip] = attempts
+    _audit(ip, "login_fail", payload.get("username", ""))
     return JSONResponse({"ok": False, "error": "Invalid credentials"}, status_code=401)
 
 
@@ -312,7 +454,15 @@ def logout(response: Response):
 
 @app.get("/api/auth/status")
 def auth_status(request: Request):
-    return {"authenticated": _is_authed(request)}
+    tok = request.cookies.get(_AUTH_COOKIE)
+    ok = _verify_token(tok)
+    expires_in = None
+    if ok:
+        try:
+            expires_in = _TOKEN_TTL - (int(time.time()) - int(tok.rsplit(".", 1)[0]))
+        except Exception:
+            pass
+    return {"authenticated": ok, "expires_in": expires_in}
 
 
 @app.get("/")
@@ -477,6 +627,11 @@ def config_full(request: Request):
     result = {}
     for section in c.sections():
         result[section] = dict(c.items(section))
+    # [alerts] nabídnout v UI i když v conf souboru ještě není
+    result.setdefault("alerts", {
+        "enabled": "false", "ntfy_url": "",
+        "telegram_token": "", "telegram_chat": "",
+    })
     return result
 
 
@@ -484,6 +639,7 @@ def config_full(request: Request):
 async def config_update(request: Request, payload: dict = Body(...)):
     if not _is_authed(request):
         return JSONResponse({"error": "unauthorized"}, 401)
+    _audit(_client_ip(request), "config_update", ", ".join(payload.keys()))
     import configparser
     c = configparser.ConfigParser(interpolation=None)
     c.read(conf.CONF_PATH)
@@ -813,6 +969,7 @@ _DB_TABLES = {
     "ban_history":  ("rowid",    ["rowid","ip","country","isp","timestamp","lat","lon","protocol"]),
     "devices":      ("mac",      ["mac","ip","hostname","vendor","first_seen","last_seen","is_online"]),
     "active_users": ("username", ["username","ip","node","cluster","country","isp","timestamp"]),
+    "audit_log":    ("id",       ["id","ts","ip","action","detail"]),
 }
 
 @app.get("/api/db/{table}")
@@ -931,12 +1088,13 @@ def mikrotik_data():
 
 
 @app.post("/api/mikrotik/block")
-async def mikrotik_block(payload: dict = Body(...)):
+async def mikrotik_block(request: Request, payload: dict = Body(...)):
     ip      = (payload.get("ip") or "").strip()
     comment = (payload.get("comment") or "sentinel").strip()
     timeout = (payload.get("timeout") or "1w").strip()
     if not ip:
         return JSONResponse({"ok": False, "error": "ip required"}, status_code=400)
+    _audit(_client_ip(request), "mikrotik_block", f"{ip} {timeout}")
     ok, err = mikrotik.block_ip(ip, comment, timeout)
     if ok:
         asyncio.run_coroutine_threadsafe(
@@ -999,6 +1157,160 @@ async def mikrotik_rule_toggle(payload: dict = Body(...)):
 
 
 # ── PiHole ───────────────────────────────────────────────────────────────────
+
+# ── Trends + scheduled reports ────────────────────────────────────────────────
+REPORTS_DIR = os.path.join(BASE_DIR, "data", "reports")
+
+
+@app.get("/api/stats/trends")
+def stats_trends(days: int = 30):
+    days = max(1, min(days, 90))
+    rows = _query(
+        "SELECT date(ts) AS day, COALESCE(protocol,'?') AS protocol, COUNT(*) AS n "
+        "FROM attacks WHERE ts >= date('now', ?) GROUP BY day, protocol",
+        (f"-{days} day",))
+    bans = _query(
+        "SELECT date(timestamp) AS day, COUNT(*) AS n FROM ban_history "
+        "WHERE timestamp >= date('now', ?) GROUP BY day", (f"-{days} day",))
+    cur = _query("SELECT COUNT(*) AS n FROM attacks WHERE ts >= date('now', ?)",
+                 (f"-{days} day",))[0]["n"]
+    prev = _query(
+        "SELECT COUNT(*) AS n FROM attacks WHERE ts >= date('now', ?) AND ts < date('now', ?)",
+        (f"-{2 * days} day", f"-{days} day"))[0]["n"]
+    return {"days": days, "rows": rows, "bans": bans,
+            "total_current": cur, "total_previous": prev}
+
+
+def _generate_report_html() -> str:
+    top = _query(
+        "SELECT src_ip, country, isp, COUNT(*) AS n FROM attacks "
+        "WHERE ts >= datetime('now','-1 day') GROUP BY src_ip ORDER BY n DESC LIMIT 15")
+    protos = _query(
+        "SELECT COALESCE(protocol,'?') AS p, COUNT(*) AS n FROM attacks "
+        "WHERE ts >= datetime('now','-1 day') GROUP BY p ORDER BY n DESC")
+    bans = _query(
+        "SELECT COUNT(*) AS n FROM ban_history WHERE timestamp >= datetime('now','-1 day')")[0]["n"]
+    devs = _query("SELECT COUNT(*) AS n, COALESCE(SUM(is_online),0) AS online FROM devices")[0]
+    total = sum(p["n"] for p in protos)
+    day = datetime.now().strftime("%Y-%m-%d")
+
+    def _esc(v):
+        return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    proto_rows = "".join(
+        f"<tr><td>{_esc(p['p']).upper()}</td><td style='text-align:right'>{p['n']}</td></tr>"
+        for p in protos)
+    top_rows = "".join(
+        f"<tr><td>{_esc(t['src_ip'])}</td><td>{_esc(t['country'] or '?')}</td>"
+        f"<td>{_esc(t['isp'] or '—')}</td><td style='text-align:right'>{t['n']}×</td></tr>"
+        for t in top)
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Sentinel-Alert report {day}</title>
+<style>
+body{{background:#02060a;color:#cfe7ec;font-family:'JetBrains Mono',monospace;font-size:13px;padding:30px;}}
+h1{{color:#f97316;font-size:18px;letter-spacing:2px;}} h2{{color:#4d7479;font-size:12px;letter-spacing:2px;margin-top:24px;}}
+table{{border-collapse:collapse;width:100%;max-width:700px;}}
+td,th{{border:1px solid #14333a;padding:5px 10px;text-align:left;}}
+.stat{{display:inline-block;border:1px solid #14333a;padding:10px 18px;margin:4px;}}
+.stat b{{font-size:20px;color:#f97316;display:block;}}
+</style></head><body>
+<h1>◤ SENTINEL-ALERT — DENNÍ REPORT {day}</h1>
+<div>
+<span class="stat"><b>{total}</b>útoků / 24h</span>
+<span class="stat"><b>{bans}</b>fail2ban banů</span>
+<span class="stat"><b>{devs['online']}/{devs['n']}</b>zařízení online</span>
+</div>
+<h2>◤ ÚTOKY PODLE VEKTORU</h2><table>{proto_rows or '<tr><td>—</td></tr>'}</table>
+<h2>◤ TOP ÚTOČNÍCI</h2>
+<table><tr><th>IP</th><th>Země</th><th>ISP</th><th>Útoků</th></tr>{top_rows or '<tr><td colspan=4>—</td></tr>'}</table>
+<p style="color:#4d7479;margin-top:30px;">Vygenerováno automaticky · Sentinel-Alert</p>
+</body></html>"""
+
+
+@app.get("/api/reports")
+def reports_list(request: Request):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    try:
+        return sorted(
+            (f for f in os.listdir(REPORTS_DIR) if f.endswith(".html")), reverse=True)
+    except OSError:
+        return []
+
+
+@app.get("/api/reports/{name}")
+def report_file(name: str, request: Request):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    if "/" in name or ".." in name or not name.endswith(".html"):
+        return JSONResponse({"error": "bad name"}, 400)
+    path = os.path.join(REPORTS_DIR, name)
+    if not os.path.exists(path):
+        return JSONResponse({"error": "not found"}, 404)
+    return FileResponse(path, media_type="text/html")
+
+
+@app.post("/api/reports/generate")
+def report_generate_now(request: Request):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    name = f"report-{datetime.now():%Y-%m-%d}.html"
+    with open(os.path.join(REPORTS_DIR, name), "w") as f:
+        f.write(_generate_report_html())
+    return {"ok": True, "name": name}
+
+
+# ── Watchlist + IP intelligence ───────────────────────────────────────────────
+@app.get("/api/watchlist")
+def watchlist_get():
+    return alerts.load_watchlist()
+
+
+@app.post("/api/watchlist")
+def watchlist_add(request: Request, payload: dict = Body(...)):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    entry = (payload.get("ip") or "").strip()
+    if not entry:
+        return JSONResponse({"ok": False, "error": "ip required"}, status_code=400)
+    alerts.save_watchlist(alerts.load_watchlist() + [entry])
+    _audit(_client_ip(request), "watchlist_add", entry)
+    return {"ok": True, "watchlist": alerts.load_watchlist()}
+
+
+@app.delete("/api/watchlist/{entry:path}")
+def watchlist_del(entry: str, request: Request):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    items = [i for i in alerts.load_watchlist() if i != entry]
+    alerts.save_watchlist(items)
+    _audit(_client_ip(request), "watchlist_del", entry)
+    return {"ok": True, "watchlist": items}
+
+
+@app.get("/api/ip/{ip}/intel")
+def ip_intel(ip: str):
+    lat, lon, country, isp = geoip.lookup(ip)
+    protos = _query(
+        "SELECT COALESCE(protocol,'?') AS protocol, COUNT(*) AS n, "
+        "MIN(ts) AS first_ts, MAX(ts) AS last_ts "
+        "FROM attacks WHERE src_ip=? GROUP BY protocol ORDER BY n DESC", (ip,))
+    ports = _query(
+        "SELECT dst_port, COUNT(*) AS n FROM attacks WHERE src_ip=? "
+        "GROUP BY dst_port ORDER BY n DESC LIMIT 8", (ip,))
+    recent = _query(
+        "SELECT ts, protocol, dst_port, payload FROM attacks WHERE src_ip=? "
+        "ORDER BY ts DESC LIMIT 12", (ip,))
+    bans = _query(
+        "SELECT COUNT(*) AS n, MAX(timestamp) AS last FROM ban_history WHERE ip=?", (ip,))
+    return {
+        "ip": ip, "lat": lat, "lon": lon, "country": country, "isp": isp,
+        "asn": geoip.lookup_asn(ip), "watched": alerts.is_watched(ip),
+        "protocols": protos, "ports": ports, "recent": recent,
+        "bans": bans[0] if bans else {},
+    }
+
 
 @app.get("/api/pihole/data")
 def pihole_data():
