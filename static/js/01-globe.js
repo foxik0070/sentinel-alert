@@ -60,8 +60,12 @@ let _countryCounts = new Map(); // country → attack arc count (for stroke widt
 let _globeViewMode = UIState.get('globe-view', 'arcs'); // arcs | heat | points
 
 function _globeFlush() {
-    // Globe always shows ALL protocols — history filter only affects the list panel
-    const allArcs = [...arcs, ...userArcs];
+    // Vector filter (ALL/F2B/SSH/HTTP/HTTPS) filtruje i globus — threat map
+    // se zaměří na zvolený typ útoku; user session arcs zůstávají vždy.
+    const f = (typeof _attackHistFilter !== 'undefined') ? _attackHistFilter : 'all';
+    const atkArcs = f === 'all' ? arcs : arcs.filter(a => (a.protocol || 'fail2ban') === f);
+    const atkPts  = f === 'all' ? points : points.filter(p => (p.protocol || 'fail2ban') === f);
+    const allArcs = [...atkArcs, ...userArcs];
     _countryCounts = new Map();
     allArcs.forEach(a => {
         if (a.country && a.protocol !== 'who')
@@ -70,23 +74,25 @@ function _globeFlush() {
     const hex = typeof globe.hexBinPointsData === 'function';
     if (_globeViewMode === 'heat' && hex) {
         globe.arcsData([...userArcs]);
-        globe.hexBinPointsData([...points]);
+        globe.hexBinPointsData([...atkPts]);
         globe.pointsData([...homePoints, ...userPoints]);
     } else if (_globeViewMode === 'points' || _globeViewMode === 'heat') {
         globe.arcsData([...userArcs]);
         if (hex) globe.hexBinPointsData([]);
-        globe.pointsData([...points, ...homePoints, ...userPoints]);
+        globe.pointsData([...atkPts, ...homePoints, ...userPoints]);
     } else {
         globe.arcsData(allArcs);
         if (hex) globe.hexBinPointsData([]);
-        globe.pointsData([...points, ...homePoints, ...userPoints]);
+        globe.pointsData([...atkPts, ...homePoints, ...userPoints]);
     }
     globe.labelsData([...labels]);
 }
 
 // Lightweight arc-only refresh — for periodic recolor (avoids re-uploading points/labels)
 function _globeFlushArcsOnly() {
-    globe.arcsData([...arcs, ...userArcs]);
+    const f = (typeof _attackHistFilter !== 'undefined') ? _attackHistFilter : 'all';
+    const atkArcs = f === 'all' ? arcs : arcs.filter(a => (a.protocol || 'fail2ban') === f);
+    globe.arcsData([...atkArcs, ...userArcs]);
 }
 
 // Throttled flush — coalesces rapid calls into one per animation frame

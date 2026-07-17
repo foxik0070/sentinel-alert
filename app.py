@@ -98,11 +98,48 @@ async def _heartbeat_loop():
         await bridge.send_heartbeat()
 
 
+_auto_blocked: set = set()   # IP už poslané na MikroTik v této session
+_auto_hits: dict = {}        # ip -> počet útoků (pro auto_block threshold)
+
+
+def _is_public_ip(ip: str) -> bool:
+    import ipaddress
+    try:
+        a = ipaddress.ip_address(ip)
+        return not (a.is_private or a.is_loopback or a.is_link_local or a.is_multicast)
+    except ValueError:
+        return False
+
+
 async def _broadcaster():
     while True:
         ev = await _broadcast_queue.get()
         if ev.get("type") == "log":
             _log_buffer.append(ev)
+        # MikroTik auto-block (pouze HOME instance): fail2ban ban → hned,
+        # honeypot/proxy útok → po dosažení prahu zásahů z jedné IP
+        if (conf.MIKROTIK_AUTO_BLOCK and conf.MIKROTIK_HOST
+                and conf.MODE_TYPE == "home"
+                and ev.get("type") in ("attack", "ban")):
+            _bip = ev.get("src_ip") or ev.get("ip") or ""
+            if _bip and _bip not in _auto_blocked and _is_public_ip(_bip):
+                _auto_hits[_bip] = _auto_hits.get(_bip, 0) + 1
+                if len(_auto_hits) > 5000:
+                    _auto_hits.clear()
+                threshold = 1 if ev.get("type") == "ban" else conf.MIKROTIK_AUTO_BLOCK_THRESHOLD
+                if _auto_hits[_bip] >= threshold:
+                    _auto_blocked.add(_bip)
+
+                    async def _do_autoblock(bip=_bip):
+                        ok, err = await asyncio.to_thread(
+                            mikrotik.block_ip, bip, "sentinel-auto", "1w")
+                        if ok:
+                            _audit("system", "mikrotik_autoblock", bip)
+                            await _notify_block(bip, "sentinel-auto", "1w")
+                        else:
+                            _auto_blocked.discard(bip)  # retry při dalším útoku
+
+                    asyncio.create_task(_do_autoblock())
         # Watchlist hit — extra log event + push notifikace
         if ev.get("type") in ("attack", "ban"):
             _wip = ev.get("src_ip") or ev.get("ip") or ""
@@ -632,6 +669,7 @@ def config_full(request: Request):
         "enabled": "false", "ntfy_url": "",
         "telegram_token": "", "telegram_chat": "",
     })
+    result.setdefault("mikrotik", {}).setdefault("auto_block_threshold", "3")
     return result
 
 

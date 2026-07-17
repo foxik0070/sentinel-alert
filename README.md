@@ -24,6 +24,25 @@ Additional capabilities:
 - **Sentinel Bridge** — forward events to a central Sentinel server
 - **Honeypot** — fake SSH (port 2222) and HTTP (port 8080) services that capture attacks
 - **ISP enrichment** — background task enriches existing records via ip-api.com
+- **Command palette** — `Ctrl+K` (or `/`): fuzzy actions + global search across devices,
+  attackers, services; type an IP to get a one-click MikroTik block
+- **Keyboard shortcuts** — `1–6` switch tabs, `?` help overlay, `ESC` closes modals
+- **Themes** — 4 color schemes (CYAN / AMBER / MATRIX / RED ALERT), 8 accent colors,
+  light mode; optional CRT/glitch FX, boot sequence and sound FX (Settings → Appearance)
+- **Globe view modes** — ARCS / HEAT (hex-bin density) / POINTS + vector filter
+  (F2B/SSH/HTTP/HTTPS) + **24 h timeline replay** (1 h ≈ 1 s)
+- **Radar widget** — sonar sweep with blips at the real bearing/distance of attackers
+- **IP intelligence** — click any IP: GeoIP/ASN, attack history, ports, bans,
+  watch/block buttons, AbuseIPDB & whois links
+- **Watchlist** — track IPs/prefixes/CIDRs; highlighted everywhere, alarm on hit
+- **Alerting** — ntfy / Telegram push for new LAN devices, offline devices, watchlist hits
+- **MikroTik auto-block** — automatically blocks attackers on the router (see `[mikrotik]`)
+- **Trends & reports** — 7/30-day stacked attack charts with period comparison;
+  daily HTML report generated at 06:00 (`data/reports/`)
+- **Toast notifications** — live "INCOMING" toasts with per-IP dedup
+- **DB maintenance** — nightly retention prune + VACUUM; **audit log** of all
+  sensitive actions (login, block, config) browsable in the DB viewer
+- **Login rate-limit** — max 5 attempts/minute per IP
 
 ---
 
@@ -175,6 +194,35 @@ ignore_ips = 192.168.2.1,192.168.2.202
 [threat]
 # File with one blocked IP per line — visualized on the globe as fail2ban arcs
 blocks_ips_file =
+
+[mikrotik]
+# MikroTik router integration (HOME instance only) — address lists, firewall
+# rules, manual + automatic blocking. Leave host blank to disable.
+host       = 192.168.2.1
+ssh_user   = admin
+# Auto-block attackers: fail2ban ban → immediately, honeypot/proxy attack
+# → after auto_block_threshold hits from the same IP (1 week timeout).
+auto_block           = false
+auto_block_threshold = 3
+
+[pihole]
+# PiHole instances (HOME instance only) — comma-separated hosts, one primary
+hosts    = 192.168.2.5,192.168.2.6
+primary  = 192.168.2.5
+password =
+
+[alerts]
+# Push notifications: new LAN device, device offline, watchlist hit
+enabled        = false
+# ntfy topic URL, e.g. https://ntfy.sh/my-sentinel-topic
+ntfy_url       =
+# Or a Telegram bot:
+telegram_token =
+telegram_chat  =
+
+[db]
+# Retention for attacks + ban history (daily prune at 04:30 + VACUUM)
+retention_days = 90
 ```
 
 Config is read at startup. After editing, restart the service:
@@ -460,6 +508,18 @@ All endpoints returning sensitive data require authentication (session cookie).
 | GET | `/api/services/settings` | no | Get check interval |
 | POST | `/api/services/settings` | no | Set check interval |
 | POST | `/api/heartbeat/{id}` | no | Receive heartbeat ping |
+| GET | `/api/watchlist` | no | Watchlist entries (IP / prefix / CIDR) |
+| POST | `/api/watchlist` | yes | Add entry `{"ip": "1.2.3.4"}` |
+| DELETE | `/api/watchlist/{entry}` | yes | Remove entry |
+| GET | `/api/ip/{ip}/intel` | no | IP intelligence — GeoIP, ASN, attack/ban history |
+| GET | `/api/stats/trends?days=30` | no | Attacks per day per vector + period comparison |
+| GET | `/api/reports` | yes | List generated daily reports |
+| GET | `/api/reports/{name}` | yes | Serve a daily HTML report |
+| POST | `/api/reports/generate` | yes | Generate today's report now |
+| GET | `/api/mikrotik/data` | no | MikroTik address lists + firewall rules |
+| POST | `/api/mikrotik/block` | no | Block IP on MikroTik |
+| POST | `/api/mikrotik/unblock` | no | Remove IP from address list |
+| GET | `/api/pihole/data` | no | PiHole instance stats |
 | WS | `/ws/live` | no | Live event stream |
 
 ---

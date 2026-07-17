@@ -3,12 +3,12 @@
 ## TODO
 
 1. ✅ Aktualizovat CLAUDE.md (hotovo)
-2. **MikroTik (192.168.2.1)** — získat blokované IP, přidat IP z f2b/ssh/http/https, přesunout vše kolem LAN do záložky LOCAL NETWORK, MikroTik vizualizace + ruční/auto blokace — pouze HOME instance
-3. **Threat map** — local network pohled nahradit pohledem zaměřeným na f2b/http/https/ssh útoky
+2. ✅ **MikroTik (192.168.2.1)** — vizualizace, ruční blokace i auto-block hotové (`[mikrotik] auto_block` + `auto_block_threshold`; f2b ban blokuje hned, honeypot/proxy po N zásazích) — pouze HOME instance
+3. ✅ **Threat map** — pohled zaměřený na útoky: vektorový filtr F2B/SSH/HTTP/HTTPS filtruje globus i seznam, LAN prvky přesunuty do LOCAL NETWORK
 4. ✅ Security CRT → OS infrastructure graph — barvy opraveny (hotovo)
-5. **PiHole záložka** — napojení na PiHole instance (zadání IP, primary/secondary pro více instancí), vizualizace dat — pouze HOME instance
-6. ✅ Verze → 2026.06.001 (hotovo)
-7. README, dokumentace, commit
+5. **PiHole záložka** — napojení na PiHole instance (zadání IP, primary/secondary pro více instancí), vizualizace dat — pouze HOME instance (backend + UI existují, zbývá ověřit proti reálné instanci)
+6. ✅ Verze → 2026.07.001 (hotovo)
+7. ✅ README, dokumentace, commit (hotovo)
 
 Rozšířená roadmapa (30 položek UI/UX/funkcionalita): viz `todo.md`.
 
@@ -36,6 +36,9 @@ Sentinel-Alert je nástroj pro monitoring domácí sítě a vizualizaci honeypot
 8. **collector.py** — SSH sběr dat z hostů (OS, CVE, fail2ban, firewall, zdroje).
 9. **blocklist.py** — Správa IP blocklists (GeoIP + fail2ban bans).
 10. **workmode.py** — Přepínání home/work módu (mění accent barvu a layout).
+11. **alerts.py** — Alerting engine + watchlist (`data/watchlist.json`). Push přes ntfy/Telegram (`[alerts]` sekce).
+
+Frontend je rozdělen do modulů `static/js/00-ui.js … 11-ux.js` (klasické skripty načítané v pořadí, sdílený globální scope — žádný build step). 00 = sdílené utility (toasty, UIState, zvuk, boot), 01–10 = per-tab logika, 11 = command palette/UX/IP intel.
 
 ## Konfigurace
 

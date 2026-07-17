@@ -65,6 +65,8 @@ PIHOLE_PASSWORD = _s("pihole", "password", "")
 MIKROTIK_HOST      = _s("mikrotik", "host",       "")
 MIKROTIK_SSH_USER  = _s("mikrotik", "ssh_user",   "sentinel-user")
 MIKROTIK_AUTO_BLOCK = _c.getboolean("mikrotik", "auto_block", fallback=False)
+# Honeypot/proxy útoky: blokovat po N zásazích z jedné IP (fail2ban ban blokuje hned)
+MIKROTIK_AUTO_BLOCK_THRESHOLD = _i("mikrotik", "auto_block_threshold", 3)
 
 # [proxy]
 PROXY_SERVER   = _s("proxy", "server",   "")
