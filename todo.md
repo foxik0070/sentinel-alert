@@ -175,16 +175,16 @@ Neschválené — čeká na výběr. Rozděleno do 6 kategorií.
 - [x] 20. **Drag řazení sloupců** — přeuspořádání sloupců v DB vieweru
 
 ### Analytika / data
-- [ ] 21. **Heatmapa hodina×den** — kdy útoky nejvíc přicházejí
-- [ ] 22. **Korelace IP napříč vektory** — jedna IP na více portech/protokolech
-- [ ] 23. **Reputační skóre IP** — threat-intel + historie + ASN → 0–100
-- [ ] 24. **Top cílové porty** — graf nejčastěji atakovaných portů
-- [ ] 25. **"On this day"** — srovnání s minulým týdnem/měsícem
-- [ ] 26. **DB statistiky** — velikost tabulek, tempo růstu, odhad zaplnění
-- [ ] 27. **Session/duration analýza** — délka útočných sérií z jedné IP
-- [ ] 28. **Predikce trendu** — jednoduchá projekce útoků na příští dny
-- [ ] 29. **Geografický clustering** — seskupení útoků do regionů
-- [ ] 30. **Export do SIEM** — CEF/LEEF formát pro Splunk/QRadar
+- [x] 21. **Heatmapa hodina×den** — kdy útoky nejvíc přicházejí
+- [x] 22. **Korelace IP napříč vektory** — jedna IP na více portech/protokolech
+- [x] 23. **Reputační skóre IP** — threat-intel + historie + ASN → 0–100
+- [x] 24. **Top cílové porty** — graf nejčastěji atakovaných portů
+- [x] 25. **"On this day"** — srovnání s minulým týdnem/měsícem
+- [x] 26. **DB statistiky** — velikost tabulek, tempo růstu, odhad zaplnění
+- [x] 27. **Session/duration analýza** — délka útočných sérií z jedné IP
+- [x] 28. **Predikce trendu** — jednoduchá projekce útoků na příští dny
+- [x] 29. **Geografický clustering** — seskupení útoků do regionů
+- [x] 30. **Export do SIEM** — CEF/LEEF formát pro Splunk/QRadar
 
 ### Integrace / feeds
 - [ ] 31. **AbuseIPDB API** — lookup skóre + hlášení útočníků (s klíčem)

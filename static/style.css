@@ -1488,3 +1488,8 @@ body.light-mode.scheme-red {
 
 /* ── KLÁVESOVÁ NAVIGACE tabulky ────────────────────────────────── */
 #dbv-tbody tr.kb-row { outline: 1px solid var(--accent); background: rgba(var(--accent-rgb),0.1); }
+
+/* ── ANALYTICS heatmapa ────────────────────────────────────────── */
+.an-heat { border-collapse: collapse; font-size: 8px; }
+.an-heat th { color: var(--muted); font-weight: 400; padding: 1px 2px; text-align: center; }
+.an-heat td { width: 13px; height: 13px; border: 1px solid var(--bg-1); }

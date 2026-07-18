@@ -1624,6 +1624,20 @@ def export_table(table: str, request: Request, fmt: str = "csv", ip: str = ""):
             _json_mod.dumps(rows, indent=1, default=str),
             media_type="application/json",
             headers={"Content-Disposition": f'attachment; filename="{base}.json"'})
+    if fmt == "cef" and table in ("attacks", "ban_history"):
+        # ArcSight CEF pro SIEM (Splunk/QRadar/ArcSight)
+        lines = []
+        for r in rows:
+            sip = r.get("src_ip") or r.get("ip", "")
+            proto = (r.get("protocol") or "attack").upper()
+            lines.append(
+                f"CEF:0|Sentinel|Alert|1.0|{proto}|Honeypot {proto} attack|5|"
+                f"src={sip} dpt={r.get('dst_port', 0)} "
+                f"cs1Label=Country cs1={r.get('country', '')} "
+                f"cs2Label=ISP cs2={r.get('isp', '')} rt={r.get('ts') or r.get('timestamp', '')}")
+        return Response(
+            "\n".join(lines) + "\n", media_type="text/plain",
+            headers={"Content-Disposition": f'attachment; filename="{base}.cef"'})
     # CSV
     import csv, io
     buf = io.StringIO()
@@ -1835,6 +1849,127 @@ async def geoblock_apply(request: Request, payload: dict = Body(...)):
     return {"ok": bool(n), "blocked": n, "error": err}
 
 
+@app.get("/api/analytics/heatmap")
+def analytics_heatmap(days: int = 30):
+    """Útoky po hodině (0-23) × dni v týdnu (0=Po). Kdy útoky přicházejí."""
+    days = max(1, min(days, 90))
+    rows = _query(
+        "SELECT CAST(strftime('%w', ts) AS INT) AS dow, "
+        "CAST(strftime('%H', ts) AS INT) AS hour, COUNT(*) AS n "
+        "FROM attacks WHERE ts >= datetime('now', ?) GROUP BY dow, hour",
+        (f"-{days} day",))
+    # strftime %w: 0=neděle → přemapovat na 0=pondělí
+    grid = [[0] * 24 for _ in range(7)]
+    for r in rows:
+        if r["dow"] is None or r["hour"] is None:
+            continue  # neplatný ts formát
+        dow = (r["dow"] + 6) % 7
+        grid[dow][r["hour"]] += r["n"]
+    return {"days": days, "grid": grid}
+
+
+@app.get("/api/analytics/ports")
+def analytics_ports(days: int = 7, limit: int = 15):
+    days = max(1, min(days, 90))
+    rows = _query(
+        "SELECT dst_port, COALESCE(protocol,'?') AS protocol, COUNT(*) AS n "
+        "FROM attacks WHERE ts >= datetime('now', ?) AND dst_port > 0 "
+        "GROUP BY dst_port ORDER BY n DESC LIMIT ?", (f"-{days} day", limit))
+    return {"rows": rows}
+
+
+@app.get("/api/analytics/correlation")
+def analytics_correlation(days: int = 7, limit: int = 20):
+    """IP útočící na více vektorech/portech — koordinovaní útočníci."""
+    days = max(1, min(days, 90))
+    rows = _query(
+        "SELECT src_ip, country, COUNT(DISTINCT protocol) AS vectors, "
+        "COUNT(DISTINCT dst_port) AS ports, COUNT(*) AS n "
+        "FROM attacks WHERE ts >= datetime('now', ?) AND src_ip != '' "
+        "GROUP BY src_ip HAVING vectors > 1 OR ports > 3 "
+        "ORDER BY vectors DESC, n DESC LIMIT ?", (f"-{days} day", limit))
+    return {"rows": rows}
+
+
+@app.get("/api/analytics/subnets")
+def analytics_subnets(days: int = 7, limit: int = 15):
+    """Clustering útočníků do /24 sítí — odhalí botnet rozsahy."""
+    days = max(1, min(days, 90))
+    rows = _query(
+        "SELECT src_ip, country, isp FROM attacks "
+        "WHERE ts >= datetime('now', ?) AND src_ip != ''", (f"-{days} day",))
+    buckets: dict = {}
+    for r in rows:
+        parts = r["src_ip"].split(".")
+        if len(parts) != 4:
+            continue
+        net = ".".join(parts[:3]) + ".0/24"
+        b = buckets.setdefault(net, {"subnet": net, "n": 0, "ips": set(),
+                                     "country": r["country"], "isp": r["isp"]})
+        b["n"] += 1
+        b["ips"].add(r["src_ip"])
+    out = sorted(
+        ({"subnet": b["subnet"], "n": b["n"], "unique_ips": len(b["ips"]),
+          "country": b["country"], "isp": b["isp"]} for b in buckets.values()),
+        key=lambda x: x["unique_ips"], reverse=True)[:limit]
+    return {"rows": out}
+
+
+@app.get("/api/analytics/onthisday")
+def analytics_onthisday():
+    """Dnes vs. stejný den minulý týden a před měsícem."""
+    def _cnt(sql):
+        return _query(sql)[0]["n"]
+    return {
+        "today": _cnt("SELECT COUNT(*) AS n FROM attacks WHERE date(ts)=date('now')"),
+        "last_week": _cnt("SELECT COUNT(*) AS n FROM attacks WHERE date(ts)=date('now','-7 day')"),
+        "last_month": _cnt("SELECT COUNT(*) AS n FROM attacks WHERE date(ts)=date('now','-1 month')"),
+    }
+
+
+@app.get("/api/analytics/dbstats")
+def analytics_dbstats(request: Request):
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    tables = {}
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        for t in ("attacks", "ban_history", "devices", "active_users", "audit_log"):
+            try:
+                tables[t] = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            except Exception:
+                tables[t] = None
+    finally:
+        conn.close()
+    size = os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0
+    # tempo růstu: útoky za posledních 24h
+    growth = _query("SELECT COUNT(*) AS n FROM attacks WHERE ts >= datetime('now','-1 day')")[0]["n"]
+    return {"size_bytes": size, "tables": tables, "attacks_per_day": growth,
+            "retention_days": conf.DB_RETENTION_DAYS}
+
+
+@app.get("/api/analytics/prediction")
+def analytics_prediction(days: int = 14):
+    """Jednoduchá lineární projekce útoků na příští 3 dny (klouzavý trend)."""
+    days = max(7, min(days, 60))
+    rows = _query(
+        "SELECT date(ts) AS day, COUNT(*) AS n FROM attacks "
+        "WHERE ts >= date('now', ?) GROUP BY day ORDER BY day", (f"-{days} day",))
+    counts = [r["n"] for r in rows]
+    if len(counts) < 3:
+        return {"history": counts, "forecast": []}
+    # lineární regrese (least squares)
+    n = len(counts)
+    xs = list(range(n))
+    mx = sum(xs) / n
+    my = sum(counts) / n
+    denom = sum((x - mx) ** 2 for x in xs) or 1
+    slope = sum((xs[i] - mx) * (counts[i] - my) for i in range(n)) / denom
+    intercept = my - slope * mx
+    forecast = [max(0, round(slope * (n + i) + intercept)) for i in range(3)]
+    return {"history": counts, "forecast": forecast, "trend": round(slope, 1)}
+
+
 @app.get("/api/stats/asn")
 def stats_asn(days: int = 7, limit: int = 12):
     """Top ISP/ASN sítě podle počtu útoků — časté zdroje botnetů."""
@@ -1990,9 +2125,20 @@ def ip_intel(ip: str):
         "ORDER BY ts DESC LIMIT 12", (ip,))
     bans = _query(
         "SELECT COUNT(*) AS n, MAX(timestamp) AS last FROM ban_history WHERE ip=?", (ip,))
+    # Reputační skóre 0-100 (vyšší = horší): útoky + vektory + bany + threat-intel
+    total_atk = sum(p["n"] for p in protos)
+    ban_n = (bans[0]["n"] if bans else 0) or 0
+    score = min(100, (
+        min(50, total_atk)            # objem útoků (max 50)
+        + len(protos) * 8             # počet vektorů
+        + min(20, ban_n * 5)          # fail2ban bany
+        + (25 if threatintel.is_known_bad(ip) else 0)  # threat-intel feed
+    ))
     return {
         "ip": ip, "lat": lat, "lon": lon, "country": country, "isp": isp,
         "asn": geoip.lookup_asn(ip), "watched": alerts.is_watched(ip),
+        "known_bad": threatintel.is_known_bad(ip),
+        "reputation": score,
         "protocols": protos, "ports": ports, "recent": recent,
         "bans": bans[0] if bans else {},
     }

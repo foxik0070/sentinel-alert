@@ -45,6 +45,7 @@ function _cpStaticActions() {
         { label: 'SCHEME — MATRIX',           run: () => applyScheme('matrix') },
         { label: 'SCHEME — RED ALERT',        run: () => applyScheme('red') },
         { label: 'ATTACK TRENDS — 7 / 30 DNÍ', run: () => trendsOpen(30) },
+        { label: 'ANALYTICS — heatmapa/korelace/predikce', run: () => analyticsOpen() },
         { label: 'DAILY REPORTS',             run: () => reportsOpen() },
         { label: 'REPLAY 24H NA GLOBUSU',     run: () => { _cpTab('threat'); replayStart(); } },
         { label: 'KIOSK MÓD — AUTO-CYKLENÍ TABŮ', run: () => kioskToggle() },
@@ -341,7 +342,15 @@ async function ipIntelOpen(ip) {
          <td style="color:${PROTO_COLOR[r.protocol] || 'var(--fg)'};">${esc((r.protocol || '?').toUpperCase())}:${r.dst_port}</td>
          <td style="color:var(--muted);overflow:hidden;text-overflow:ellipsis;max-width:180px;white-space:nowrap;">${esc(r.payload)}</td></tr>`).join('');
 
+    const repColor = d.reputation >= 70 ? 'var(--red)' : d.reputation >= 40 ? 'var(--yellow)' : 'var(--green)';
     $('ipm-body').innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;padding:4px 0 8px;">
+            <span style="font-size:9px;letter-spacing:1px;color:var(--muted);">REPUTATION</span>
+            <div style="flex:1;height:10px;background:var(--bg-1);border:1px solid var(--border);">
+                <div style="height:100%;width:${d.reputation ?? 0}%;background:${repColor};"></div></div>
+            <span style="font-weight:800;color:${repColor};">${d.reputation ?? 0}/100</span>
+            ${d.known_bad ? '<span style="color:var(--red);" title="Threat intel feed">☠</span>' : ''}
+        </div>
         <div style="display:grid;grid-template-columns:90px 1fr;gap:3px 10px;padding:4px 0 10px;color:var(--muted);">
             <span>COUNTRY</span><span style="color:var(--fg)">${esc(d.country)}</span>
             <span>ISP</span><span style="color:var(--fg)">${esc(d.isp)}</span>
@@ -364,6 +373,7 @@ async function ipIntelOpen(ip) {
         <a class="btn" href="https://www.abuseipdb.com/check/${ip}" target="_blank" style="text-decoration:none;">ABUSEIPDB ⧉</a>
         <a class="btn" href="https://bgp.he.net/ip/${ip}" target="_blank" style="text-decoration:none;">WHOIS ⧉</a>
         <a class="btn" href="/api/export/attacks?fmt=csv&ip=${encodeURIComponent(ip)}" style="text-decoration:none;">⬇ CSV</a>
+        <a class="btn" href="/api/export/attacks?fmt=cef&ip=${encodeURIComponent(ip)}" style="text-decoration:none;" title="SIEM CEF formát">⬇ CEF</a>
         <button class="btn" id="ipm-copy-btn">⎘ COPY</button>`;
 
     $('ipm-watch-btn').addEventListener('click', async () => {
@@ -990,3 +1000,96 @@ document.addEventListener('keydown', e => {
     rows.forEach((r, i) => r.classList.toggle('kb-row', i === _dbvKbRow));
     rows[_dbvKbRow]?.scrollIntoView({ block: 'nearest' });
 });
+
+// ================================================================
+// ANALYTICS MODÁL — heatmapa, korelace, porty, subnety, predikce
+// ================================================================
+const _anm = document.createElement('div');
+_anm.id = 'analytics-modal';
+_anm.className = 'modal hidden';
+_anm.innerHTML = `
+    <div class="modal-box" style="width:760px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;overflow-y:auto;">
+        <div class="ph"><span>◤ ANALYTICS</span>
+            <button class="btn ghost" onclick="document.getElementById('analytics-modal').classList.add('hidden')">✕</button></div>
+        <div id="an-body" style="padding:8px 0;font-size:11px;"></div>
+    </div>`;
+document.body.appendChild(_anm);
+_anm.addEventListener('click', e => { if (e.target === _anm) _anm.classList.add('hidden'); });
+
+async function analyticsOpen() {
+    _anm.classList.remove('hidden');
+    $('an-body').innerHTML = '<div class="skel"></div>'.repeat(6);
+    const esc = s => String(s ?? '').replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+    let hm, ports, corr, subs, otd, pred;
+    try {
+        [hm, ports, corr, subs, otd, pred] = await Promise.all([
+            fetch('/api/analytics/heatmap?days=30').then(r => r.json()),
+            fetch('/api/analytics/ports').then(r => r.json()),
+            fetch('/api/analytics/correlation').then(r => r.json()),
+            fetch('/api/analytics/subnets').then(r => r.json()),
+            fetch('/api/analytics/onthisday').then(r => r.json()),
+            fetch('/api/analytics/prediction').then(r => r.json()),
+        ]);
+    } catch { $('an-body').innerHTML = '<div class="empty">Load failed.</div>'; return; }
+
+    // Heatmapa hodina × den
+    const DOW = ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'];
+    const maxCell = Math.max(1, ...hm.grid.flat());
+    let heat = '<table class="an-heat"><tr><th></th>' +
+        Array.from({ length: 24 }, (_, h) => `<th>${h}</th>`).join('') + '</tr>';
+    hm.grid.forEach((row, d) => {
+        heat += `<tr><th>${DOW[d]}</th>` + row.map(v => {
+            const a = (v / maxCell).toFixed(2);
+            return `<td style="background:rgba(var(--accent-rgb),${a})" title="${v}"></td>`;
+        }).join('') + '</tr>';
+    });
+    heat += '</table>';
+
+    const portRows = (ports.rows || []).map(p => {
+        const col = PROTO_COLOR[p.protocol] || 'var(--accent)';
+        return `<span class="port" style="border-color:${col}44;color:${col}">:${p.dst_port} ×${p.n}</span>`;
+    }).join(' ');
+
+    const corrRows = (corr.rows || []).slice(0, 10).map(r =>
+        `<tr><td style="font-family:monospace;color:var(--accent)">${esc(r.src_ip)}</td>
+         <td style="color:var(--muted)">${esc(r.country)}</td>
+         <td style="text-align:right;color:var(--red)">${r.vectors} vekt.</td>
+         <td style="text-align:right;color:var(--yellow)">${r.ports} portů</td>
+         <td style="text-align:right">${r.n}×</td></tr>`).join('');
+
+    const subRows = (subs.rows || []).slice(0, 10).map(r =>
+        `<tr><td style="font-family:monospace;color:var(--accent)">${esc(r.subnet)}</td>
+         <td style="color:var(--muted);overflow:hidden;text-overflow:ellipsis;max-width:180px">${esc(r.isp)}</td>
+         <td style="text-align:right;color:var(--red)">${r.unique_ips} IP</td>
+         <td style="text-align:right">${r.n}×</td></tr>`).join('');
+
+    const predBars = [...pred.history.slice(-14), ...pred.forecast].map((v, i) => {
+        const isF = i >= Math.min(14, pred.history.length);
+        const mx = Math.max(1, ...pred.history, ...pred.forecast);
+        return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:60px;">
+            <div style="background:${isF ? 'var(--yellow)' : 'var(--accent)'};opacity:${isF ? 0.6 : 0.85};height:${(v / mx * 100).toFixed(0)}%;" title="${v}${isF ? ' (predikce)' : ''}"></div></div>`;
+    }).join('');
+
+    $('an-body').innerHTML = `
+        <div class="cp-group" style="padding-left:0;">KDY ÚTOKY PŘICHÁZEJÍ (hodina × den, 30 dní)</div>
+        <div style="overflow-x:auto;">${heat}</div>
+
+        <div class="cp-group" style="padding-left:0;margin-top:12px;">TOP CÍLOVÉ PORTY (7 dní)</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;">${portRows || '—'}</div>
+
+        <div class="cp-group" style="padding-left:0;margin-top:12px;">PREDIKCE (14 dní + 3 dny výhled) · trend ${pred.trend > 0 ? '+' : ''}${pred.trend ?? 0}/den</div>
+        <div style="display:flex;gap:2px;align-items:flex-end;">${predBars}</div>
+
+        <div class="cp-group" style="padding-left:0;margin-top:12px;">ON THIS DAY</div>
+        <div style="display:flex;gap:16px;">
+            <span>Dnes: <b style="color:var(--accent)">${otd.today}</b></span>
+            <span style="color:var(--muted)">Před týdnem: <b>${otd.last_week}</b></span>
+            <span style="color:var(--muted)">Před měsícem: <b>${otd.last_month}</b></span>
+        </div>
+
+        <div class="cp-group" style="padding-left:0;margin-top:12px;">KOORDINOVANÍ ÚTOČNÍCI (více vektorů/portů)</div>
+        <table style="width:100%;border-collapse:collapse;line-height:1.8;">${corrRows || '<tr><td>—</td></tr>'}</table>
+
+        <div class="cp-group" style="padding-left:0;margin-top:12px;">BOTNET SÍTĚ (/24 clustering)</div>
+        <table style="width:100%;border-collapse:collapse;line-height:1.8;">${subRows || '<tr><td>—</td></tr>'}</table>`;
+}
