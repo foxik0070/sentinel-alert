@@ -1464,3 +1464,27 @@ body.light-mode.scheme-red {
     --panel-2: rgba(245,208,208,0.97); --input-bg: #f5dcdc; --grid-line: #e8bcbc; --scrollbar: #d89898;
     background: radial-gradient(ellipse at center, #fdecec 0%, #f5dcdc 70%, #e8c8c8 100%);
 }
+
+/* ── KONTEXTOVÉ MENU IP ────────────────────────────────────────── */
+#ip-ctx-menu {
+    position: fixed; z-index: 960; min-width: 180px;
+    background: var(--panel-2); border: 1px solid var(--border-2);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.6); display: flex; flex-direction: column;
+}
+#ip-ctx-menu.hidden { display: none; }
+#ip-ctx-menu .ctx-head {
+    padding: 6px 12px; font-family: monospace; font-size: 11px; color: var(--accent);
+    border-bottom: 1px solid var(--border);
+}
+#ip-ctx-menu button {
+    background: none; border: none; color: var(--fg); text-align: left;
+    padding: 6px 12px; font-size: 11px; font-family: inherit; cursor: pointer;
+}
+#ip-ctx-menu button:hover { background: rgba(var(--accent-rgb),0.12); color: var(--accent); }
+
+/* ── PALETTE pin ───────────────────────────────────────────────── */
+.cp-pin { color: var(--muted); cursor: pointer; font-size: 12px; flex-shrink: 0; padding: 0 4px; }
+.cp-pin:hover { color: var(--yellow); }
+
+/* ── KLÁVESOVÁ NAVIGACE tabulky ────────────────────────────────── */
+#dbv-tbody tr.kb-row { outline: 1px solid var(--accent); background: rgba(var(--accent-rgb),0.1); }

@@ -729,6 +729,7 @@ async function dbvLoad() {
     const data = await fetch(`/api/db/${_dbv.table}?${params}`).then(r => r.json()).catch(() => null);
     if (!data || data.error) return;
     _dbv.cols = data.columns; _dbv.total = data.total; _dbv.pk = data.pk;
+    _dbv.lastRows = data.rows; // snapshot pro undo mazání
 
     // Header with sortable columns
     const thead = $('dbv-thead');
@@ -804,6 +805,10 @@ async function dbvDeleteSelected() {
     if (!_dbv.selected.size) return;
     if (!confirm(`Delete ${_dbv.selected.size} record(s)?`)) return;
     const ids = [..._dbv.selected];
+    // Snapshot smazaných řádků pro undo
+    const idSet = new Set(ids);
+    const backup = (_dbv.lastRows || []).filter(row => idSet.has(String(row[_dbv.pk])));
+    const table = _dbv.table;
     const r = await fetch(`/api/db/${_dbv.table}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
@@ -813,6 +818,19 @@ async function dbvDeleteSelected() {
         _dbv.selected.clear();
         _dbv.page = 0;
         dbvLoad();
+        if (backup.length) {
+            showToast({
+                title: `SMAZÁNO ${r.deleted}`, body: 'Klikni pro UNDO', color: 'var(--yellow)', ttl: 8000,
+                onClick: async () => {
+                    const rr = await fetch(`/api/db/${table}/restore`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(backup),
+                    }).then(x => x.json()).catch(() => ({}));
+                    if (rr.restored) { showToast({ title: `OBNOVENO ${rr.restored}`, color: 'var(--green)' }); dbvLoad(); }
+                    else showToast({ title: 'UNDO FAILED', body: rr.error || '?', color: 'var(--red)' });
+                },
+            });
+        }
     }
 }
 

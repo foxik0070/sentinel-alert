@@ -163,16 +163,16 @@ Neschválené — čeká na výběr. Rozděleno do 6 kategorií.
 - [x] 10. **Animovaný přechod hodnot gauge** — plynulé dojetí ringu
 
 ### UX
-- [ ] 11. **Bulk block** — multi-select v attack history → hromadná blokace
-- [ ] 12. **Undo smazání** — vrácení smazaných řádků v DB vieweru (soft delete)
-- [ ] 13. **Uložené filtry/pohledy** — pojmenované kombinace filtrů
-- [ ] 14. **Kontextové menu na IP** — pravé tlačítko: block/watch/intel/copy
-- [ ] 15. **Historie příkazů v palette** — poslední použité akce nahoře
-- [ ] 16. **Pinned akce v palette** — oblíbené akce připnout
-- [ ] 17. **Onboarding tour** — první spuštění: průvodce po tabech
-- [ ] 18. **Rychlé HOME/WORK přepnutí** — přepínač módu přímo v HUD
-- [ ] 19. **Klávesová navigace tabulek** — šipky + Enter v DB vieweru/matici
-- [ ] 20. **Drag řazení sloupců** — přeuspořádání sloupců v DB vieweru
+- [x] 11. **Bulk block** — multi-select v attack history → hromadná blokace
+- [x] 12. **Undo smazání** — vrácení smazaných řádků v DB vieweru (soft delete)
+- [x] 13. **Uložené filtry/pohledy** — pojmenované kombinace filtrů
+- [x] 14. **Kontextové menu na IP** — pravé tlačítko: block/watch/intel/copy
+- [x] 15. **Historie příkazů v palette** — poslední použité akce nahoře
+- [x] 16. **Pinned akce v palette** — oblíbené akce připnout
+- [x] 17. **Onboarding tour** — první spuštění: průvodce po tabech
+- [x] 18. **Rychlé HOME/WORK přepnutí** — přepínač módu přímo v HUD
+- [x] 19. **Klávesová navigace tabulek** — šipky + Enter v DB vieweru/matici
+- [x] 20. **Drag řazení sloupců** — přeuspořádání sloupců v DB vieweru
 
 ### Analytika / data
 - [ ] 21. **Heatmapa hodina×den** — kdy útoky nejvíc přicházejí

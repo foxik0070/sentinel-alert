@@ -665,3 +665,22 @@ function timeAgo(iso) {
     return `${(s/86400)|0}d`;
 }
 
+
+// Bulk block — zablokuje všechny aktuálně zobrazené útočníky (filtr-aware)
+async function bulkBlockVisible() {
+    const filtered = _attackHistFilter === 'all'
+        ? _attackHistory
+        : _attackHistory.filter(b => (b.protocol || 'fail2ban') === _attackHistFilter);
+    const ips = [...new Set(filtered.map(b => b.src_ip).filter(Boolean))].slice(0, 200);
+    if (!ips.length) return;
+    if (!confirm(`Zablokovat ${ips.length} IP na MikroTiku (1 týden)?`)) return;
+    const r = await fetch('/api/mikrotik/block-batch', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ips, timeout: '1w' }),
+    }).then(x => x.json()).catch(() => ({ ok: false, error: 'request failed' }));
+    showToast({
+        title: r.ok ? 'BULK BLOCK' : 'BULK BLOCK FAILED',
+        body: r.ok ? `${r.blocked} IP zablokováno` : (r.error || '?'),
+        color: r.ok ? 'var(--green)' : 'var(--red)',
+    });
+}

@@ -1411,6 +1411,37 @@ async def db_delete(table: str, request: Request, ids: list = Body(...)):
     return {"deleted": deleted}
 
 
+@app.post("/api/db/{table}/restore")
+async def db_restore(table: str, request: Request, rows: list = Body(...)):
+    """Undo mazání — vloží zpět dříve smazané řádky (jen povolené sloupce)."""
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    if table not in _DB_TABLES:
+        return JSONResponse({"error": "unknown table"}, 400)
+    _, cols = _DB_TABLES[table]
+    insert_cols = [c for c in cols if c not in ("rowid",)]
+    if not rows:
+        return {"restored": 0}
+    conn = sqlite3.connect(DB_PATH)
+    restored = 0
+    try:
+        ph = ",".join("?" * len(insert_cols))
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            vals = [row.get(c) for c in insert_cols]
+            conn.execute(
+                f"INSERT OR IGNORE INTO {table} ({','.join(insert_cols)}) VALUES ({ph})", vals)
+            restored += 1
+        conn.commit()
+    except Exception as e:
+        return JSONResponse({"restored": 0, "error": str(e)[:120]}, status_code=500)
+    finally:
+        conn.close()
+    _audit(_client_ip(request), "db_restore", f"{table} × {restored}")
+    return {"restored": restored}
+
+
 @app.get("/api/fsc/data")
 def fsc_data():
     return fsc.data_store
@@ -1478,6 +1509,23 @@ async def sniproxy_ban(payload: dict = Body(...)):
 @app.get("/api/mikrotik/data")
 def mikrotik_data():
     return mikrotik.data_store
+
+
+@app.post("/api/mikrotik/block-batch")
+async def mikrotik_block_batch(request: Request, payload: dict = Body(...)):
+    """Hromadná blokace více IP jedním SSH voláním."""
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    if not conf.MIKROTIK_HOST:
+        return JSONResponse({"ok": False, "error": "MikroTik není nakonfigurován"}, status_code=400)
+    ips = [str(i).strip() for i in payload.get("ips", []) if _is_public_ip(str(i).strip())][:200]
+    if not ips:
+        return JSONResponse({"ok": False, "error": "no valid ips"}, status_code=400)
+    timeout = str(payload.get("timeout", "1w"))
+    n, err = await asyncio.to_thread(mikrotik.block_ips_batch, ips, "sentinel-bulk", timeout)
+    if n:
+        _audit(_client_ip(request), "mikrotik_block_batch", f"{n} IP")
+    return {"ok": bool(n), "blocked": n, "error": err}
 
 
 @app.post("/api/mikrotik/block")

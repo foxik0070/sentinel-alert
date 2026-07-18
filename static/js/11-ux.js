@@ -49,6 +49,8 @@ function _cpStaticActions() {
         { label: 'REPLAY 24H NA GLOBUSU',     run: () => { _cpTab('threat'); replayStart(); } },
         { label: 'KIOSK MÓD — AUTO-CYKLENÍ TABŮ', run: () => kioskToggle() },
         { label: 'BACKUP DATABÁZE',           run: () => { window.location.href = '/api/backup'; } },
+        { label: 'ULOŽIT POHLED',             run: () => viewSave() },
+        ...(_views().map(v => ({ label: 'POHLED — ' + v.name, run: () => viewApply(v) }))),
         { label: 'HELP / SHORTCUTS',    hint: '?', run: () => helpToggle(true) },
     ];
 }
@@ -78,7 +80,19 @@ function cpRender() {
         } });
     }
 
-    _cpStaticActions()
+    const allActions = _cpStaticActions();
+    if (!q) {
+        // Připnuté + nedávné akce nahoře (jen bez dotazu)
+        _cpPinned().forEach(label => {
+            const a = allActions.find(x => x.label === label);
+            if (a) items.push({ group: '★ PŘIPNUTÉ', ...a });
+        });
+        _cpHistory().forEach(label => {
+            const a = allActions.find(x => x.label === label);
+            if (a && !_cpPinned().includes(label)) items.push({ group: 'NEDÁVNÉ', ...a });
+        });
+    }
+    allActions
         .filter(a => !q || a.label.toLowerCase().includes(q))
         .forEach(a => items.push({ group: 'AKCE', ...a }));
 
@@ -130,8 +144,18 @@ function cpRender() {
     _cpResults.querySelectorAll('.cp-item').forEach(el => {
         const it = _cpItems[+el.dataset.i];
         el.querySelector('.cp-label').textContent = it.label;
-        el.querySelector('.cp-hint-r').textContent = it.hint || '';
-        el.addEventListener('click', () => { cpClose(); it.run(); });
+        // pin toggle jen u akcí (mají v allActions)
+        if (it.group !== 'ZAŘÍZENÍ' && it.group !== 'ÚTOČNÍCI' && it.group !== 'SLUŽBY') {
+            const pin = document.createElement('span');
+            pin.className = 'cp-pin';
+            pin.textContent = _cpPinned().includes(it.label) ? '★' : '☆';
+            pin.title = 'Připnout';
+            pin.addEventListener('click', e => { e.stopPropagation(); cpTogglePin(it.label); });
+            el.querySelector('.cp-hint-r').replaceWith(pin);
+        } else {
+            el.querySelector('.cp-hint-r').textContent = it.hint || '';
+        }
+        el.addEventListener('click', () => { cpClose(); _cpPushHistory(it.label); it.run(); });
         el.addEventListener('mousemove', () => {
             if (_cpSel !== +el.dataset.i) { _cpSel = +el.dataset.i; _cpHighlight(); }
         });
@@ -147,7 +171,7 @@ _cpInput.addEventListener('input', () => { _cpSel = 0; cpRender(); });
 _cpInput.addEventListener('keydown', e => {
     if (e.key === 'ArrowDown') { e.preventDefault(); if (_cpSel < _cpItems.length - 1) _cpSel++; _cpHighlight(); _scrollSel(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); if (_cpSel > 0) _cpSel--; _cpHighlight(); _scrollSel(); }
-    else if (e.key === 'Enter') { const it = _cpItems[_cpSel]; if (it) { cpClose(); it.run(); } }
+    else if (e.key === 'Enter') { const it = _cpItems[_cpSel]; if (it) { cpClose(); _cpPushHistory(it.label); it.run(); } }
     else if (e.key === 'Escape') cpClose();
 });
 function _scrollSel() {
@@ -795,4 +819,174 @@ document.addEventListener('keydown', e => {
         const f = document.querySelector('.chart-fullscreen');
         if (f) { f.classList.remove('chart-fullscreen'); document.body.classList.remove('has-fullscreen'); }
     }
+});
+
+// ================================================================
+// KONTEXTOVÉ MENU NA IP — pravé tlačítko kdekoli na IP adrese
+// ================================================================
+const _ctxMenu = document.createElement('div');
+_ctxMenu.id = 'ip-ctx-menu';
+_ctxMenu.className = 'hidden';
+document.body.appendChild(_ctxMenu);
+
+const _IP_RE = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/;
+
+function _extractIP(el) {
+    // najdi IP v textu elementu nebo jeho data atributech
+    const cand = el.dataset?.ip || el.textContent || '';
+    const m = cand.match(_IP_RE);
+    return m ? m[0] : null;
+}
+
+document.addEventListener('contextmenu', e => {
+    const el = e.target.closest('[data-ip], .ip, .tk-item, .cp-item, td');
+    if (!el) return;
+    const ip = _extractIP(el);
+    if (!ip) return;
+    e.preventDefault();
+    _ctxShow(e.clientX, e.clientY, ip);
+});
+
+function _ctxShow(x, y, ip) {
+    const watched = typeof _isWatched === 'function' && _isWatched(ip);
+    const items = [
+        ['⧉ IP intel', () => ipIntelOpen(ip)],
+        ['⊘ Block (MikroTik)', () => {
+            _cpTab('network');
+            setTimeout(() => { const i = $('mt-block-ip'); if (i) { i.value = ip; i.focus(); } }, 250);
+        }],
+        [watched ? '★ Unwatch' : '☆ Watch', async () => {
+            const j = await (watched ? wlDel(ip) : wlAdd(ip));
+            if (j.error) showToast({ title: 'AUTH REQUIRED', color: 'var(--red)' });
+            else showToast({ title: watched ? 'UNWATCHED' : 'WATCHED', body: ip, color: 'var(--yellow)' });
+        }],
+        ['◎ Globe', () => {
+            const a = (_attackHistory || []).find(x => x.src_ip === ip);
+            _cpTab('threat'); if (a) centerGlobeOn(a.lat, a.lon);
+        }],
+        ['⎘ Copy', () => navigator.clipboard?.writeText(ip)],
+        ['⬇ Export útoků (CSV)', () => { window.location.href = `/api/export/attacks?fmt=csv&ip=${encodeURIComponent(ip)}`; }],
+    ];
+    _ctxMenu.innerHTML = `<div class="ctx-head">${ip}</div>`;
+    items.forEach(([label, fn]) => {
+        const b = document.createElement('button');
+        b.textContent = label;
+        b.addEventListener('click', () => { _ctxHide(); fn(); });
+        _ctxMenu.appendChild(b);
+    });
+    _ctxMenu.classList.remove('hidden');
+    const w = _ctxMenu.offsetWidth, h = _ctxMenu.offsetHeight;
+    _ctxMenu.style.left = Math.min(x, innerWidth - w - 8) + 'px';
+    _ctxMenu.style.top = Math.min(y, innerHeight - h - 8) + 'px';
+}
+function _ctxHide() { _ctxMenu.classList.add('hidden'); }
+document.addEventListener('click', _ctxHide);
+document.addEventListener('scroll', _ctxHide, true);
+
+// ================================================================
+// PALETTE — historie a připnuté akce
+// ================================================================
+function _cpHistory() { return UIState.get('cp-history', []); }
+function _cpPushHistory(label) {
+    let h = _cpHistory().filter(l => l !== label);
+    h.unshift(label);
+    UIState.set('cp-history', h.slice(0, 8));
+}
+function _cpPinned() { return UIState.get('cp-pinned', []); }
+function cpTogglePin(label) {
+    let p = _cpPinned();
+    p = p.includes(label) ? p.filter(l => l !== label) : [...p, label];
+    UIState.set('cp-pinned', p);
+    cpRender();
+}
+
+// ================================================================
+// ONBOARDING TOUR — jednoduchý průvodce při prvním spuštění
+// ================================================================
+(function onboarding() {
+    if (UIState.get('onboarded', false)) return;
+    if (new URLSearchParams(location.search).get('solo') || new URLSearchParams(location.search).get('kiosk')) return;
+    setTimeout(() => {
+        const ov = document.createElement('div');
+        ov.id = 'onboard-overlay';
+        ov.className = 'modal';
+        ov.innerHTML = `
+            <div class="modal-box" style="width:460px;">
+                <div class="ph"><span>◤ VÍTEJ V SENTINEL-ALERT</span></div>
+                <div style="padding:10px 0;font-size:12px;line-height:1.9;color:var(--fg);">
+                    <p style="margin:0 0 10px;color:var(--muted);">Rychlý přehled:</p>
+                    <div><b style="color:var(--accent)">Ctrl+K</b> — příkazová paleta + hledání</div>
+                    <div><b style="color:var(--accent)">1–6</b> — přepínání záložek</div>
+                    <div><b style="color:var(--accent)">?</b> — nápověda &amp; zkratky</div>
+                    <div><b style="color:var(--accent)">Pravé tlačítko na IP</b> — block / watch / intel</div>
+                    <div><b style="color:var(--accent)">Settings → Appearance</b> — barevná schémata, 2FA</div>
+                    <div style="margin-top:8px;color:var(--muted);">Globus vpravo nahoře: ⟳ rotace · ARCS/HEAT/POINTS · ▶ 24H replay.</div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn primary" id="onboard-done" style="width:100%;">ZAČÍT</button>
+                </div>
+            </div>`;
+        document.body.appendChild(ov);
+        ov.querySelector('#onboard-done').addEventListener('click', () => {
+            UIState.set('onboarded', true); ov.remove();
+        });
+    }, 1500);
+})();
+
+// ================================================================
+// HOME/WORK indikátor v HUD — klik otevře nastavení módu
+// ================================================================
+(function modeIndicator() {
+    const el = $('hud-home');
+    if (!el) return;
+    el.style.cursor = 'pointer';
+    el.title = 'Režim HOME/WORK — klikni pro nastavení';
+    el.addEventListener('click', () => {
+        if (typeof openSettings === 'function' && document.querySelector('.auth-only')?.offsetParent !== null)
+            openSettings();
+    });
+})();
+
+// ================================================================
+// ULOŽENÉ POHLEDY — snapshot tab + filtr + schéma
+// ================================================================
+function _views() { return UIState.get('saved-views', []); }
+function viewSave() {
+    const name = prompt('Název pohledu:');
+    if (!name) return;
+    const v = {
+        name,
+        tab: (typeof _activeTab !== 'undefined') ? _activeTab : 'threat',
+        filter: (typeof _attackHistFilter !== 'undefined') ? _attackHistFilter : 'all',
+        scheme: localStorage.getItem('sentinel-scheme') || 'default',
+    };
+    UIState.set('saved-views', [..._views().filter(x => x.name !== name), v]);
+    showToast({ title: 'POHLED ULOŽEN', body: name, color: 'var(--green)' });
+}
+function viewApply(v) {
+    if (v.scheme) applyScheme(v.scheme);
+    const tb = document.querySelector(`.tab-btn[data-tab="${v.tab}"]`);
+    if (tb) tb.click();
+    if (v.filter) {
+        const fb = document.querySelector(`.hist-filter-btn[data-filter="${v.filter}"]`);
+        if (fb) fb.click();
+    }
+}
+
+// ================================================================
+// KLÁVESOVÁ NAVIGACE TABULEK — DB viewer (j/k + Enter)
+// ================================================================
+let _dbvKbRow = -1;
+document.addEventListener('keydown', e => {
+    const dbv = $('db-viewer');
+    if (!dbv || dbv.classList.contains('hidden')) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+    const rows = [...dbv.querySelectorAll('#dbv-tbody tr')];
+    if (!rows.length) return;
+    if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); _dbvKbRow = Math.min(rows.length - 1, _dbvKbRow + 1); }
+    else if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); _dbvKbRow = Math.max(0, _dbvKbRow - 1); }
+    else return;
+    rows.forEach((r, i) => r.classList.toggle('kb-row', i === _dbvKbRow));
+    rows[_dbvKbRow]?.scrollIntoView({ block: 'nearest' });
 });
