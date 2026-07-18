@@ -422,10 +422,13 @@ setInterval(() => { fetchActiveUsers(); }, 30000);
 // ── Attack history ─────────────────────────────────────────────────────────
 const _ATTACK_HIST_MAX_S = 24 * 3600;
 
+const _knownBadIPs = new Set(); // IP označené threat-intel feedem
+
 function pushAttackHistory(entry) {
     const ts = entry.ts || entry.timestamp || null;
     const src_ip = entry.src_ip || entry.ip || '?';
     if (!src_ip || src_ip === '?') return;
+    if (entry.known_bad) _knownBadIPs.add(src_ip);
     _attackHistory.unshift({
         ts, src_ip,
         country:  entry.country  || '?',
@@ -434,6 +437,7 @@ function pushAttackHistory(entry) {
         protocol: entry.protocol || 'fail2ban',
         lat: entry.lat || 0,
         lon: entry.lon || 0,
+        known_bad: !!entry.known_bad,
     });
     _ipCounts.set(src_ip, (_ipCounts.get(src_ip) || 0) + 1);
     // Prune to 24h
@@ -511,7 +515,7 @@ function renderAttackHistory() {
             <span class="port" style="min-width:38px;text-align:center;align-self:center;color:${col};border-color:${col}44;">${label}</span>
             <div style="flex:1;min-width:0;padding-left:4px;">
                 <div style="display:flex;justify-content:space-between;gap:4px;">
-                    <span class="ip" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${(typeof _isWatched==='function'&&_isWatched(b.src_ip))?'<span style="color:var(--yellow);">⭐</span> ':''}${escape(b.src_ip)}</span>
+                    <span class="ip" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${(typeof _isWatched==='function'&&_isWatched(b.src_ip))?'<span style="color:var(--yellow);">⭐</span> ':''}${(b.known_bad||_knownBadIPs.has(b.src_ip))?'<span style="color:var(--red);" title="Known bad — threat intel feed">☠</span> ':''}${escape(b.src_ip)}</span>
                     <span class="meta" style="white-space:nowrap;color:${cnt>1?col:'#4d7479'};" title="${cnt} hit(s) from this IP">${cnt>1?'×'+cnt:time}</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:4px;">

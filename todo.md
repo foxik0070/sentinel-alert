@@ -133,7 +133,7 @@ Původní TODO z CLAUDE.md (MikroTik #2, Threat map #3, PiHole #5, dokumentace #
 ## Čtvrtá vlna námětů (schváleno)
 
 ### Threat intel / bezpečnost
-- [ ] **Threat intel blocklist import** — blocklist.de/spamhaus/FireHOL, "known bad" zvýraznění, volitelný auto-block
+- [x] **Threat intel blocklist import** — blocklist.de/spamhaus/FireHOL, "known bad" zvýraznění, volitelný auto-block
 - [ ] **GeoIP blocking (celé země)** — výběr zemí → MikroTik address-list, statistika dopadu
 - [ ] **Fail2ban jail management** — přehled jailů napříč hosty, unban přes SSH
 - [x] **ASN / ISP breakdown** — graf útoků podle ASN/ISP

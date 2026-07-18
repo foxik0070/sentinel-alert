@@ -95,6 +95,10 @@ FSC_IGNORE_IPS = [
 
 # [threat]
 BLOCKLIST_FILE = _s("threat", "blocks_ips_file", "")
+# Import veřejných threat-intel blocklistů (blocklist.de, Spamhaus, FireHOL)
+THREATINTEL_ENABLED = _c.getboolean("threat", "intel_enabled", fallback=False)
+# Auto-block known-bad IP na MikroTiku (vyžaduje mikrotik.auto_block)
+THREATINTEL_AUTOBLOCK = _c.getboolean("threat", "intel_autoblock", fallback=False)
 
 # [db]
 DB_RETENTION_DAYS = _i("db", "retention_days", 90)

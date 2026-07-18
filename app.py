@@ -29,6 +29,7 @@ import mikrotik
 import pihole
 import proxy_monitor
 import tasks
+import threatintel
 import totp
 import workmode
 
@@ -141,6 +142,28 @@ async def _broadcaster():
                             _auto_blocked.discard(bip)  # retry při dalším útoku
 
                     asyncio.create_task(_do_autoblock())
+        # Threat-intel: označ known-bad IP (obohatí event pro globus/UI)
+        if ev.get("type") in ("attack", "ban"):
+            _tip = ev.get("src_ip") or ev.get("ip") or ""
+            if _tip and threatintel.is_known_bad(_tip):
+                ev["known_bad"] = True
+                # auto-block known-bad na MikroTiku (opt-in, jen HOME)
+                if (conf.THREATINTEL_AUTOBLOCK and conf.MIKROTIK_HOST
+                        and conf.MODE_TYPE == "home" and _tip not in _auto_blocked
+                        and _is_public_ip(_tip)):
+                    _auto_blocked.add(_tip)
+
+                    async def _do_ti_block(bip=_tip):
+                        ok, _ = await asyncio.to_thread(
+                            mikrotik.block_ip, bip, "sentinel-threatintel", "4w")
+                        if ok:
+                            _audit("system", "threatintel_autoblock", bip)
+                            await _notify_block(bip, "sentinel-threatintel", "4w")
+                        else:
+                            _auto_blocked.discard(bip)
+
+                    asyncio.create_task(_do_ti_block())
+
         # Watchlist hit — extra log event + push notifikace
         if ev.get("type") in ("attack", "ban"):
             _wip = ev.get("src_ip") or ev.get("ip") or ""
@@ -182,6 +205,7 @@ async def lifespan(app: FastAPI):
                         http_port=conf.HONEYPOT_HTTP_PORT)
     fsc.start()
     blocklist.start()
+    threatintel.start(conf.THREATINTEL_ENABLED)
     global _loop
     _loop = asyncio.get_event_loop()
     proxy_monitor.start(
@@ -961,6 +985,9 @@ def config_full(request: Request):
         "slack_webhook": "", "discord_webhook": "",
     })
     result.setdefault("mikrotik", {}).setdefault("auto_block_threshold", "3")
+    _t = result.setdefault("threat", {})
+    _t.setdefault("intel_enabled", "false")
+    _t.setdefault("intel_autoblock", "false")
     return result
 
 
@@ -1680,6 +1707,11 @@ def stats_summary():
         "devices_total": devrow["total"],
         "pihole_block_pct": pct,
     }
+
+
+@app.get("/api/threatintel/status")
+def threatintel_status():
+    return threatintel.stats()
 
 
 @app.get("/api/stats/asn")

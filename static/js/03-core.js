@@ -503,8 +503,8 @@ async function _cfgWlDel(entry) {
 }
 
 function _cfgField(section, key, val) {
-    const SENSITIVE = new Set(['token', 'ha_token', 'password', 'secret', 'api_key', 'key']);
-    const BOOLEANS  = new Set(['enabled', 'auto_block']);
+    const SENSITIVE = new Set(['token', 'ha_token', 'password', 'secret', 'api_key', 'key', 'totp_secret', 'api_token']);
+    const BOOLEANS  = new Set(['enabled', 'auto_block', 'intel_enabled', 'intel_autoblock']);
     const isBool = BOOLEANS.has(key);
     const isPass = SENSITIVE.has(key);
     const checked = String(val).toLowerCase() === 'true';
@@ -528,7 +528,7 @@ function _cfgGroup(title, sections, data) {
     const inner = sections.flatMap(sec => {
         const keys = data[sec];
         if (!keys) return [];
-        const SEC_LABELS = { server:'SERVER', auth:'AUTHENTICATION', home:'HOME LOCATION',
+        const SEC_LABELS = { server:'SERVER', auth:'AUTHENTICATION', home:'HOME LOCATION', threat:'THREAT INTEL',
             scanner:'SCANNER', mikrotik:'MIKROTIK ROUTER', pihole:'PIHOLE', honeypot:'HONEYPOT',
             security_center:'SECURITY CENTER', threat:'THREAT INTEL',
             sentinel:'SENTINEL LINK', proxy:'NGINX PROXY', collector:'COLLECTOR' };
@@ -583,7 +583,7 @@ async function openSettings() {
     const tabs = [
         { id: 'status',      label: 'STATUS',      html: statusPane },
         { id: 'system',      label: 'SYSTEM',      html: _cfgThemeBlock() + _cfgSecurityBlock() + _cfgWatchlistBlock() + _cfgGroup('SYSTEM', ['server','auth','alerts'], data) },
-        { id: 'network',     label: 'NETWORK',     html: _cfgGroup('NETWORK',     ['home','scanner','mikrotik','pihole'], data), homeOnly: true },
+        { id: 'network',     label: 'NETWORK',     html: _cfgGroup('NETWORK',     ['home','scanner','mikrotik','pihole','threat'], data), homeOnly: true },
         { id: 'security',    label: 'SECURITY',    html: _cfgGroup('SECURITY',    ['honeypot','security_center','threat'], data) },
         { id: 'connectivity',label: 'CONNECTIVITY',html: _cfgGroup('CONNECTIVITY',['sentinel','proxy','collector'], data) },
     ].filter(t => !t.homeOnly || !isWork);
