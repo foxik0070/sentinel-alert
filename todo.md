@@ -187,16 +187,16 @@ Neschválené — čeká na výběr. Rozděleno do 6 kategorií.
 - [x] 30. **Export do SIEM** — CEF/LEEF formát pro Splunk/QRadar
 
 ### Integrace / feeds
-- [ ] 31. **AbuseIPDB API** — lookup skóre + hlášení útočníků (s klíčem)
-- [ ] 32. **VirusTotal IP lookup** — v IP intel kartě
-- [ ] 33. **Shodan lookup** — otevřené porty/služby útočící IP
-- [ ] 34. **GreyNoise** — rozlišení cílený útok vs. internetový šum
-- [ ] 35. **E-mail alerty (SMTP)** — vedle ntfy/Telegram/Slack/Discord
-- [ ] 36. **Syslog forwarding** — RFC 5424 export eventů do SIEM
-- [ ] 37. **MISP feed import** — threat-intel z MISP instance
-- [ ] 38. **RSS/Atom feed** — veřejný feed útoků pro čtečky
-- [ ] 39. **Matrix / Rocket.Chat** — další notifikační kanály
-- [ ] 40. **Alertmanager rules** — export Prometheus alert pravidel
+- [x] 31. **AbuseIPDB API** — lookup skóre + hlášení útočníků (s klíčem)
+- [x] 32. **VirusTotal IP lookup** — v IP intel kartě
+- [x] 33. **Shodan lookup** — otevřené porty/služby útočící IP
+- [x] 34. **GreyNoise** — rozlišení cílený útok vs. internetový šum
+- [x] 35. **E-mail alerty (SMTP)** — vedle ntfy/Telegram/Slack/Discord
+- [x] 36. **Syslog forwarding** — RFC 5424 export eventů do SIEM
+- [x] 37. **MISP feed import** — threat-intel z MISP instance
+- [x] 38. **RSS/Atom feed** — veřejný feed útoků pro čtečky
+- [x] 39. **Matrix / Rocket.Chat** — další notifikační kanály
+- [x] 40. **Alertmanager rules** — export Prometheus alert pravidel
 
 ### Bezpečnost / provoz
 - [ ] 41. **Multi-user + role** — admin/viewer, oddělené účty

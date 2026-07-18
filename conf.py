@@ -110,6 +110,24 @@ ALERTS_TELEGRAM_TOKEN = _s("alerts", "telegram_token", "")
 ALERTS_TELEGRAM_CHAT  = _s("alerts", "telegram_chat", "")
 ALERTS_SLACK_WEBHOOK  = _s("alerts", "slack_webhook", "")
 ALERTS_DISCORD_WEBHOOK = _s("alerts", "discord_webhook", "")
+ALERTS_ROCKETCHAT_WEBHOOK = _s("alerts", "rocketchat_webhook", "")
+# SMTP e-mail
+ALERTS_SMTP_HOST = _s("alerts", "smtp_host", "")
+ALERTS_SMTP_PORT = _i("alerts", "smtp_port", 587)
+ALERTS_SMTP_USER = _s("alerts", "smtp_user", "")
+ALERTS_SMTP_PASS = _s("alerts", "smtp_pass", "")
+ALERTS_SMTP_TO   = _s("alerts", "smtp_to", "")
+# Syslog forwarding (RFC 5424)
+ALERTS_SYSLOG_HOST = _s("alerts", "syslog_host", "")
+ALERTS_SYSLOG_PORT = _i("alerts", "syslog_port", 514)
+
+# [integrations] — externí IP lookup služby (klíče)
+ABUSEIPDB_KEY  = _s("integrations", "abuseipdb_key", "")
+VIRUSTOTAL_KEY = _s("integrations", "virustotal_key", "")
+SHODAN_KEY     = _s("integrations", "shodan_key", "")
+GREYNOISE_KEY  = _s("integrations", "greynoise_key", "")
+MISP_URL       = _s("integrations", "misp_url", "")
+MISP_KEY       = _s("integrations", "misp_key", "")
 
 # [mode]
 MODE_TYPE     = _s("mode", "type",     "home")  # 'home' or 'work'

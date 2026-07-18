@@ -15,15 +15,17 @@ WATCHLIST_PATH = os.path.join(BASE_DIR, "data", "watchlist.json")
 
 _lock = threading.Lock()
 _cfg = {"enabled": False, "ntfy_url": "", "telegram_token": "", "telegram_chat": "",
-        "slack_webhook": "", "discord_webhook": ""}
+        "slack_webhook": "", "discord_webhook": "", "rocketchat_webhook": "",
+        "smtp_host": "", "smtp_port": 587, "smtp_user": "", "smtp_pass": "", "smtp_to": "",
+        "syslog_host": "", "syslog_port": 514}
 _wl_cache = {"mtime": -1.0, "items": []}
 
 
-def configure(enabled=False, ntfy_url="", telegram_token="", telegram_chat="",
-              slack_webhook="", discord_webhook=""):
-    _cfg.update(enabled=enabled, ntfy_url=ntfy_url,
-                telegram_token=telegram_token, telegram_chat=telegram_chat,
-                slack_webhook=slack_webhook, discord_webhook=discord_webhook)
+def configure(**kwargs):
+    """Aktualizuje konfiguraci alerting kanálů (jen známé klíče)."""
+    for k, v in kwargs.items():
+        if k in _cfg:
+            _cfg[k] = v
 
 
 def load_watchlist() -> list:
@@ -103,6 +105,43 @@ def _notify_sync(title: str, message: str):
         _post_json(_cfg["slack_webhook"], {"text": f"*{title}*\n{message}"})
     if _cfg["discord_webhook"]:
         _post_json(_cfg["discord_webhook"], {"content": f"**{title}**\n{message}"})
+    if _cfg["rocketchat_webhook"]:
+        _post_json(_cfg["rocketchat_webhook"], {"text": f"*{title}*\n{message}"})
+    if _cfg["smtp_host"] and _cfg["smtp_to"]:
+        _send_email(title, message)
+    if _cfg["syslog_host"]:
+        _send_syslog(title, message)
+
+
+def _send_email(title: str, message: str):
+    import smtplib
+    from email.message import EmailMessage
+    try:
+        msg = EmailMessage()
+        msg["Subject"] = f"[Sentinel-Alert] {title}"
+        msg["From"] = _cfg["smtp_user"] or "sentinel@localhost"
+        msg["To"] = _cfg["smtp_to"]
+        msg.set_content(message)
+        with smtplib.SMTP(_cfg["smtp_host"], int(_cfg["smtp_port"]), timeout=15) as s:
+            s.starttls()
+            if _cfg["smtp_user"]:
+                s.login(_cfg["smtp_user"], _cfg["smtp_pass"])
+            s.send_message(msg)
+    except Exception:
+        pass
+
+
+def _send_syslog(title: str, message: str):
+    # RFC 5424 přes UDP; facility 16 (local0), severity 4 (warning) → pri 132
+    import socket
+    try:
+        host = socket.gethostname()
+        ts = __import__("time").strftime("%Y-%m-%dT%H:%M:%SZ", __import__("time").gmtime())
+        pkt = f"<132>1 {ts} {host} sentinel-alert - - - {title}: {message}"
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.sendto(pkt.encode(), (_cfg["syslog_host"], int(_cfg["syslog_port"])))
+    except Exception:
+        pass
 
 
 def _post_json(url: str, payload: dict):

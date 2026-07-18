@@ -26,6 +26,7 @@ import db_init
 import fsc
 import geoip
 import honeypot
+import intel_ext
 import mikrotik
 import pihole
 import proxy_monitor
@@ -199,6 +200,11 @@ async def lifespan(app: FastAPI):
         telegram_chat=conf.ALERTS_TELEGRAM_CHAT,
         slack_webhook=conf.ALERTS_SLACK_WEBHOOK,
         discord_webhook=conf.ALERTS_DISCORD_WEBHOOK,
+        rocketchat_webhook=conf.ALERTS_ROCKETCHAT_WEBHOOK,
+        smtp_host=conf.ALERTS_SMTP_HOST, smtp_port=conf.ALERTS_SMTP_PORT,
+        smtp_user=conf.ALERTS_SMTP_USER, smtp_pass=conf.ALERTS_SMTP_PASS,
+        smtp_to=conf.ALERTS_SMTP_TO,
+        syslog_host=conf.ALERTS_SYSLOG_HOST, syslog_port=conf.ALERTS_SYSLOG_PORT,
     )
     await _detect_home()
     await honeypot.start(_broadcast_queue,
@@ -980,11 +986,16 @@ def config_full(request: Request):
     for section in c.sections():
         result[section] = dict(c.items(section))
     # [alerts] nabídnout v UI i když v conf souboru ještě není
-    result.setdefault("alerts", {
-        "enabled": "false", "ntfy_url": "",
-        "telegram_token": "", "telegram_chat": "",
-        "slack_webhook": "", "discord_webhook": "",
-    })
+    _a = result.setdefault("alerts", {})
+    for k, v in {"enabled": "false", "ntfy_url": "", "telegram_token": "",
+                 "telegram_chat": "", "slack_webhook": "", "discord_webhook": "",
+                 "rocketchat_webhook": "", "smtp_host": "", "smtp_to": "",
+                 "syslog_host": ""}.items():
+        _a.setdefault(k, v)
+    _in = result.setdefault("integrations", {})
+    for k in ("abuseipdb_key", "virustotal_key", "shodan_key", "greynoise_key",
+              "misp_url", "misp_key"):
+        _in.setdefault(k, "")
     result.setdefault("mikrotik", {}).setdefault("auto_block_threshold", "3")
     _t = result.setdefault("threat", {})
     _t.setdefault("intel_enabled", "false")
@@ -1847,6 +1858,73 @@ async def geoblock_apply(request: Request, payload: dict = Body(...)):
     if n:
         _audit(_client_ip(request), "geoblock_apply", f"{'+'.join(codes)} → {n} IP")
     return {"ok": bool(n), "blocked": n, "error": err}
+
+
+@app.get("/api/ip/{ip}/enrich")
+async def ip_enrich(ip: str):
+    """Externí lookup (AbuseIPDB/VirusTotal/Shodan/GreyNoise) — jen nakonfigurované."""
+    return await asyncio.to_thread(intel_ext.enrich_all, ip)
+
+
+@app.get("/feed.xml")
+def rss_feed():
+    """RSS 2.0 feed posledních útoků."""
+    rows = _query(
+        "SELECT ts, src_ip, protocol, country, isp, dst_port FROM attacks "
+        "ORDER BY ts DESC LIMIT 40")
+
+    def _esc(v):
+        return (str(v).replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace('"', "&quot;"))
+    items = []
+    for r in rows:
+        title = f"{(r['protocol'] or '?').upper()} attack from {r['src_ip']} ({r['country']})"
+        desc = f"port {r['dst_port']} · {r['isp']}"
+        items.append(
+            f"<item><title>{_esc(title)}</title>"
+            f"<description>{_esc(desc)}</description>"
+            f"<guid isPermaLink=\"false\">{_esc(r['src_ip'])}-{_esc(r['ts'])}</guid>"
+            f"<pubDate>{_esc(r['ts'])}</pubDate></item>")
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel>'
+           '<title>Sentinel-Alert — attacks</title>'
+           '<description>Recent honeypot/fail2ban attacks</description>'
+           '<link>/</link>' + "".join(items) + "</channel></rss>")
+    return Response(xml, media_type="application/rss+xml")
+
+
+@app.get("/alertmanager-rules.yml")
+def alertmanager_rules():
+    """Prometheus alerting pravidla pro /metrics (import do Alertmanageru)."""
+    rules = """groups:
+  - name: sentinel-alert
+    rules:
+      - alert: SentinelAttackSpike
+        expr: sentinel_attacks_last_hour > 500
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Sentinel: attack spike ({{ $value }} in last hour)"
+      - alert: SentinelDeviceOffline
+        expr: sentinel_devices{state="online"} / sentinel_devices{state="total"} < 0.5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Sentinel: over half of LAN devices offline"
+      - alert: SentinelPiholeDown
+        expr: sentinel_pihole_instances_connected == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Sentinel: no PiHole instance connected"
+      - alert: SentinelDown
+        expr: up{job="sentinel-alert"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Sentinel-Alert scrape target down"
+"""
+    return Response(rules, media_type="text/yaml",
+                    headers={"Content-Disposition": 'attachment; filename="alertmanager-rules.yml"'})
 
 
 @app.get("/api/analytics/heatmap")

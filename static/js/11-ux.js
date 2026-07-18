@@ -363,7 +363,10 @@ async function ipIntelOpen(ip) {
         <table style="width:100%;border-collapse:collapse;line-height:1.9;">${protoRows}</table>` : '<div class="empty">Žádné útoky v DB.</div>'}
         ${portChips ? `<div class="cp-group" style="padding-left:0;margin-top:8px;">CÍLOVÉ PORTY</div><div style="display:flex;gap:4px;flex-wrap:wrap;">${portChips}</div>` : ''}
         ${recentRows ? `<div class="cp-group" style="padding-left:0;margin-top:8px;">POSLEDNÍ UDÁLOSTI</div>
-        <table style="width:100%;border-collapse:collapse;line-height:1.8;">${recentRows}</table>` : ''}`;
+        <table style="width:100%;border-collapse:collapse;line-height:1.8;">${recentRows}</table>` : ''}
+        <div class="cp-group" style="padding-left:0;margin-top:8px;">EXTERNÍ LOOKUP
+            <button class="btn" style="font-size:9px;padding:1px 6px;margin-left:6px;" onclick="ipEnrich('${ip}')">↻ NAČÍST</button></div>
+        <div id="ipm-enrich" style="font-size:10px;color:var(--muted);"></div>`;
 
     const watched = d.watched;
     $('ipm-actions').innerHTML = `
@@ -1092,4 +1095,24 @@ async function analyticsOpen() {
 
         <div class="cp-group" style="padding-left:0;margin-top:12px;">BOTNET SÍTĚ (/24 clustering)</div>
         <table style="width:100%;border-collapse:collapse;line-height:1.8;">${subRows || '<tr><td>—</td></tr>'}</table>`;
+}
+
+// Externí IP lookup (AbuseIPDB/VirusTotal/Shodan/GreyNoise) — on-demand
+async function ipEnrich(ip) {
+    const box = $('ipm-enrich');
+    if (!box) return;
+    box.innerHTML = '<div class="skel"></div>';
+    let d;
+    try { d = await fetch(`/api/ip/${encodeURIComponent(ip)}/enrich`).then(r => r.json()); }
+    catch { box.textContent = 'Load failed.'; return; }
+    const rows = [];
+    const A = d.abuseipdb || {}, V = d.virustotal || {}, S = d.shodan || {}, G = d.greynoise || {};
+    if (A.configured) rows.push(`AbuseIPDB: skóre <b style="color:var(--red)">${A.score ?? '?'}</b> (${A.reports ?? 0} hlášení)`);
+    if (V.configured) rows.push(`VirusTotal: <b style="color:var(--red)">${V.malicious ?? 0}</b> malicious / ${V.harmless ?? 0} harmless`);
+    if (S.configured) rows.push(`Shodan: porty ${(S.ports || []).join(', ') || '—'} · ${S.org || '?'}`);
+    if (G.configured) rows.push(`GreyNoise: <b>${G.classification || '?'}</b>${G.name ? ' · ' + G.name : ''}`);
+    const none = ![A, V, S, G].some(x => x.configured);
+    box.innerHTML = none
+        ? 'Žádná externí služba není nakonfigurovaná (Settings → [integrations]).'
+        : rows.map(r => `<div style="padding:2px 0;">${r}</div>`).join('');
 }

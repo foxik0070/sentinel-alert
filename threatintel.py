@@ -56,6 +56,27 @@ def _fetch():
             sources[name] = len(ips) + len(nets)
         except Exception as e:
             sources[name] = f"error: {e}"
+    # MISP feed (volitelný) — atributy typu ip-src/ip-dst přes REST
+    import conf as _conf
+    if _conf.MISP_URL and _conf.MISP_KEY:
+        try:
+            body = json.dumps({"returnFormat": "json", "type": ["ip-src", "ip-dst"]}).encode()
+            req = urllib.request.Request(
+                _conf.MISP_URL.rstrip("/") + "/attributes/restSearch", data=body,
+                headers={"Authorization": _conf.MISP_KEY, "Accept": "application/json",
+                         "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=25) as r:
+                data = json.loads(r.read())
+            attrs = data.get("response", {}).get("Attribute", [])
+            cnt = 0
+            for a in attrs:
+                val = str(a.get("value", "")).strip()
+                if val:
+                    all_ips.add(val)
+                    cnt += 1
+            sources["misp"] = cnt
+        except Exception as e:
+            sources["misp"] = f"error: {e}"
     with _lock:
         _ips.clear()
         _ips.update(all_ips)

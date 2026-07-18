@@ -531,7 +531,7 @@ function _cfgGroup(title, sections, data) {
         const SEC_LABELS = { server:'SERVER', auth:'AUTHENTICATION', home:'HOME LOCATION', threat:'THREAT INTEL',
             scanner:'SCANNER', mikrotik:'MIKROTIK ROUTER', pihole:'PIHOLE', honeypot:'HONEYPOT',
             security_center:'SECURITY CENTER', threat:'THREAT INTEL',
-            sentinel:'SENTINEL LINK', proxy:'NGINX PROXY', collector:'COLLECTOR' };
+            sentinel:'SENTINEL LINK', proxy:'NGINX PROXY', collector:'COLLECTOR', integrations:'EXTERNAL LOOKUP', alerts:'ALERTING' };
         return [`<div class="cfg-field-group">
             <div class="cfg-field-group-title">${SEC_LABELS[sec]||sec.toUpperCase()}</div>
             ${Object.entries(keys).map(([k,v])=>_cfgField(sec,k,v)).join('')}
@@ -582,7 +582,7 @@ async function openSettings() {
     const isWork = _workMode;
     const tabs = [
         { id: 'status',      label: 'STATUS',      html: statusPane },
-        { id: 'system',      label: 'SYSTEM',      html: _cfgThemeBlock() + _cfgSecurityBlock() + _cfgWatchlistBlock() + _cfgGroup('SYSTEM', ['server','auth','alerts'], data) },
+        { id: 'system',      label: 'SYSTEM',      html: _cfgThemeBlock() + _cfgSecurityBlock() + _cfgWatchlistBlock() + _cfgGroup('SYSTEM', ['server','auth','alerts','integrations'], data) },
         { id: 'network',     label: 'NETWORK',     html: _cfgGroup('NETWORK',     ['home','scanner','mikrotik','pihole','threat'], data), homeOnly: true },
         { id: 'security',    label: 'SECURITY',    html: _cfgGroup('SECURITY',    ['honeypot','security_center','threat'], data) },
         { id: 'connectivity',label: 'CONNECTIVITY',html: _cfgGroup('CONNECTIVITY',['sentinel','proxy','collector'], data) },
