@@ -5,7 +5,7 @@ import geoip
 
 
 def test_private_ip_is_lan():
-    lat, lon, country, isp = geoip.lookup("192.168.2.10")
+    lat, lon, country, isp = geoip.lookup("192.168.1.10")
     assert (lat, lon) == (0.0, 0.0)
     assert country == "LAN"
     assert isp == "Local"

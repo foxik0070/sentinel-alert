@@ -3,10 +3,10 @@
 ## TODO
 
 1. ✅ Aktualizovat CLAUDE.md (hotovo)
-2. ✅ **MikroTik (192.168.2.1)** — vizualizace, ruční blokace i auto-block hotové (`[mikrotik] auto_block` + `auto_block_threshold`; f2b ban blokuje hned, honeypot/proxy po N zásazích) — pouze HOME instance
+2. ✅ **MikroTik (192.168.1.1)** — vizualizace, ruční blokace i auto-block hotové (`[mikrotik] auto_block` + `auto_block_threshold`; f2b ban blokuje hned, honeypot/proxy po N zásazích) — pouze HOME instance
 3. ✅ **Threat map** — pohled zaměřený na útoky: vektorový filtr F2B/SSH/HTTP/HTTPS filtruje globus i seznam, LAN prvky přesunuty do LOCAL NETWORK
 4. ✅ Security CRT → OS infrastructure graph — barvy opraveny (hotovo)
-5. ✅ **PiHole záložka** — ověřeno proti reálné instanci 192.168.2.204 (PiHole v6.4.3, v6 REST API + SID auth). Data, grafy i top domény sedí; opraveny chybové stavy (síťová chyba vs. špatné heslo, pád polling threadu při string erroru) — pouze HOME instance
+5. ✅ **PiHole záložka** — ověřeno proti reálné instanci 192.168.1.204 (PiHole v6.4.3, v6 REST API + SID auth). Data, grafy i top domény sedí; opraveny chybové stavy (síťová chyba vs. špatné heslo, pád polling threadu při string erroru) — pouze HOME instance
 6. ✅ Verze → 2026.07.001 (hotovo)
 7. ✅ README, dokumentace, commit (hotovo)
 

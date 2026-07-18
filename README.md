@@ -236,7 +236,7 @@ monitor_hosts =
 [sniproxy]
 # Remote proxy running sniproxy — logs read via SSH
 # Leave server blank to hide the Proxy Monitor tab
-server    = 192.168.2.203
+server    = 192.168.1.203
 ssh_user  = root
 log_files = /var/log/sniproxy/https_access.log,/var/log/sniproxy/http_access.log
 
@@ -249,7 +249,7 @@ enabled = false
 enabled    = true
 ha_url     =          # Home Assistant URL for push notifications
 ha_token   =
-ignore_ips = 192.168.2.1,192.168.2.202
+ignore_ips = 192.168.1.1,192.168.1.202
 
 [threat]
 # File with one blocked IP per line — visualized on the globe as fail2ban arcs
@@ -258,7 +258,7 @@ blocks_ips_file =
 [mikrotik]
 # MikroTik router integration (HOME instance only) — address lists, firewall
 # rules, manual + automatic blocking. Leave host blank to disable.
-host       = 192.168.2.1
+host       = 192.168.1.1
 ssh_user   = admin
 # Auto-block attackers: fail2ban ban → immediately, honeypot/proxy attack
 # → after auto_block_threshold hits from the same IP (1 week timeout).
@@ -267,8 +267,8 @@ auto_block_threshold = 3
 
 [pihole]
 # PiHole instances (HOME instance only) — comma-separated hosts, one primary
-hosts    = 192.168.2.5,192.168.2.6
-primary  = 192.168.2.5
+hosts    = 192.168.1.5,192.168.1.6
+primary  = 192.168.1.5
 password =
 
 [alerts]
@@ -356,8 +356,8 @@ CSV with a header row. Fields: `name,dept,ip,note`.
 
 ```csv
 name,dept,ip,note
-Alice Smith,Engineering,192.168.2.10,workstation
-Bob Jones,Marketing,192.168.2.11,laptop
+Alice Smith,Engineering,192.168.1.10,workstation
+Bob Jones,Marketing,192.168.1.11,laptop
 ```
 
 All fields except `name` are optional. The USERS panel shows a searchable table of all entries.

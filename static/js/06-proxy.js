@@ -187,7 +187,7 @@ async function pscUpdate() {
         const domStatsSorted = Object.entries(data.domain_stats || {})
             .sort((a, b) => (b[1].ext + b[1].int) - (a[1].ext + a[1].int))
             .slice(0, 15);
-        _pscCharts.extint.data.labels = domStatsSorted.map(([d]) => d.replace('.foxik-iot.cz', ''));
+        _pscCharts.extint.data.labels = domStatsSorted.map(([d]) => d.replace('.example.com', ''));
         _pscCharts.extint.data.datasets[0].data = domStatsSorted.map(([, v]) => v.int);
         _pscCharts.extint.data.datasets[1].data = domStatsSorted.map(([, v]) => v.ext);
         _pscCharts.extint.update('none');

@@ -219,7 +219,7 @@ async function openDeviceModal(mac) {
     const _CONN_STYLE = { ethernet: ['#0a1418','#2dffa1'], wifi: ['#00183a','#38bdf8'], virtual: ['#1a0d00','#fb923c'] };
     const connGrp = document.getElementById('dd-conn-grp');
     if (connGrp) {
-        const wifiApMac = (_allDevices.find(x => x.ip === '192.168.2.90') || {}).mac || '';
+        const wifiApMac = (_allDevices.find(x => x.ip === '192.168.1.90') || {}).mac || '';
         connGrp.querySelectorAll('button').forEach(btn => {
             btn.addEventListener('click', () => {
                 const val = btn.dataset.val;

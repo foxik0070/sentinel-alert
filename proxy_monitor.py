@@ -5,7 +5,7 @@ Runs two daemon threads:
   - _speed_worker: every 2 s computes KB/s metrics and appends to speed_history
 
 Log format (nginx stream):
-  1.2.3.4 [01/Jun/2026:18:38:37 +0000] "git.foxik-iot.cz" -> 192.168.2.212:443 15234/8432 0.456s
+  1.2.3.4 [01/Jun/2026:18:38:37 +0000] "git.example.com" -> 192.168.1.212:443 15234/8432 0.456s
 """
 import ipaddress
 import json

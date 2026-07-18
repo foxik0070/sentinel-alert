@@ -354,7 +354,7 @@ if [[ "$SKIP_CONF" == "false" ]]; then
         echo -e "${CYN}── Security Center — Ignored IPs ───────────────${NC}"
         warn "Enter IPs to exclude from SSH security scan (comma-separated)."
         warn "Typically: gateway, switches, printers, HA."
-        ask FSC_IGNORE_IPS "Ignore IPs" "192.168.2.1"
+        ask FSC_IGNORE_IPS "Ignore IPs" "192.168.1.1"
 
         echo ""
         echo -e "${CYN}── Blocked IPs Visualization ────────────────────${NC}"
