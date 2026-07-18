@@ -127,3 +127,19 @@ Původní TODO z CLAUDE.md (MikroTik #2, Threat map #3, PiHole #5, dokumentace #
 - [x] **Kiosk / auto-cycle** — cyklení tabů, skrytí ovládání, wake-lock (?kiosk)
 - [x] **Anomaly alert (spike)** — detekce náhlého nárůstu útoků → toast + push
 - [x] **Read-only API token** — token pro read-only /api přístup, správa v Settings
+
+---
+
+## Čtvrtá vlna námětů (schváleno)
+
+### Threat intel / bezpečnost
+- [ ] **Threat intel blocklist import** — blocklist.de/spamhaus/FireHOL, "known bad" zvýraznění, volitelný auto-block
+- [ ] **GeoIP blocking (celé země)** — výběr zemí → MikroTik address-list, statistika dopadu
+- [ ] **Fail2ban jail management** — přehled jailů napříč hosty, unban přes SSH
+- [x] **ASN / ISP breakdown** — graf útoků podle ASN/ISP
+
+### Integrace / nasazení
+- [ ] **Webhook receiver** — příjem externích eventů (token), log/toast/globus
+- [x] **Slack / Discord alerty** — rozšíření alerting engine
+- [x] **Docker / compose** — Dockerfile + docker-compose.yml
+- [x] **Grafana dashboard template** — JSON napojený na /metrics

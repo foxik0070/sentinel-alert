@@ -104,6 +104,8 @@ ALERTS_ENABLED        = _c.getboolean("alerts", "enabled", fallback=False)
 ALERTS_NTFY_URL       = _s("alerts", "ntfy_url", "")
 ALERTS_TELEGRAM_TOKEN = _s("alerts", "telegram_token", "")
 ALERTS_TELEGRAM_CHAT  = _s("alerts", "telegram_chat", "")
+ALERTS_SLACK_WEBHOOK  = _s("alerts", "slack_webhook", "")
+ALERTS_DISCORD_WEBHOOK = _s("alerts", "discord_webhook", "")
 
 # [mode]
 MODE_TYPE     = _s("mode", "type",     "home")  # 'home' or 'work'

@@ -391,7 +391,9 @@ _trm.innerHTML = `
                 <button class="btn ghost" onclick="document.getElementById('trends-modal').classList.add('hidden')">✕</button>
             </div></div>
         <div id="tr-delta" style="padding:6px 0;font-size:11px;color:var(--muted);"></div>
-        <div style="height:300px;"><canvas id="tr-chart"></canvas></div>
+        <div style="height:260px;"><canvas id="tr-chart"></canvas></div>
+        <div class="cp-group" style="padding-left:0;margin-top:10px;">TOP ISP / ASN SÍTĚ <span style="color:var(--muted);font-weight:400;">(zdroje útoků)</span></div>
+        <div id="tr-asn" style="max-height:200px;overflow-y:auto;"></div>
     </div>`;
 document.body.appendChild(_trm);
 _trm.addEventListener('click', e => { if (e.target === _trm) _trm.classList.add('hidden'); });
@@ -457,6 +459,26 @@ async function trendsOpen(days = 30) {
             },
         },
     });
+
+    // ASN / ISP breakdown pod grafem
+    try {
+        const asn = await fetch(`/api/stats/asn?days=${days}`).then(r => r.json());
+        const rows = asn.rows || [];
+        const max = rows.length ? rows[0].n : 1;
+        $('tr-asn').innerHTML = rows.map(r => {
+            const pct = Math.round(r.n / max * 100);
+            return `<div style="display:flex;align-items:center;gap:8px;padding:3px 2px;font-size:11px;">
+                <span class="tr-asn-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+                <div style="width:120px;height:10px;background:var(--bg-1);border:1px solid var(--border);flex-shrink:0;">
+                    <div style="height:100%;width:${pct}%;background:var(--accent);opacity:0.8;"></div></div>
+                <span style="width:52px;text-align:right;font-weight:700;color:var(--accent);flex-shrink:0;">${r.n.toLocaleString()}</span>
+                <span style="width:44px;text-align:right;color:var(--muted);flex-shrink:0;" title="unikátní IP">${r.ips} IP</span>
+            </div>`;
+        }).join('') || '<div class="empty">Žádná data.</div>';
+        // názvy ISP přes textContent (data z GeoIP)
+        const names = [...$('tr-asn').querySelectorAll('.tr-asn-name')];
+        rows.forEach((r, i) => { if (names[i]) { names[i].textContent = r.isp; names[i].title = r.isp; } });
+    } catch { $('tr-asn').innerHTML = '<div class="empty">Load failed.</div>'; }
 }
 $('tr-7').addEventListener('click', () => trendsOpen(7));
 $('tr-30').addEventListener('click', () => trendsOpen(30));

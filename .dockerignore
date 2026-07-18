@@ -1,0 +1,12 @@
+.git
+.venv
+node_modules
+__pycache__
+.pytest_cache
+*.pyc
+data/*.db
+data/backups
+data/reports
+data/watchlist.json
+Sentinel
+work

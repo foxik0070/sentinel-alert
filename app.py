@@ -173,6 +173,8 @@ async def lifespan(app: FastAPI):
         ntfy_url=conf.ALERTS_NTFY_URL,
         telegram_token=conf.ALERTS_TELEGRAM_TOKEN,
         telegram_chat=conf.ALERTS_TELEGRAM_CHAT,
+        slack_webhook=conf.ALERTS_SLACK_WEBHOOK,
+        discord_webhook=conf.ALERTS_DISCORD_WEBHOOK,
     )
     await _detect_home()
     await honeypot.start(_broadcast_queue,
@@ -956,6 +958,7 @@ def config_full(request: Request):
     result.setdefault("alerts", {
         "enabled": "false", "ntfy_url": "",
         "telegram_token": "", "telegram_chat": "",
+        "slack_webhook": "", "discord_webhook": "",
     })
     result.setdefault("mikrotik", {}).setdefault("auto_block_threshold", "3")
     return result
@@ -1641,6 +1644,19 @@ def stats_summary():
         "devices_total": devrow["total"],
         "pihole_block_pct": pct,
     }
+
+
+@app.get("/api/stats/asn")
+def stats_asn(days: int = 7, limit: int = 12):
+    """Top ISP/ASN sítě podle počtu útoků — časté zdroje botnetů."""
+    days = max(1, min(days, 90))
+    limit = max(1, min(limit, 50))
+    rows = _query(
+        "SELECT isp, COUNT(*) AS n, COUNT(DISTINCT src_ip) AS ips "
+        "FROM attacks WHERE ts >= datetime('now', ?) "
+        "AND isp NOT IN ('','Unknown','Local','Invalid') "
+        "GROUP BY isp ORDER BY n DESC LIMIT ?", (f"-{days} day", limit))
+    return {"days": days, "rows": rows}
 
 
 @app.get("/api/stats/trends")

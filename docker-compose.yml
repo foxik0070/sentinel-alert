@@ -1,0 +1,21 @@
+services:
+  sentinel-alert:
+    build: .
+    container_name: sentinel-alert
+    restart: unless-stopped
+    # host network usnadní ARP scan + honeypot na LAN (Linux only).
+    # Bez host network zakomentuj a odkomentuj sekci ports níže.
+    network_mode: host
+    # ports:
+    #   - "5056:5056"   # dashboard
+    #   - "2222:2222"   # honeypot SSH
+    #   - "8080:8080"   # honeypot HTTP
+    volumes:
+      - ./data:/app/data                       # DB, GeoIP mmdb, stavové JSONy
+      - ./conf:/app/conf                        # SSH klíč pro collector/proxy
+      - sentinel-config:/etc/sentinel           # sentinel-alert.conf
+    environment:
+      - SENTINEL_CONF=/etc/sentinel/sentinel-alert.conf
+
+volumes:
+  sentinel-config:

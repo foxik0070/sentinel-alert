@@ -14,13 +14,16 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WATCHLIST_PATH = os.path.join(BASE_DIR, "data", "watchlist.json")
 
 _lock = threading.Lock()
-_cfg = {"enabled": False, "ntfy_url": "", "telegram_token": "", "telegram_chat": ""}
+_cfg = {"enabled": False, "ntfy_url": "", "telegram_token": "", "telegram_chat": "",
+        "slack_webhook": "", "discord_webhook": ""}
 _wl_cache = {"mtime": -1.0, "items": []}
 
 
-def configure(enabled=False, ntfy_url="", telegram_token="", telegram_chat=""):
+def configure(enabled=False, ntfy_url="", telegram_token="", telegram_chat="",
+              slack_webhook="", discord_webhook=""):
     _cfg.update(enabled=enabled, ntfy_url=ntfy_url,
-                telegram_token=telegram_token, telegram_chat=telegram_chat)
+                telegram_token=telegram_token, telegram_chat=telegram_chat,
+                slack_webhook=slack_webhook, discord_webhook=discord_webhook)
 
 
 def load_watchlist() -> list:
@@ -96,3 +99,17 @@ def _notify_sync(title: str, message: str):
             urllib.request.urlopen(req, timeout=10).close()
         except Exception:
             pass
+    if _cfg["slack_webhook"]:
+        _post_json(_cfg["slack_webhook"], {"text": f"*{title}*\n{message}"})
+    if _cfg["discord_webhook"]:
+        _post_json(_cfg["discord_webhook"], {"content": f"**{title}**\n{message}"})
+
+
+def _post_json(url: str, payload: dict):
+    try:
+        req = urllib.request.Request(
+            url, data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10).close()
+    except Exception:
+        pass
