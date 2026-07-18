@@ -194,6 +194,49 @@ def poll_active_sessions(host):
         return []
 
 
+def _ssh(host: str, remote_cmd: str, timeout: int = 6) -> tuple[bool, str]:
+    """Spustí příkaz na hostu přes SSH. Vrací (ok, output)."""
+    try:
+        out = subprocess.check_output(
+            ["ssh", "-i", SSH_KEY, "-o", "BatchMode=yes",
+             "-o", f"ConnectTimeout={timeout}",
+             "-o", "StrictHostKeyChecking=accept-new",
+             f"{SSH_USER}@{host}", remote_cmd],
+            stderr=subprocess.STDOUT, text=True, timeout=timeout + 3)
+        return True, out
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+        return False, getattr(e, "output", "") or str(e)
+
+
+def fail2ban_jails(host: str) -> dict:
+    """Vrátí jaily hosta + počet a seznam zabanovaných IP per jail."""
+    ok, out = _ssh(host, "fail2ban-client status")
+    if not ok:
+        return {"host": host, "ok": False, "error": out.strip()[:120], "jails": []}
+    m = re.search(r"Jail list:\s*(.*)", out)
+    names = [j.strip() for j in m.group(1).split(",") if j.strip()] if m else []
+    jails = []
+    for jail in names:
+        okj, sout = _ssh(host, f"fail2ban-client status {jail}")
+        banned, count = [], 0
+        if okj:
+            mc = re.search(r"Currently banned:\s*(\d+)", sout)
+            count = int(mc.group(1)) if mc else 0
+            mb = re.search(r"Banned IP list:\s*(.*)", sout, re.DOTALL)
+            if mb:
+                banned = [ip.strip() for ip in mb.group(1).split() if ip.strip()]
+        jails.append({"name": jail, "banned_count": count, "banned": banned[:100]})
+    return {"host": host, "ok": True, "jails": jails}
+
+
+def fail2ban_unban(host: str, jail: str, ip: str) -> tuple[bool, str]:
+    """Odbanuje IP z jailu na hostu."""
+    if not re.match(r"^[\w.-]+$", jail) or not re.match(r"^[0-9a-fA-F:.]+$", ip):
+        return False, "invalid jail/ip"
+    ok, out = _ssh(host, f"fail2ban-client set {jail} unbanip {ip}")
+    return ok, out.strip()[:120]
+
+
 def poll_all():
     total = 0
     for host in discover_hosts():

@@ -32,6 +32,7 @@ function _cpStaticActions() {
         { label: 'GO → SERVICES',        hint: '5', run: () => _cpTab('services') },
         { label: 'GO → PIHOLE',          hint: '6', run: () => _cpTab('pihole') },
         { label: 'FORCE SECURITY SCAN',       run: () => { _cpTab('security'); fscTriggerScan(); } },
+        { label: 'FAIL2BAN JAILS',            run: () => f2bOpen() },
         { label: 'CHECK ALL SERVICES',        run: () => { _cpTab('services'); setTimeout(svcCheckAll, 300); } },
         { label: 'OPEN SETTINGS',             run: () => openSettings() },
         { label: 'DATABASE VIEWER',           run: () => dbvOpen() },
@@ -609,4 +610,68 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && _kiosk.act
 {
     const kp = new URLSearchParams(location.search).get('kiosk');
     if (kp !== null) window.addEventListener('load', () => kioskStart(parseInt(kp) || 20));
+}
+
+// ================================================================
+// FAIL2BAN JAIL MANAGEMENT — přehled jailů napříč hosty + unban
+// ================================================================
+const _f2b = document.createElement('div');
+_f2b.id = 'f2b-modal';
+_f2b.className = 'modal hidden';
+_f2b.innerHTML = `
+    <div class="modal-box" style="width:640px;max-width:96vw;max-height:85vh;display:flex;flex-direction:column;">
+        <div class="ph"><span>◤ FAIL2BAN JAILS</span>
+            <div style="display:flex;gap:6px;align-items:center;">
+                <span class="chip" id="f2b-total">—</span>
+                <button class="btn" id="f2b-refresh" style="font-size:10px;">↺</button>
+                <button class="btn ghost" onclick="document.getElementById('f2b-modal').classList.add('hidden')">✕</button>
+            </div></div>
+        <div id="f2b-body" style="flex:1;min-height:0;overflow-y:auto;padding:6px 0;font-size:11px;"></div>
+    </div>`;
+document.body.appendChild(_f2b);
+_f2b.addEventListener('click', e => { if (e.target === _f2b) _f2b.classList.add('hidden'); });
+$('f2b-refresh').addEventListener('click', f2bOpen);
+
+async function f2bOpen() {
+    _f2b.classList.remove('hidden');
+    $('f2b-body').innerHTML = '<div class="skel"></div>'.repeat(4);
+    let d;
+    try { d = await fetch('/api/fail2ban/jails').then(r => r.json()); }
+    catch { $('f2b-body').innerHTML = '<div class="empty">Load failed.</div>'; return; }
+    if (d.error) { $('f2b-body').innerHTML = '<div class="empty">Vyžaduje přihlášení.</div>'; return; }
+    $('f2b-total').textContent = (d.total_banned ?? 0) + ' banned';
+
+    const esc = s => String(s ?? '').replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+    // jen hosty s aspoň jedním banem nebo chybou; OK bez banů skryjeme do souhrnu
+    const withBans = d.hosts.filter(h => h.ok && h.jails.some(j => j.banned_count > 0));
+    const errored = d.hosts.filter(h => !h.ok);
+    const clean = d.hosts.filter(h => h.ok && !h.jails.some(j => j.banned_count > 0)).length;
+
+    $('f2b-body').innerHTML = (withBans.map(h => `
+        <div style="margin:0 0 10px;border:1px solid var(--border);">
+            <div style="padding:5px 10px;background:var(--panel-2);font-weight:700;color:var(--accent);">${esc(h.host)}</div>
+            ${h.jails.filter(j => j.banned_count > 0).map(j => `
+                <div style="padding:6px 10px;border-top:1px solid var(--border);">
+                    <div style="color:var(--muted);margin-bottom:4px;">jail <b style="color:var(--fg)">${esc(j.name)}</b> — ${j.banned_count} banned</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:4px;">
+                        ${j.banned.map(ip => `<span class="f2b-ip" data-host="${esc(h.host)}" data-jail="${esc(j.name)}" data-ip="${esc(ip)}"
+                            title="Klikni pro unban">${esc(ip)} ✕</span>`).join('')}
+                    </div>
+                </div>`).join('')}
+        </div>`).join('') || '<div class="empty">Žádné aktivní bany.</div>')
+        + `<div style="padding:6px 10px;color:var(--muted);font-size:10px;border-top:1px dashed var(--border);">
+            ${clean} hostů bez banů${errored.length ? ` · ${errored.length} nedostupných (${errored.slice(0,3).map(h=>esc(h.host)).join(', ')}${errored.length>3?'…':''})` : ''}</div>`;
+
+    $('f2b-body').querySelectorAll('.f2b-ip').forEach(el => {
+        el.addEventListener('click', async () => {
+            if (!confirm(`Unban ${el.dataset.ip} z jailu ${el.dataset.jail} na ${el.dataset.host}?`)) return;
+            el.style.opacity = '0.5';
+            const r = await fetch('/api/fail2ban/unban', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ host: el.dataset.host, jail: el.dataset.jail, ip: el.dataset.ip }),
+            }).then(x => x.json()).catch(() => ({ ok: false }));
+            if (r.ok) { el.remove(); showToast({ title: 'UNBANNED', body: el.dataset.ip, color: 'var(--green)' }); }
+            else { el.style.opacity = '1'; showToast({ title: 'UNBAN FAILED', body: r.error || '?', color: 'var(--red)' }); }
+        });
+    });
 }

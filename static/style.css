@@ -1389,3 +1389,19 @@ body.kiosk-mode::after {
     border: 1px solid var(--accent); padding: 2px 8px; pointer-events: none;
     background: var(--panel-2);
 }
+
+/* ── GEOIP BLOCK chips ─────────────────────────────────────────── */
+.geo-chip {
+    font-size: 10px; padding: 2px 7px; background: var(--input-bg);
+    border: 1px solid var(--border); color: var(--muted);
+    cursor: pointer; font-family: inherit; letter-spacing: 0.5px;
+}
+.geo-chip.on { border-color: var(--red); color: var(--red); background: rgba(255,42,94,0.08); }
+
+/* ── FAIL2BAN jail IPs ─────────────────────────────────────────── */
+.f2b-ip {
+    font-family: monospace; font-size: 10px; padding: 2px 7px;
+    background: var(--input-bg); border: 1px solid var(--border); color: var(--red);
+    cursor: pointer; letter-spacing: 0.5px;
+}
+.f2b-ip:hover { background: rgba(255,42,94,0.12); border-color: var(--red); }

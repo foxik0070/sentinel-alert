@@ -294,6 +294,9 @@
         <div class="fsc-tb-cell">
             <button id="fsc-scan-btn" class="btn primary" onclick="fscTriggerScan()">▶ FORCE SCAN</button>
         </div>
+        <div class="fsc-tb-cell">
+            <button class="btn" onclick="f2bOpen()" title="Fail2ban jaily napříč hosty">⛨ F2B JAILS</button>
+        </div>
     </div>
 
     <!-- Stat cards -->
@@ -548,6 +551,14 @@
                         <button class="btn primary" id="mt-block-btn" onclick="mtBlockIP()">⊘ BLOCK</button>
                     </div>
                     <div id="mt-block-result" style="font-size:10px;color:var(--muted);min-height:14px;"></div>
+                    <div style="border-top:1px dashed var(--border);padding-top:8px;margin-top:2px;">
+                        <div style="font-size:9px;letter-spacing:1px;color:var(--muted);margin-bottom:5px;">GEOIP BLOCK — útočníci z vybraných zemí</div>
+                        <div id="geo-country-list" style="display:flex;flex-wrap:wrap;gap:4px;max-height:96px;overflow-y:auto;"></div>
+                        <div style="display:flex;gap:6px;align-items:center;margin-top:7px;">
+                            <span id="geo-preview" style="flex:1;font-size:10px;color:var(--muted);"></span>
+                            <button class="btn" id="geo-apply-btn" onclick="geoApply()" style="font-size:10px;">⊘ BLOCK COUNTRIES</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 

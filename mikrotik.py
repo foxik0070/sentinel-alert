@@ -159,6 +159,21 @@ def block_ip(ip: str, comment: str = "sentinel", timeout: str = "1w") -> tuple[b
     return ok, out
 
 
+def block_ips_batch(ips: list[str], comment: str = "sentinel-geo", timeout: str = "4w") -> tuple[int, str]:
+    """Přidá více IP do blocked_ips jedním SSH voláním. Vrací (počet_ok, chyba)."""
+    ips = [ip for ip in ips if ip]
+    if not ips:
+        return 0, "no ips"
+    lines = "\n".join(
+        f'/ip firewall address-list add list=blocked_ips address="{ip}" '
+        f'comment="{comment}" timeout={timeout}' for ip in ips)
+    ok, out = _run(lines, timeout=max(15, len(ips) // 10))
+    if ok:
+        threading.Thread(target=_refresh_once, daemon=True).start()
+        return len(ips), ""
+    return 0, out
+
+
 def unblock_ip(ip: str) -> tuple[bool, str]:
     """Remove IP from blocked_ips list (all matching entries)."""
     ok, out = _run(f'/ip firewall address-list remove [find list=blocked_ips address="{ip}"]')

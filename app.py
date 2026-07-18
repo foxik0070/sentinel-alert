@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 import alerts
 import blocklist
 import bridge
+import collector
 import conf
 import db_init
 import fsc
@@ -1712,6 +1713,78 @@ def stats_summary():
 @app.get("/api/threatintel/status")
 def threatintel_status():
     return threatintel.stats()
+
+
+@app.get("/api/fail2ban/jails")
+async def fail2ban_jails(request: Request):
+    """Fail2ban jaily napříč monitorovanými hosty (SSH). Vyžaduje auth."""
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    hosts = collector.discover_hosts()
+    results = await asyncio.gather(
+        *(asyncio.to_thread(collector.fail2ban_jails, h) for h in hosts))
+    total = sum(j["banned_count"] for r in results if r.get("ok") for j in r["jails"])
+    return {"hosts": list(results), "total_banned": total}
+
+
+@app.post("/api/fail2ban/unban")
+async def fail2ban_unban(request: Request, payload: dict = Body(...)):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    host = str(payload.get("host", "")).strip()
+    jail = str(payload.get("jail", "")).strip()
+    ip = str(payload.get("ip", "")).strip()
+    if not (host and jail and ip):
+        return JSONResponse({"ok": False, "error": "host, jail, ip required"}, status_code=400)
+    ok, out = await asyncio.to_thread(collector.fail2ban_unban, host, jail, ip)
+    if ok:
+        _audit(_client_ip(request), "fail2ban_unban", f"{host}/{jail}/{ip}")
+    return {"ok": ok, "error": "" if ok else out}
+
+
+@app.get("/api/geoblock/preview")
+def geoblock_preview(countries: str = "", days: int = 7):
+    """Kolik útočících IP/útoků by pokryl blok vybraných zemí (z DB)."""
+    codes = [c.strip() for c in countries.split(",") if c.strip()]
+    if not codes:
+        # nabídni top země jako kandidáty
+        top = _query(
+            "SELECT country, COUNT(*) AS n, COUNT(DISTINCT src_ip) AS ips FROM attacks "
+            "WHERE ts >= datetime('now', ?) AND country NOT IN ('','LAN','Unknown','?') "
+            "GROUP BY country ORDER BY n DESC LIMIT 15", (f"-{days} day",))
+        return {"countries": [], "top": top}
+    ph = ",".join("?" * len(codes))
+    rows = _query(
+        f"SELECT COUNT(DISTINCT src_ip) AS ips, COUNT(*) AS attacks FROM attacks "
+        f"WHERE country IN ({ph}) AND ts >= datetime('now', ?) AND src_ip != ''",
+        (*codes, f"-{days} day"))
+    r = rows[0] if rows else {"ips": 0, "attacks": 0}
+    return {"countries": codes, "ips": r["ips"], "attacks": r["attacks"]}
+
+
+@app.post("/api/geoblock/apply")
+async def geoblock_apply(request: Request, payload: dict = Body(...)):
+    """Zablokuje na MikroTiku útočící IP z vybraných zemí (jen HOME)."""
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    if not conf.MIKROTIK_HOST:
+        return JSONResponse({"ok": False, "error": "MikroTik není nakonfigurován"}, status_code=400)
+    codes = [str(c).strip() for c in payload.get("countries", []) if str(c).strip()]
+    if not codes:
+        return JSONResponse({"ok": False, "error": "countries required"}, status_code=400)
+    days = int(payload.get("days", 7))
+    limit = max(1, min(int(payload.get("limit", 200)), 500))
+    ph = ",".join("?" * len(codes))
+    rows = _query(
+        f"SELECT DISTINCT src_ip FROM attacks WHERE country IN ({ph}) "
+        f"AND ts >= datetime('now', ?) AND src_ip != '' LIMIT ?",
+        (*codes, f"-{days} day", limit))
+    ips = [r["src_ip"] for r in rows if _is_public_ip(r["src_ip"])]
+    n, err = await asyncio.to_thread(
+        mikrotik.block_ips_batch, ips, f"geo:{'+'.join(codes)}", "4w")
+    if n:
+        _audit(_client_ip(request), "geoblock_apply", f"{'+'.join(codes)} → {n} IP")
+    return {"ok": bool(n), "blocked": n, "error": err}
 
 
 @app.get("/api/stats/asn")

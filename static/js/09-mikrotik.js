@@ -6,9 +6,12 @@ let _mtInterval = null;
 let _mtActiveList = null;
 let _mtData = null;
 
+let _geoLoaded = false;
+
 async function mtUpdate() {
     const section = $('mikrotik-section');
     if (!section || section.classList.contains('hidden')) return;
+    if (!_geoLoaded) { _geoLoaded = true; geoLoadCountries(); }
     try {
         const data = await fetch('/api/mikrotik/data').then(r => r.json());
         _mtData = data;
@@ -234,3 +237,60 @@ async function mtToggleRule(type, index, enable) {
     } catch {}
 }
 
+
+// ================================================================
+// GEOIP BLOCK — blokace útočníků z vybraných zemí
+// ================================================================
+const _geoSelected = new Set();
+
+async function geoLoadCountries() {
+    const box = document.getElementById('geo-country-list');
+    if (!box) return;
+    let d;
+    try { d = await fetch('/api/geoblock/preview?days=7').then(r => r.json()); }
+    catch { return; }
+    box.innerHTML = (d.top || []).map(c => {
+        const on = _geoSelected.has(c.country);
+        return `<button class="geo-chip${on ? ' on' : ''}" data-c="${escape(c.country)}"
+            title="${c.n} útoků / ${c.ips} IP">${escape(c.country)} <span style="opacity:.6">${c.ips}</span></button>`;
+    }).join('') || '<span style="font-size:10px;color:var(--muted);">Žádná data.</span>';
+    box.querySelectorAll('.geo-chip').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const c = btn.dataset.c;
+            if (_geoSelected.has(c)) { _geoSelected.delete(c); btn.classList.remove('on'); }
+            else { _geoSelected.add(c); btn.classList.add('on'); }
+            geoPreview();
+        });
+    });
+    geoPreview();
+}
+
+async function geoPreview() {
+    const el = document.getElementById('geo-preview');
+    if (!el) return;
+    if (!_geoSelected.size) { el.textContent = 'Vyber země…'; return; }
+    const q = encodeURIComponent([..._geoSelected].join(','));
+    try {
+        const d = await fetch(`/api/geoblock/preview?countries=${q}&days=7`).then(r => r.json());
+        el.textContent = `${d.ips} IP · ${d.attacks} útoků za 7 dní`;
+    } catch {}
+}
+
+async function geoApply() {
+    if (!_geoSelected.size) return;
+    const countries = [..._geoSelected];
+    if (!confirm(`Zablokovat útočící IP ze zemí ${countries.join(', ')} na MikroTiku?`)) return;
+    const btn = document.getElementById('geo-apply-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    const r = await fetch('/api/geoblock/apply', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ countries, days: 7, limit: 200 }),
+    }).then(x => x.json()).catch(() => ({ ok: false, error: 'request failed' }));
+    if (btn) { btn.disabled = false; btn.textContent = '⊘ BLOCK COUNTRIES'; }
+    showToast({
+        title: r.ok ? 'GEOIP BLOCK' : 'GEOIP BLOCK FAILED',
+        body: r.ok ? `${r.blocked} IP zablokováno (${countries.join(', ')})` : (r.error || '?'),
+        color: r.ok ? 'var(--green)' : 'var(--red)',
+    });
+    if (r.ok) { _geoSelected.clear(); geoLoadCountries(); mtUpdate(); }
+}
