@@ -229,6 +229,8 @@ function connectWS() {
                 showToast({ title: 'ATTACK SPIKE', body: m.msg, color: 'var(--red)', ttl: 12000, dedupKey: 'anom:' + m.msg });
                 playBeep('alarm');
                 browserNotify('ATTACK SPIKE', m.msg);
+            } else if (m.source && m.source.startsWith('wh:')) {
+                showToast({ title: 'WEBHOOK — ' + m.source.slice(3).toUpperCase(), body: m.msg, color: 'var(--accent)', ttl: 8000 });
             }
         }
     };

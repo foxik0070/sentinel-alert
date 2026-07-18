@@ -1059,6 +1059,42 @@ DEMO_IPS = [
 ]
 
 
+@app.post("/api/webhook/{token}")
+async def webhook_receive(token: str, payload: dict = Body(...)):
+    """Příjem externích eventů (jiné nástroje/skripty). Autorizace API tokenem.
+    Očekává: {level?, source?, msg, ip?, protocol?} → log event + volitelně globus."""
+    if not conf.AUTH_API_TOKEN or not hmac.compare_digest(token, conf.AUTH_API_TOKEN):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    msg = str(payload.get("msg", "")).strip()[:300]
+    if not msg:
+        return JSONResponse({"ok": False, "error": "msg required"}, status_code=400)
+    ip = str(payload.get("ip", "")).strip()
+    ev = {
+        "type": "log",
+        "level": str(payload.get("level", "info"))[:12],
+        "source": ("wh:" + str(payload.get("source", "webhook"))[:24]),
+        "ts": datetime.now().isoformat(),
+        "msg": msg,
+    }
+    try:
+        _broadcast_queue.put_nowait(ev)
+    except asyncio.QueueFull:
+        pass
+    # Volitelně vykresli na globusu jako útok, pokud přišla veřejná IP
+    if ip and _is_public_ip(ip):
+        lat, lon, country, isp = geoip.lookup(ip)
+        atk = {"type": "attack", "ts": ev["ts"], "src_ip": ip,
+               "dst_port": int(payload.get("port", 0) or 0),
+               "protocol": str(payload.get("protocol", "webhook"))[:12],
+               "country": country, "lat": lat, "lon": lon, "isp": isp,
+               "source": "webhook"}
+        try:
+            _broadcast_queue.put_nowait(atk)
+        except asyncio.QueueFull:
+            pass
+    return {"ok": True}
+
+
 @app.post("/api/demo/attack")
 async def demo_attack(count: int = 5):
     """Inject N random demo attacks (for visual testing)."""

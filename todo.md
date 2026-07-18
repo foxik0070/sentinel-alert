@@ -139,7 +139,7 @@ Původní TODO z CLAUDE.md (MikroTik #2, Threat map #3, PiHole #5, dokumentace #
 - [x] **ASN / ISP breakdown** — graf útoků podle ASN/ISP
 
 ### Integrace / nasazení
-- [ ] **Webhook receiver** — příjem externích eventů (token), log/toast/globus
+- [x] **Webhook receiver** — příjem externích eventů (token), log/toast/globus
 - [x] **Slack / Discord alerty** — rozšíření alerting engine
 - [x] **Docker / compose** — Dockerfile + docker-compose.yml
 - [x] **Grafana dashboard template** — JSON napojený na /metrics
