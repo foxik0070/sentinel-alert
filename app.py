@@ -209,7 +209,8 @@ async def lifespan(app: FastAPI):
     await _detect_home()
     await honeypot.start(_broadcast_queue,
                         ssh_port=conf.HONEYPOT_SSH_PORT,
-                        http_port=conf.HONEYPOT_HTTP_PORT)
+                        http_port=conf.HONEYPOT_HTTP_PORT,
+                        extra=conf.HONEYPOT_EXTRA)
     fsc.start()
     blocklist.start()
     threatintel.start(conf.THREATINTEL_ENABLED)

@@ -86,6 +86,8 @@ SENTINEL_HOSTNAME = _s("sentinel", "hostname", "") or None
 # [honeypot]
 HONEYPOT_SSH_PORT  = _i("honeypot", "ssh_port",  2222)
 HONEYPOT_HTTP_PORT = _i("honeypot", "http_port", 8080)
+# Extra deception služby (comma-separated: ftp,telnet,smtp,rdp,smb)
+HONEYPOT_EXTRA = [s.strip() for s in _s("honeypot", "extra_services", "").split(",") if s.strip()]
 
 # [collector]
 COLLECTOR_SSH_USER      = _s("collector", "ssh_user",      "root")

@@ -26,6 +26,12 @@ HTTP_RESPONSE = (
     b"Connection: close\r\n\r\n"
 )
 
+# Deception bannery pro další protokoly — realistické fake služby lákající útočníky
+FTP_BANNER    = b"220 (vsFTPd 3.0.3)\r\n"
+TELNET_BANNER = b"\xff\xfb\x01\xff\xfb\x03\r\nUbuntu 22.04.3 LTS\r\nlogin: "
+SMTP_BANNER   = b"220 mail.local ESMTP Postfix (Ubuntu)\r\n"
+# RDP/SMB jsou binární — jen connect capture bez banneru
+
 MAX_PAYLOAD = 512
 READ_TIMEOUT = 5.0
 
@@ -122,8 +128,19 @@ async def _handle(reader, writer, protocol, port, banner):
 _broadcast_queue: asyncio.Queue | None = None
 
 
-async def start(queue: asyncio.Queue, ssh_port=2222, http_port=8080, host="0.0.0.0"):
-    """Start both listeners. Caller passes the WS broadcast queue."""
+# Extra deception služby: proto → (default port, banner). Zapnutelné v configu.
+EXTRA_SERVICES = {
+    "ftp":    (21,   FTP_BANNER),
+    "telnet": (23,   TELNET_BANNER),
+    "smtp":   (25,   SMTP_BANNER),
+    "rdp":    (3389, None),
+    "smb":    (445,  None),
+}
+
+
+async def start(queue: asyncio.Queue, ssh_port=2222, http_port=8080, host="0.0.0.0",
+                extra=None):
+    """Start listeners. `extra` = seznam názvů protokolů z EXTRA_SERVICES."""
     global _broadcast_queue
     _broadcast_queue = queue
 
@@ -133,7 +150,27 @@ async def start(queue: asyncio.Queue, ssh_port=2222, http_port=8080, host="0.0.0
     async def http_cb(r, w):
         await _handle(r, w, "http", http_port, HTTP_RESPONSE)
 
-    ssh_server = await asyncio.start_server(ssh_cb, host, ssh_port)
-    http_server = await asyncio.start_server(http_cb, host, http_port)
-    print(f"Honeypot listening: SSH={ssh_port} HTTP={http_port}")
-    return ssh_server, http_server
+    servers = [
+        await asyncio.start_server(ssh_cb, host, ssh_port),
+        await asyncio.start_server(http_cb, host, http_port),
+    ]
+    started = ["SSH=%d" % ssh_port, "HTTP=%d" % http_port]
+
+    for name in (extra or []):
+        svc = EXTRA_SERVICES.get(name)
+        if not svc:
+            continue
+        port, banner = svc
+
+        def _mk(proto, p, b):
+            async def _cb(r, w):
+                await _handle(r, w, proto, p, b)
+            return _cb
+        try:
+            servers.append(await asyncio.start_server(_mk(name, port, banner), host, port))
+            started.append(f"{name.upper()}={port}")
+        except Exception as e:
+            print(f"honeypot: {name}:{port} bind failed: {e}")
+
+    print("Honeypot listening: " + " ".join(started))
+    return servers

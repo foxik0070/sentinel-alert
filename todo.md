@@ -211,6 +211,6 @@ Neschválené — čeká na výběr. Rozděleno do 6 kategorií.
 - [x] 50. **CVE scan scheduling** — plánovaný bezpečnostní sken hostů (cron)
 
 ### Honeypot / detekce (bonus)
-- [ ] **Rozšíření portů** — FTP(21)/Telnet(23)/RDP(3389)/SMB(445) honeypoty
-- [ ] **Payload capture** — co útočníci posílají (příkazy, credentials, user-agenty)
-- [ ] **Deception bannery** — realistické fake služby pro delší zdržení útočníka
+- [x] **Rozšíření portů** — FTP(21)/Telnet(23)/RDP(3389)/SMB(445) honeypoty
+- [x] **Payload capture** — co útočníci posílají (příkazy, credentials, user-agenty)
+- [x] **Deception bannery** — realistické fake služby pro delší zdržení útočníka
