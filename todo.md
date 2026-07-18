@@ -151,16 +151,16 @@ Původní TODO z CLAUDE.md (MikroTik #2, Threat map #3, PiHole #5, dokumentace #
 Neschválené — čeká na výběr. Rozděleno do 6 kategorií.
 
 ### UI / vizuál
-- [ ] 1. **Attack ticker** — burzovní páska živých útoků pod HUD (scroll)
-- [ ] 2. **Count-up animace** — stat čísla (summary bar, FSC) se animují při změně
-- [ ] 3. **Konfigurovatelný dashboard** — skrýt/zobrazit jednotlivé panely (persist)
-- [ ] 4. **Fullscreen grafů** — každý Chart.js graf na celou obrazovku
-- [ ] 5. **Export grafu jako PNG** — tlačítko u každého grafu
-- [ ] 6. **Proxy sankey** — tok doména → backend jako sankey diagram
-- [ ] 7. **Výběr textury globusu** — blue marble / night / topolografie / vlastní
-- [ ] 8. **Světlá varianta schémat** — light mode pro AMBER/MATRIX/RED
-- [ ] 9. **Country timeline** — mini-graf útoků v čase v country modálu
-- [ ] 10. **Animovaný přechod hodnot gauge** — plynulé dojetí ringu
+- [x] 1. **Attack ticker** — burzovní páska živých útoků pod HUD (scroll)
+- [x] 2. **Count-up animace** — stat čísla (summary bar, FSC) se animují při změně
+- [x] 3. **Konfigurovatelný dashboard** — skrýt/zobrazit jednotlivé panely (persist)
+- [x] 4. **Fullscreen grafů** — každý Chart.js graf na celou obrazovku
+- [x] 5. **Export grafu jako PNG** — tlačítko u každého grafu
+- [x] 6. **Proxy sankey** — tok doména → backend jako sankey diagram
+- [x] 7. **Výběr textury globusu** — blue marble / night / topolografie / vlastní
+- [x] 8. **Světlá varianta schémat** — light mode pro AMBER/MATRIX/RED
+- [x] 9. **Country timeline** — mini-graf útoků v čase v country modálu
+- [x] 10. **Animovaný přechod hodnot gauge** — plynulé dojetí ringu
 
 ### UX
 - [ ] 11. **Bulk block** — multi-select v attack history → hromadná blokace

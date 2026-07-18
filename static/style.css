@@ -1405,3 +1405,62 @@ body.kiosk-mode::after {
     cursor: pointer; letter-spacing: 0.5px;
 }
 .f2b-ip:hover { background: rgba(255,42,94,0.12); border-color: var(--red); }
+
+/* ── GAUGE animovaný přechod hodnoty (@property) ───────────────── */
+@property --p { syntax: '<number>'; inherits: false; initial-value: 0; }
+.gauge { transition: --p 0.6s ease-out; }
+
+/* ── ATTACK TICKER ─────────────────────────────────────────────── */
+#attack-ticker {
+    display: flex; align-items: center; gap: 6px; height: 22px;
+    background: var(--panel-2); border-bottom: 1px solid var(--border);
+    overflow: hidden; font-size: 10px; letter-spacing: 0.5px; white-space: nowrap;
+}
+#attack-ticker.hidden { display: none; }
+.tk-label {
+    flex-shrink: 0; padding: 0 10px; height: 100%; display: flex; align-items: center;
+    background: var(--accent); color: var(--bg-0); font-weight: 800; letter-spacing: 2px;
+}
+#tk-track { display: flex; gap: 26px; animation: tk-scroll 40s linear infinite; padding-left: 100%; }
+#attack-ticker:hover #tk-track { animation-play-state: paused; }
+.tk-item { color: var(--muted); }
+.tk-item b { color: var(--fg); font-family: monospace; }
+@keyframes tk-scroll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+
+/* ── DASHBOARD TOOLS ───────────────────────────────────────────── */
+.panel-collapsed { display: none !important; }
+.panel-hide, .chart-tools button {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    font-size: 11px; line-height: 1; padding: 1px 6px; cursor: pointer; font-family: inherit;
+}
+.panel-hide:hover, .chart-tools button:hover { color: var(--accent); border-color: var(--accent); }
+.chart-tools { display: inline-flex; gap: 4px; margin-left: auto; }
+#panel-restore { display: flex; align-items: center; gap: 5px; padding: 5px 12px; flex-wrap: wrap; }
+.chart-fullscreen {
+    position: fixed !important; inset: 40px !important; z-index: 930 !important;
+    background: var(--bg-0); border: 1px solid var(--accent); padding: 20px;
+    height: auto !important; width: auto !important;
+}
+
+/* ── SVĚTLÉ VARIANTY SCHÉMAT ───────────────────────────────────── */
+body.light-mode.scheme-amber {
+    --bg-0: #fdf6e3; --bg-1: #f5ead0; --fg: #5c4a1a; --muted: #a08a5a;
+    --accent: #b8860b; --accent-2: #d4a017; --accent-rgb: 184,134,11;
+    --border: #d8c89a; --border-2: #c8b482; --panel: rgba(253,246,227,0.97);
+    --panel-2: rgba(245,234,208,0.97); --input-bg: #f0e6cc; --grid-line: #e0d0a0; --scrollbar: #c8b482;
+    background: radial-gradient(ellipse at center, #fdf6e3 0%, #f0e6cc 70%, #e8dcc0 100%);
+}
+body.light-mode.scheme-matrix {
+    --bg-0: #e8f5e9; --bg-1: #d0ead2; --fg: #1b4a20; --muted: #5a8a5c;
+    --accent: #1a8a2e; --accent-2: #2db33f; --accent-rgb: 26,138,46;
+    --border: #a8d8ac; --border-2: #90c894; --panel: rgba(232,245,233,0.97);
+    --panel-2: rgba(208,234,210,0.97); --input-bg: #d8ecda; --grid-line: #b8dcba; --scrollbar: #90c894;
+    background: radial-gradient(ellipse at center, #e8f5e9 0%, #d8ecda 70%, #c8e0ca 100%);
+}
+body.light-mode.scheme-red {
+    --bg-0: #fdecec; --bg-1: #f5d0d0; --fg: #7a1a20; --muted: #b06a70;
+    --accent: #c62828; --accent-2: #e53935; --accent-rgb: 198,40,40;
+    --border: #e8b0b0; --border-2: #d89898; --panel: rgba(253,236,236,0.97);
+    --panel-2: rgba(245,208,208,0.97); --input-bg: #f5dcdc; --grid-line: #e8bcbc; --scrollbar: #d89898;
+    background: radial-gradient(ellipse at center, #fdecec 0%, #f5dcdc 70%, #e8c8c8 100%);
+}

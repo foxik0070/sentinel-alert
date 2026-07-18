@@ -236,3 +236,21 @@ if ('serviceWorker' in navigator && !new URLSearchParams(location.search).get('s
         navigator.serviceWorker.register('/sw.js').catch(() => {}); // tichý fail (http/localhost bez TLS)
     });
 }
+
+// ================================================================
+// COUNT-UP — plynulá animace číselných hodnot ve stat prvcích
+// ================================================================
+function countUp(el, to, dur = 600) {
+    if (!el) return;
+    const from = parseFloat(String(el.textContent).replace(/[^\d.-]/g, '')) || 0;
+    to = Number(to) || 0;
+    if (from === to) { el.textContent = to.toLocaleString(); return; }
+    const t0 = performance.now();
+    const step = (t) => {
+        const p = Math.min(1, (t - t0) / dur);
+        const eased = 1 - Math.pow(1 - p, 3); // easeOutCubic
+        el.textContent = Math.round(from + (to - from) * eased).toLocaleString();
+        if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+}

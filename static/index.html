@@ -167,6 +167,12 @@
     </div>
 </div>
 
+<!-- ATTACK TICKER (threat tab only) -->
+<div id="attack-ticker">
+    <span class="tk-label">◤ LIVE</span>
+    <div id="tk-track"></div>
+</div>
+
 <!-- DASHBOARD SUMMARY BAR (threat tab only) -->
 <div id="summary-bar">
     <div class="sum-cell"><span class="sum-lbl">ATTACKS TODAY</span><span class="sum-val" id="sum-today">—</span><span class="sum-delta" id="sum-delta"></span></div>
@@ -409,6 +415,12 @@
     <div class="panel" style="min-height:280px;">
         <div class="ph">◤ DOMAIN ACCESS — EXTERNAL vs INTERNAL (last 24h)</div>
         <div style="height:240px;"><canvas id="psc-ext-int-chart"></canvas></div>
+    </div>
+
+    <!-- Domain → backend flow -->
+    <div class="panel">
+        <div class="ph">◤ DOMAIN → BACKEND FLOW</div>
+        <div id="psc-flow" style="padding:8px 10px;display:flex;flex-direction:column;gap:5px;"></div>
     </div>
 
     <!-- Clients / Live feed — two columns -->

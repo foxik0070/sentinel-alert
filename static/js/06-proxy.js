@@ -220,6 +220,30 @@ async function pscUpdate() {
                 <td style="text-align:right;color:var(--yellow)">${escape(String(c.duration))}</td>
             </tr>`).join('') || `<tr><td colspan="6" class="empty">No connections recorded yet.</td></tr>`;
 
+        // Domain → backend flow (agregace z recent_connections)
+        const flowEl = document.getElementById('psc-flow');
+        if (flowEl) {
+            const flow = {};
+            (data.recent_connections || []).forEach(c => {
+                const key = `${c.domain} → ${c.dest}`;
+                flow[key] = (flow[key] || 0) + 1;
+            });
+            const sorted = Object.entries(flow).sort((a, b) => b[1] - a[1]).slice(0, 15);
+            const max = sorted.length ? sorted[0][1] : 1;
+            flowEl.innerHTML = sorted.map(([k, n]) => {
+                const [dom, backend] = k.split(' → ');
+                const pct = Math.round(n / max * 100);
+                return `<div style="display:flex;align-items:center;gap:8px;font-size:11px;">
+                    <span style="flex:1;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escape(dom)}</span>
+                    <span style="color:var(--muted);">→</span>
+                    <span style="width:150px;color:#38bdf8;font-family:monospace;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escape(backend)}</span>
+                    <div style="width:90px;height:8px;background:var(--bg-1);border:1px solid var(--border);flex-shrink:0;">
+                        <div style="height:100%;width:${pct}%;background:var(--accent);opacity:0.8;"></div></div>
+                    <span style="width:36px;text-align:right;color:var(--accent);font-weight:700;">${n}</span>
+                </div>`;
+            }).join('') || '<div class="empty">Žádná data.</div>';
+        }
+
     } catch (e) {
         console.error('PSC update failed:', e);
     }

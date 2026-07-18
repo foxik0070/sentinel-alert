@@ -119,10 +119,21 @@ let _lastCfg = {};
 // Textury self-hosted (dřív unpkg.com) — offline provoz + CSP bez externího CDN
 const TX_NIGHT = '/static/vendor/earth-night.jpg';
 const TX_DAY   = '/static/vendor/earth-blue-marble.jpg';
+const TX_TOPO  = '/static/vendor/earth-topology.png';
+const TX_LIST  = [
+    { name: 'NIGHT', url: TX_NIGHT },
+    { name: 'DAY',   url: TX_DAY },
+    { name: 'TOPO',  url: TX_TOPO },
+];
 
 let _manualDay = UIState.get('globe-day', null); // null = auto (time-based), true/false = user override
+let _texIdx = UIState.get('globe-tex', null);    // null = auto den/noc; jinak index do TX_LIST
 
 function pickTexture() {
+    if (_texIdx !== null && TX_LIST[_texIdx]) {
+        globeModeEl.textContent = TX_LIST[_texIdx].name;
+        return TX_LIST[_texIdx].url;
+    }
     const autoDay = new Date().getHours() >= 7 && new Date().getHours() < 19;
     const isDay = _manualDay !== null ? _manualDay : autoDay;
     globeModeEl.textContent = isDay ? 'DAY' : 'NIGHT';
@@ -314,9 +325,15 @@ document.addEventListener('visibilitychange', () => {
     }
 });
 
+globeModeEl.title = 'Cyklit texturu: NIGHT → DAY → TOPO → AUTO';
 globeModeEl.addEventListener('click', () => {
-    _manualDay = globeModeEl.textContent !== 'DAY';
-    UIState.set('globe-day', _manualDay);
+    // cyklus: (auto) → NIGHT(0) → DAY(1) → TOPO(2) → auto
+    if (_texIdx === null) _texIdx = 0;
+    else if (_texIdx >= TX_LIST.length - 1) _texIdx = null;
+    else _texIdx++;
+    _manualDay = null;
+    UIState.set('globe-tex', _texIdx);
+    UIState.set('globe-day', null);
     globe.globeImageUrl(pickTexture());
 });
 
@@ -459,7 +476,8 @@ function _openCountryModal(name) {
     const sorted = Object.entries(ipMap).sort((a,b)=>b[1]-a[1]);
 
     $('cmod-title').textContent = name.toUpperCase();
-    $('cmod-stats').textContent = `${hits.length} attack${hits.length!==1?'s':''} from ${sorted.length} unique IP${sorted.length!==1?'s':''}`;
+    $('cmod-stats').innerHTML = `${hits.length} attack${hits.length!==1?'s':''} from ${sorted.length} unique IP${sorted.length!==1?'s':''}`
+        + _countrySparkline(hits);
     $('cmod-list').innerHTML = sorted.map(([ip, cnt]) => {
         const col = PROTO_COLOR[(_attackHistory.find(a=>a.src_ip===ip)||{}).protocol||'fail2ban'] || '#d228ff';
         return `<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:#02060a;border:1px solid #14333a;border-radius:2px;">
@@ -470,6 +488,23 @@ function _openCountryModal(name) {
         </div>`;
     }).join('');
     $('country-modal').classList.remove('hidden');
+}
+
+// Mini timeline útoků za 24h po hodinách (inline SVG sparkline)
+function _countrySparkline(hits) {
+    const buckets = new Array(24).fill(0);
+    const now = Date.now();
+    hits.forEach(h => {
+        if (!h.ts) return;
+        const age = (now - new Date(h.ts).getTime()) / 3600000;
+        if (age >= 0 && age < 24) buckets[23 - Math.floor(age)]++;
+    });
+    const max = Math.max(...buckets, 1);
+    const W = 300, H = 40, bw = W / 24;
+    const bars = buckets.map((v, i) =>
+        `<rect x="${(i * bw).toFixed(1)}" y="${(H - v / max * H).toFixed(1)}" width="${(bw - 1).toFixed(1)}" height="${(v / max * H).toFixed(1)}" fill="var(--accent)" opacity="0.8"/>`).join('');
+    return `<div style="margin-top:8px;"><div style="font-size:8px;letter-spacing:1px;color:var(--muted);margin-bottom:2px;">POSLEDNÍCH 24H</div>
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:40px;display:block;">${bars}</svg></div>`;
 }
 
 $('cmod-close').addEventListener('click', () => $('country-modal').classList.add('hidden'));

@@ -530,7 +530,7 @@ async function summaryUpdate() {
     try { s = await fetch('/api/stats/summary').then(r => r.json()); }
     catch { return; }
 
-    $('sum-today').textContent = (s.attacks_today ?? 0).toLocaleString();
+    countUp($('sum-today'), s.attacks_today ?? 0);
     const dEl = $('sum-delta');
     if (s.attacks_yesterday > 0) {
         const d = Math.round((s.attacks_today - s.attacks_yesterday) / s.attacks_yesterday * 100);
@@ -538,7 +538,7 @@ async function summaryUpdate() {
         dEl.className = 'sum-delta ' + (d > 0 ? 'up' : d < 0 ? 'down' : '');
     } else { dEl.textContent = ''; dEl.className = 'sum-delta'; }
 
-    $('sum-1h').textContent  = (s.attacks_last_hour ?? 0).toLocaleString();
+    countUp($('sum-1h'), s.attacks_last_hour ?? 0);
     $('sum-vec').textContent = s.top_vector
         ? `${_PROTO_LABEL_SUM[s.top_vector] || s.top_vector.toUpperCase()} (${s.top_vector_n})` : '—';
     $('sum-vec').style.color = s.top_vector ? (PROTO_COLOR[s.top_vector] || 'var(--accent)') : 'var(--accent)';
@@ -675,3 +675,124 @@ async function f2bOpen() {
         });
     });
 }
+
+// ================================================================
+// ATTACK TICKER — burzovní páska živých útoků (jen Threat Map)
+// ================================================================
+function tickerRebuild() {
+    const track = $('tk-track');
+    if (!track) return;
+    const items = (_attackHistory || []).slice(0, 30);
+    if (!items.length) { track.innerHTML = '<span class="tk-item">Čekám na data…</span>'; return; }
+    track.innerHTML = '';
+    items.forEach(a => {
+        const el = document.createElement('span');
+        el.className = 'tk-item';
+        const proto = document.createElement('span');
+        proto.style.color = PROTO_COLOR[a.protocol] || 'var(--accent)';
+        proto.textContent = (a.protocol || '?').toUpperCase() + ' ';
+        const ip = document.createElement('b');
+        ip.textContent = a.src_ip;
+        el.append(proto, ip, document.createTextNode(` ${a.country || '?'}`));
+        track.appendChild(el);
+    });
+}
+function tickerSyncVisibility() {
+    const t = $('attack-ticker');
+    if (!t) return;
+    const show = (typeof _activeTab === 'undefined') || _activeTab === 'threat';
+    t.classList.toggle('hidden', !show);
+    if (show) tickerRebuild();
+}
+document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', tickerSyncVisibility));
+setInterval(tickerSyncVisibility, 20000);
+tickerSyncVisibility();
+
+// ================================================================
+// DASHBOARD TOOLS — skrytí panelů (Threat Map) + fullscreen/PNG grafů
+// ================================================================
+(function dashboardTools() {
+    // 1) Skrývání panelů v Threat Map gridu (persist)
+    const hidden = new Set(UIState.get('threat-hidden', []));
+    const panels = [...document.querySelectorAll('#tab-threat > .panel')].filter(p => p.id && p.id !== 'globe-panel');
+    panels.forEach(p => {
+        if (hidden.has(p.id)) p.classList.add('panel-collapsed');
+        const ph = p.querySelector('.ph');
+        if (!ph || ph.querySelector('.panel-hide')) return;
+        const btn = document.createElement('button');
+        btn.className = 'panel-hide';
+        btn.title = 'Skrýt panel';
+        btn.textContent = '–';
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            p.classList.toggle('panel-collapsed');
+            const h = p.classList.contains('panel-collapsed');
+            if (h) hidden.add(p.id); else hidden.delete(p.id);
+            UIState.set('threat-hidden', [...hidden]);
+            _syncPanelMenu();
+        });
+        ph.appendChild(btn);
+    });
+
+    // Menu pro obnovení skrytých panelů (v summary baru)
+    function _syncPanelMenu() {
+        let menu = document.getElementById('panel-restore');
+        const collapsed = panels.filter(p => p.classList.contains('panel-collapsed'));
+        if (!collapsed.length) { menu?.remove(); return; }
+        if (!menu) {
+            menu = document.createElement('div');
+            menu.id = 'panel-restore';
+            document.getElementById('summary-bar')?.appendChild(menu);
+        }
+        menu.innerHTML = '';
+        const lbl = document.createElement('span');
+        lbl.className = 'sum-lbl'; lbl.textContent = 'SKRYTÉ';
+        menu.appendChild(lbl);
+        collapsed.forEach(p => {
+            const name = p.querySelector('.ph span')?.textContent?.replace(/^◤\s*/, '') || p.id;
+            const b = document.createElement('button');
+            b.className = 'geo-chip'; b.textContent = '+ ' + name;
+            b.addEventListener('click', () => {
+                p.classList.remove('panel-collapsed');
+                hidden.delete(p.id); UIState.set('threat-hidden', [...hidden]); _syncPanelMenu();
+            });
+            menu.appendChild(b);
+        });
+    }
+    _syncPanelMenu();
+
+    // 2) Chart panely — fullscreen + PNG export
+    document.querySelectorAll('.fsc-chart-panel .ph, .panel > .ph').forEach(ph => {
+        const canvas = ph.parentElement.querySelector('canvas');
+        if (!canvas || ph.querySelector('.chart-tools')) return;
+        const tools = document.createElement('span');
+        tools.className = 'chart-tools';
+        const png = document.createElement('button');
+        png.textContent = '⇩'; png.title = 'Uložit graf jako PNG';
+        png.addEventListener('click', e => {
+            e.stopPropagation();
+            const a = document.createElement('a');
+            a.href = canvas.toDataURL('image/png');
+            a.download = (canvas.id || 'chart') + '.png';
+            a.click();
+        });
+        const fs = document.createElement('button');
+        fs.textContent = '⛶'; fs.title = 'Fullscreen grafu';
+        fs.addEventListener('click', e => {
+            e.stopPropagation();
+            const wrap = canvas.closest('.fsc-chart-wrap') || canvas.parentElement;
+            wrap.classList.toggle('chart-fullscreen');
+            document.body.classList.toggle('has-fullscreen', wrap.classList.contains('chart-fullscreen'));
+        });
+        tools.append(png, fs);
+        ph.appendChild(tools);
+    });
+})();
+
+// ESC zavře fullscreen grafu
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+        const f = document.querySelector('.chart-fullscreen');
+        if (f) { f.classList.remove('chart-fullscreen'); document.body.classList.remove('has-fullscreen'); }
+    }
+});
