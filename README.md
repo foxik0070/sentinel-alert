@@ -63,6 +63,16 @@ Additional capabilities:
 - **2FA (TOTP)** — optional, RFC 6238, works with Google/Aegis Authenticator; setup in Settings
 - **Read-only API token** — grants GET `/api` access (dashboard embeds, scripts) without
   sharing the password; excludes backup/config/export; managed in Settings
+- **Threat intel import** — public blocklists (blocklist.de / Spamhaus DROP / FireHOL);
+  known-bad IPs marked ☠ everywhere, optional auto-block on MikroTik
+- **GeoIP country blocking** — block attacking IPs from selected countries on MikroTik,
+  with impact preview (IPs/attacks covered)
+- **Fail2ban jail management** — jails across all monitored hosts (SSH), one-click unban
+- **ASN / ISP breakdown** — top attacking networks (in the Trends modal)
+- **Webhook receiver** — `POST /api/webhook/{token}` ingests external events onto the feed/globe
+- **Slack / Discord alerts** — in addition to ntfy / Telegram
+- **Docker** — `Dockerfile` + `docker-compose.yml` (host network, data/conf volumes)
+- **Grafana** — ready-made dashboard (`grafana-dashboard.json`) wired to `/metrics`
 
 ---
 
@@ -155,6 +165,17 @@ secret   =
 totp_secret =
 # Read-only API token — managed from Settings; blank = disabled
 api_token   =
+
+[threat]
+# Import public threat-intel blocklists (blocklist.de / Spamhaus / FireHOL)
+intel_enabled   = false
+# Auto-block known-bad IPs on MikroTik (needs mikrotik.auto_block)
+intel_autoblock = false
+
+[alerts]
+# Slack / Discord webhooks (alongside ntfy / Telegram)
+slack_webhook   =
+discord_webhook =
 
 [mode]
 # Deployment mode: "home" (default) or "work"
@@ -552,6 +573,13 @@ All endpoints returning sensitive data require authentication (session cookie).
 | GET | `/api/2fa/status` | yes | Whether TOTP 2FA is enabled |
 | POST | `/api/2fa/setup` `enable` `disable` | yes | TOTP setup / confirm / disable |
 | GET/POST | `/api/token`, `/api/token/generate\|revoke` | yes | Read-only API token management |
+| GET | `/api/threatintel/status` | no | Threat-intel feed status |
+| GET | `/api/stats/asn` | no | Top attacking ISP/ASN networks |
+| GET | `/api/geoblock/preview` | no | Impact of blocking selected countries |
+| POST | `/api/geoblock/apply` | yes | Block attacking IPs from countries on MikroTik |
+| GET | `/api/fail2ban/jails` | yes | Fail2ban jails across hosts |
+| POST | `/api/fail2ban/unban` | yes | Unban an IP from a jail |
+| POST | `/api/webhook/{token}` | token | Ingest an external event |
 | WS | `/ws/live` | no | Live event stream |
 
 ---
