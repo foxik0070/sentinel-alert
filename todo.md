@@ -143,3 +143,74 @@ Původní TODO z CLAUDE.md (MikroTik #2, Threat map #3, PiHole #5, dokumentace #
 - [x] **Slack / Discord alerty** — rozšíření alerting engine
 - [x] **Docker / compose** — Dockerfile + docker-compose.yml
 - [x] **Grafana dashboard template** — JSON napojený na /metrics
+
+---
+
+## Pátá vlna — backlog (50 námětů)
+
+Neschválené — čeká na výběr. Rozděleno do 6 kategorií.
+
+### UI / vizuál
+- [ ] 1. **Attack ticker** — burzovní páska živých útoků pod HUD (scroll)
+- [ ] 2. **Count-up animace** — stat čísla (summary bar, FSC) se animují při změně
+- [ ] 3. **Konfigurovatelný dashboard** — skrýt/zobrazit jednotlivé panely (persist)
+- [ ] 4. **Fullscreen grafů** — každý Chart.js graf na celou obrazovku
+- [ ] 5. **Export grafu jako PNG** — tlačítko u každého grafu
+- [ ] 6. **Proxy sankey** — tok doména → backend jako sankey diagram
+- [ ] 7. **Výběr textury globusu** — blue marble / night / topolografie / vlastní
+- [ ] 8. **Světlá varianta schémat** — light mode pro AMBER/MATRIX/RED
+- [ ] 9. **Country timeline** — mini-graf útoků v čase v country modálu
+- [ ] 10. **Animovaný přechod hodnot gauge** — plynulé dojetí ringu
+
+### UX
+- [ ] 11. **Bulk block** — multi-select v attack history → hromadná blokace
+- [ ] 12. **Undo smazání** — vrácení smazaných řádků v DB vieweru (soft delete)
+- [ ] 13. **Uložené filtry/pohledy** — pojmenované kombinace filtrů
+- [ ] 14. **Kontextové menu na IP** — pravé tlačítko: block/watch/intel/copy
+- [ ] 15. **Historie příkazů v palette** — poslední použité akce nahoře
+- [ ] 16. **Pinned akce v palette** — oblíbené akce připnout
+- [ ] 17. **Onboarding tour** — první spuštění: průvodce po tabech
+- [ ] 18. **Rychlé HOME/WORK přepnutí** — přepínač módu přímo v HUD
+- [ ] 19. **Klávesová navigace tabulek** — šipky + Enter v DB vieweru/matici
+- [ ] 20. **Drag řazení sloupců** — přeuspořádání sloupců v DB vieweru
+
+### Analytika / data
+- [ ] 21. **Heatmapa hodina×den** — kdy útoky nejvíc přicházejí
+- [ ] 22. **Korelace IP napříč vektory** — jedna IP na více portech/protokolech
+- [ ] 23. **Reputační skóre IP** — threat-intel + historie + ASN → 0–100
+- [ ] 24. **Top cílové porty** — graf nejčastěji atakovaných portů
+- [ ] 25. **"On this day"** — srovnání s minulým týdnem/měsícem
+- [ ] 26. **DB statistiky** — velikost tabulek, tempo růstu, odhad zaplnění
+- [ ] 27. **Session/duration analýza** — délka útočných sérií z jedné IP
+- [ ] 28. **Predikce trendu** — jednoduchá projekce útoků na příští dny
+- [ ] 29. **Geografický clustering** — seskupení útoků do regionů
+- [ ] 30. **Export do SIEM** — CEF/LEEF formát pro Splunk/QRadar
+
+### Integrace / feeds
+- [ ] 31. **AbuseIPDB API** — lookup skóre + hlášení útočníků (s klíčem)
+- [ ] 32. **VirusTotal IP lookup** — v IP intel kartě
+- [ ] 33. **Shodan lookup** — otevřené porty/služby útočící IP
+- [ ] 34. **GreyNoise** — rozlišení cílený útok vs. internetový šum
+- [ ] 35. **E-mail alerty (SMTP)** — vedle ntfy/Telegram/Slack/Discord
+- [ ] 36. **Syslog forwarding** — RFC 5424 export eventů do SIEM
+- [ ] 37. **MISP feed import** — threat-intel z MISP instance
+- [ ] 38. **RSS/Atom feed** — veřejný feed útoků pro čtečky
+- [ ] 39. **Matrix / Rocket.Chat** — další notifikační kanály
+- [ ] 40. **Alertmanager rules** — export Prometheus alert pravidel
+
+### Bezpečnost / provoz
+- [ ] 41. **Multi-user + role** — admin/viewer, oddělené účty
+- [ ] 42. **OIDC / LDAP login** — SSO integrace
+- [ ] 43. **Env config (12-factor)** — konfigurace přes proměnné prostředí
+- [ ] 44. **Šifrování secretů v conf** — hesla/tokeny nešifrované na disku
+- [ ] 45. **Obecný API rate-limit** — ne jen login, všechny endpointy
+- [ ] 46. **Zálohy na S3/rsync** — offsite kopie DB
+- [ ] 47. **Log rotace** — rotace app logů + strukturované logování (JSON)
+- [ ] 48. **Graceful shutdown** — persist rozpracovaného stavu při restartu
+- [ ] 49. **IPv6 napříč** — honeypot, blocklist, geoip plná podpora
+- [ ] 50. **CVE scan scheduling** — plánovaný bezpečnostní sken hostů (cron)
+
+### Honeypot / detekce (bonus)
+- [ ] **Rozšíření portů** — FTP(21)/Telnet(23)/RDP(3389)/SMB(445) honeypoty
+- [ ] **Payload capture** — co útočníci posílají (příkazy, credentials, user-agenty)
+- [ ] **Deception bannery** — realistické fake služby pro delší zdržení útočníka

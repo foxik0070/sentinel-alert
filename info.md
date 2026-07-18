@@ -11,11 +11,13 @@ Viz `HISTORY.md` pro detailní popis oprav z 2026-05-26.
 
 ## Otevřené TODO
 
-0. HOME — u zařízení se zaskrtnutou volbou NEW by neměl badge (NEW) svítit poté co je odškrtnut. Chci možnost označit LXC, QEMU — svítit jinou barvou vedle hostname.
+0. HOME — u zařízení se zaskrtnutou volbou NEW by neměl badge (NEW) svítit poté co je odškrtnut. Chci možnost označit LXC, QEMU — svítit jinou barvou vedle hostname. *(typy zařízení s barvami hotové; badge NEW dořešit)*
 1. WORK — animace oblouků aktivních uživatelů se zobrazuje jen občas (vypadává).
-2. Responzivita — HOME i WORK nejsou plně responzivní (prázdná místa, prvky přes sebe, logo překrývá jiné prvky).
-3. Globus se sekne, otáčí se trhaně.
-4. Závislost na externích JS/CSS (unpkg.com) — přepracovat na lokální soubory ve `static/vendor/`.
+2. Responzivita — HOME i WORK nejsou plně responzivní. *(mobile bottom bar + rolovací tabulky doplněny 2026-07; doladit prázdná místa)*
+3. Globus se sekne, otáčí se trhaně. *(rAF throttling flushů + pauza při skryté záložce; sledovat)*
+4. ~~Závislost na externích JS/CSS (unpkg.com)~~ — **hotovo (2026-07):** globe textury i knihovny lokálně ve `static/vendor/`, CSP bez externího CDN.
+
+> Kompletní přehled prací z 2026-07 viz `HISTORY.md`. Aktuální roadmapa: `todo.md`.
 
 ---
 

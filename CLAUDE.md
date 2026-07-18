@@ -33,12 +33,19 @@ Sentinel-Alert je nástroj pro monitoring domácí sítě a vizualizaci honeypot
 5. **app.py** — FastAPI server, WebSocket streaming, REST API.
 6. **bridge.py** — Odesílání událostí do hlavní Sentinel instance.
 7. **geoip.py** — GeoIP lookup (GeoLite2-City.mmdb + ip-api.com fallback).
-8. **collector.py** — SSH sběr dat z hostů (OS, CVE, fail2ban, firewall, zdroje).
+8. **collector.py** — SSH sběr dat z hostů (OS, CVE, fail2ban, firewall, zdroje). Fail2ban jail management (jails/unban).
 9. **blocklist.py** — Správa IP blocklists (GeoIP + fail2ban bans).
 10. **workmode.py** — Přepínání home/work módu (mění accent barvu a layout).
-11. **alerts.py** — Alerting engine + watchlist (`data/watchlist.json`). Push přes ntfy/Telegram (`[alerts]` sekce).
+11. **alerts.py** — Alerting engine + watchlist (`data/watchlist.json`). Push přes ntfy/Telegram/Slack/Discord (`[alerts]` sekce).
+12. **totp.py** — 2FA (TOTP, RFC 6238) čistě ze stdlib. Login flow + `[auth] totp_secret`.
+13. **threatintel.py** — Import veřejných blocklistů (blocklist.de/Spamhaus/FireHOL), `is_known_bad(ip)`, `[threat] intel_enabled`.
+14. **mikrotik.py** — MikroTik firewall (address-list, filter/NAT rules) přes SSH; ruční/auto/batch blokace, GeoIP country block.
+15. **pihole.py** — PiHole v6 REST API (multi-instance, primary/secondary).
 
-Frontend je rozdělen do modulů `static/js/00-ui.js … 11-ux.js` (klasické skripty načítané v pořadí, sdílený globální scope — žádný build step). 00 = sdílené utility (toasty, UIState, zvuk, boot), 01–10 = per-tab logika, 11 = command palette/UX/IP intel.
+Frontend je rozdělen do modulů `static/js/00-ui.js … 11-ux.js` (klasické skripty načítané v pořadí, sdílený globální scope — žádný build step). 00 = sdílené utility (toasty, UIState, zvuk, boot, notifikace, gauge, watchlist), 01–10 = per-tab logika, 11 = command palette/UX/IP intel/trends/reports/kiosk/f2b.
+
+Testy: `.venv/bin/python -m pytest tests/` (84 testů). Dev závislosti: `requirements-dev.txt`.
+Nasazení: systemd (`setup.sh`) nebo Docker (`docker-compose.yml`). Monitoring: `/healthz`, `/metrics` (+ `grafana-dashboard.json`).
 
 ## Konfigurace
 

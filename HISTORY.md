@@ -1,5 +1,64 @@
 # Sentinel-Alert — Change History
 
+## 2026-07-17 / 18 — velký sci-fi upgrade (verze 2026.07.001)
+
+Přepracování na moderní "sci-fi command center". 18 commitů (`f19e239` … `7458ade`),
+rozděleno do roadmapy a čtyř vln námětů. Vše ověřeno headless Chromiem (0 JS chyb),
+84 pytest testy a live proti běžící službě i reálné síti.
+
+### Architektura — refaktor
+- **Frontend rozdělen** z jednoho `static/script.js` (4442 řádků) na 13 modulů
+  `static/js/00-ui.js` … `11-ux.js` (klasické skripty načítané v pořadí, sdílený
+  globální scope kvůli inline `onclick` handlerům, bez build stepu).
+- **Nové backend moduly:** `alerts.py` (alerting + watchlist), `totp.py` (2FA, stdlib),
+  `threatintel.py` (blocklist import). Rozšířeny `conf.py`, `collector.py`, `mikrotik.py`.
+- **Globe textury self-hosted** ve `static/vendor/` (dřív unpkg.com) — offline provoz + CSP.
+
+### Roadmapa (30 položek — UI/UX/funkce/technika)
+- **Theme engine** — 4 schémata (CYAN/AMBER/MATRIX/RED ALERT), 8 accent barev, light mode.
+- **Sci-fi efekty** — boot sekvence, CRT/glitch, radar widget (sonar dle azimutu/vzdálenosti
+  útočníka), hex-grid, přechody tabů, volitelné Web Audio zvuky.
+- **Globe** — módy ARCS/HEAT/POINTS, pulzující ringy, den/noc dle UTC, 24h timeline replay,
+  hot zones (top země za poslední hodinu).
+- **Toasty**, gauge ringy, persist stavu UI (tab/filtry/rotace).
+- **UX** — command palette Ctrl+K s globálním hledáním, klávesové zkratky, help overlay,
+  skeleton loading, relativní časy, tooltips, mobile bottom bar, drag&drop panelů.
+- **Funkce** — IP intelligence karta, alerting engine (ntfy/Telegram), watchlist,
+  trendy 7/30 dní, scheduled HTML reporty.
+- **Technika** — DB údržba (retence/VACUUM/indexy), rate-limit loginu, audit log,
+  debounce renderů, session expiry indikátor.
+
+### CLAUDE.md TODO
+- **MikroTik auto-block** (`[mikrotik] auto_block`) — f2b ban hned, honeypot/proxy po N zásazích.
+- **Threat map vektorový filtr** (F2B/SSH/HTTP/HTTPS) filtruje globus i seznam.
+- **PiHole** ověřeno proti reálné instanci (v6.4.3), opraveny chybové stavy.
+
+### WebGL fallback
+- Globe init v `try/catch`; při selhání Proxy stub (globe.* → no-op), 2D live feed útoků
+  v panelu, radar (canvas 2D) běží dál — dashboard přežije chybějící WebGL.
+
+### 2. vlna — robustnost & funkce
+- **WS reconnect** s exponenciálním backoffem + jitter, re-sync snapshotu.
+- **/healthz**, GZip middleware, bezpečnostní hlavičky (CSP/X-Frame/nosniff/Referrer).
+- **Dashboard summary bar** (dnes vs. včera, top vektor, hot zone, block %).
+- **Export CSV/JSON** (DB viewer + IP intel), **PWA** (manifest + service worker offline shell).
+- 22 nových testů (watchlist/geoip/healthz/trends/rate-limit).
+
+### 3. vlna — provoz & bezpečnost
+- **Prometheus /metrics**, **backup DB** (+ noční auto-záloha retence 7),
+  **config self-test** na startu (TCP dostupnost hostů → /healthz), **browser notifikace**.
+- **Anomaly spike detekce** (≥3× baseline), **kiosk mód** (`?kiosk`, wake-lock),
+  **2FA/TOTP** (RFC 6238), **read-only API token** (GET-only, ne backup/config).
+
+### 4. vlna — threat intel & integrace
+- **Threat intel import** (blocklist.de/Spamhaus/FireHOL, ☠ marker, opt-in auto-block).
+- **GeoIP country blocking** (blok útočníků z vybraných zemí na MikroTik + náhled dopadu).
+- **Fail2ban jail management** (jaily napříč hosty přes SSH, one-click unban).
+- **ASN/ISP breakdown**, **webhook receiver**, **Slack/Discord alerty**,
+  **Docker** (Dockerfile + compose), **Grafana dashboard** (`grafana-dashboard.json`).
+
+---
+
 ## 2026-05-26
 
 ### Work mode — opraveny kritické chyby
