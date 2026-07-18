@@ -73,6 +73,21 @@ Additional capabilities:
 - **Slack / Discord alerts** — in addition to ntfy / Telegram
 - **Docker** — `Dockerfile` + `docker-compose.yml` (host network, data/conf volumes)
 - **Grafana** — ready-made dashboard (`grafana-dashboard.json`) wired to `/metrics`
+- **Attack ticker** — live scrolling attack feed above the Threat Map
+- **Analytics** — hour×day heatmap, top ports, IP correlation, /24 botnet clustering,
+  attack prediction, on-this-day (ANALYTICS modal)
+- **IP reputation** — 0-100 score (attacks + vectors + bans + threat-intel) in the IP card
+- **External lookups** — AbuseIPDB / VirusTotal / Shodan / GreyNoise (API keys in `[integrations]`)
+- **IP context menu** — right-click any IP: intel / block / watch / globe / copy / export
+- **Command palette** — recent + pinned actions, saved views (tab + filter + scheme)
+- **Bulk block** — block all visible attackers on MikroTik in one call
+- **Undo delete** — restore records removed in the DB viewer
+- **SIEM export** — ArcSight CEF format; RSS feed (`/feed.xml`)
+- **More alert channels** — Slack / Discord / Rocket.Chat / SMTP e-mail / Syslog (RFC 5424)
+- **Multi-user** — optional read-only *viewer* account; reverse-proxy auth trust (OIDC)
+- **12-factor config** — any value overridable via `SENTINEL_<SECTION>_<KEY>`; `env:VAR` secret refs
+- **General API rate-limit**, **rsync offsite backups**, **rotating JSON audit log**
+- **Honeypot deception** — optional FTP/Telnet/SMTP/RDP/SMB fake services with realistic banners
 
 ---
 
@@ -268,7 +283,26 @@ telegram_chat  =
 [db]
 # Retention for attacks + ban history (daily prune at 04:30 + VACUUM)
 retention_days = 90
+# Optional offsite backup target (rsync over SSH); empty = local only
+backup_rsync_target =
+
+[integrations]
+# External IP lookup services (blank = disabled). Shown on-demand in the IP card.
+abuseipdb_key  =
+virustotal_key =
+shodan_key     =
+greynoise_key  =
+# MISP threat-intel feed (imported alongside blocklist.de/Spamhaus/FireHOL)
+misp_url =
+misp_key =
 ```
+
+Extra `[auth]` keys: `viewer_username` / `viewer_password` (read-only account),
+`trust_proxy_header` (trust reverse-proxy auth header, e.g. `X-Forwarded-User`),
+`api_rate_limit` (req/min per IP; 0 = off). `[honeypot] extra_services` enables extra
+deception listeners (`ftp,telnet,smtp,rdp,smb`). `[alerts]` adds `rocketchat_webhook`,
+`smtp_*`, `syslog_*`. Any value may be overridden with an env var
+`SENTINEL_<SECTION>_<KEY>`, or point to a secret with `env:VARNAME`.
 
 Config is read at startup. After editing, restart the service:
 

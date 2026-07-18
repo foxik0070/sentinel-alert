@@ -217,6 +217,24 @@ ask_secret() {
     printf -v "$var" '%s' "$val"
 }
 
+# ── vylepšené interaktivní helpery s vysvětlením ─────────────────────────────
+# section "NÁZEV" "popis co sekce nastavuje"
+section() {
+    echo ""
+    echo -e "${CYN}── $1 ──────────────────────────────────────${NC}"
+    [[ -n "${2:-}" ]] && echo -e "${YLW}  ${2}${NC}"
+}
+# explain "text" — víceřádkové vysvětlení k jednotlivé volbě
+explain() { echo -e "     ${CYN}› ${1}${NC}"; }
+# ask_yn VAR "otázka" default(y/n) — vrací true/false
+ask_yn() {
+    local var="$1" prompt="$2" def="${3:-n}"
+    local hint="[y/N]"; [[ "$def" == "y" ]] && hint="[Y/n]"
+    read -rp "  $prompt $hint: " _yn
+    _yn="${_yn:-$def}"
+    [[ "${_yn,,}" == "y" ]] && printf -v "$var" 'true' || printf -v "$var" 'false'
+}
+
 # ── skip config if exists and not --reconf ──────────────────────────────────
 if [[ -f "$CONF_FILE" && "$MODE" == "install" ]]; then
     warn "Config already exists at $CONF_FILE"
@@ -342,6 +360,41 @@ if [[ "$SKIP_CONF" == "false" ]]; then
         echo -e "${CYN}── Blocked IPs Visualization ────────────────────${NC}"
         warn "Path to a file with one IP per line to visualize on the globe."
         ask BLOCKS_IPS_FILE "Blocked IPs file (empty to disable)" ""
+
+        section "MikroTik Router" "Firewall na MikroTiku přes SSH — ruční i automatická blokace útočníků."
+        explain "Prázdný host = MikroTik integrace vypnutá (záložka LOCAL NETWORK bez firewallu)."
+        ask MIKROTIK_HOST "MikroTik IP/hostname (empty = disable)" ""
+        if [[ -n "$MIKROTIK_HOST" ]]; then
+            ask MIKROTIK_SSH_USER "SSH uživatel na MikroTiku" "admin"
+            explain "Auto-block: fail2ban ban se zablokuje hned, honeypot/proxy útok po N zásazích."
+            ask_yn MIKROTIK_AUTO_BLOCK "Zapnout automatickou blokaci?" "n"
+            ask MIKROTIK_AB_THRESHOLD "  Práh zásahů pro honeypot/proxy útok" "3"
+        else
+            MIKROTIK_SSH_USER="admin"; MIKROTIK_AUTO_BLOCK=false; MIKROTIK_AB_THRESHOLD=3
+        fi
+
+        section "PiHole" "DNS statistiky z PiHole v6 (dotazy, blokace, top domény)."
+        explain "Více instancí odděl čárkou; primary je ta, ze které se berou grafy."
+        ask PIHOLE_HOSTS "PiHole IP/hostname(y), comma-sep (empty = disable)" ""
+        if [[ -n "$PIHOLE_HOSTS" ]]; then
+            ask PIHOLE_PRIMARY "Primární instance" "${PIHOLE_HOSTS%%,*}"
+            ask_secret PIHOLE_PASSWORD "PiHole heslo (web admin)" ""
+        else
+            PIHOLE_PRIMARY=""; PIHOLE_PASSWORD=""
+        fi
+
+        section "Threat Intel" "Import veřejných blocklistů (blocklist.de/Spamhaus/FireHOL) — known-bad IP se značí ☠."
+        ask_yn THREAT_INTEL_ENABLED "Zapnout import threat-intel blocklistů?" "n"
+        if [[ "$THREAT_INTEL_ENABLED" == "true" && "$MIKROTIK_AUTO_BLOCK" == "true" ]]; then
+            explain "Auto-block known-bad IP na MikroTiku (4 týdny)."
+            ask_yn THREAT_INTEL_AUTOBLOCK "Auto-blokovat known-bad na MikroTiku?" "n"
+        else
+            THREAT_INTEL_AUTOBLOCK=false
+        fi
+
+        section "Honeypot deception (extra služby)" "Volitelné fake služby lákající útočníky (vyžadují root — porty pod 1024)."
+        explain "Zadej comma-sep: ftp,telnet,smtp,rdp,smb — nebo nech prázdné (jen SSH+HTTP)."
+        ask HONEYPOT_EXTRA "Extra služby (empty = žádné)" ""
     else
         # Work mode — home-only features disabled
         SNIPROXY_SERVER=""; SNIPROXY_SSH_USER="root"
@@ -351,8 +404,73 @@ if [[ "$SKIP_CONF" == "false" ]]; then
         FSC_HA_URL=""; FSC_HA_TOKEN=""
         FSC_IGNORE_IPS=""
         BLOCKS_IPS_FILE=""
-        ok "Work mode: LAN scanner, Security Center, Proxy Monitor disabled."
+        MIKROTIK_HOST=""; MIKROTIK_SSH_USER="admin"; MIKROTIK_AUTO_BLOCK=false; MIKROTIK_AB_THRESHOLD=3
+        PIHOLE_HOSTS=""; PIHOLE_PRIMARY=""; PIHOLE_PASSWORD=""
+        THREAT_INTEL_ENABLED=false; THREAT_INTEL_AUTOBLOCK=false
+        HONEYPOT_EXTRA=""
+        ok "Work mode: LAN scanner, Security Center, Proxy Monitor, MikroTik, PiHole disabled."
     fi
+
+    # ── Alerting (obě módy) ──────────────────────────────────────────────────
+    section "Alerting" "Push notifikace: nové zařízení v LAN, host offline, watchlist hit, attack spike."
+    ask_yn ALERTS_ENABLED "Zapnout alerting?" "n"
+    ALERTS_NTFY_URL=""; ALERTS_TG_TOKEN=""; ALERTS_TG_CHAT=""
+    ALERTS_SLACK=""; ALERTS_DISCORD=""; ALERTS_ROCKET=""
+    ALERTS_SMTP_HOST=""; ALERTS_SMTP_PORT=587; ALERTS_SMTP_USER=""; ALERTS_SMTP_PASS=""; ALERTS_SMTP_TO=""
+    ALERTS_SYSLOG_HOST=""; ALERTS_SYSLOG_PORT=514
+    if [[ "$ALERTS_ENABLED" == "true" ]]; then
+        explain "ntfy: veřejný/self-hosted topic URL, např. https://ntfy.sh/muj-sentinel"
+        ask ALERTS_NTFY_URL "ntfy topic URL (empty = skip)" ""
+        explain "Telegram bot: token od @BotFather + chat_id příjemce."
+        ask ALERTS_TG_TOKEN "Telegram bot token (empty = skip)" ""
+        [[ -n "$ALERTS_TG_TOKEN" ]] && ask ALERTS_TG_CHAT "Telegram chat ID" ""
+        explain "Webhooky (Slack/Discord/Rocket.Chat) — vlož incoming webhook URL."
+        ask ALERTS_SLACK   "Slack webhook URL (empty = skip)" ""
+        ask ALERTS_DISCORD "Discord webhook URL (empty = skip)" ""
+        ask ALERTS_ROCKET  "Rocket.Chat webhook URL (empty = skip)" ""
+        explain "E-mail přes SMTP (STARTTLS)."
+        ask ALERTS_SMTP_HOST "SMTP server (empty = skip)" ""
+        if [[ -n "$ALERTS_SMTP_HOST" ]]; then
+            ask ALERTS_SMTP_PORT "SMTP port" "587"
+            ask ALERTS_SMTP_USER "SMTP uživatel" ""
+            ask_secret ALERTS_SMTP_PASS "SMTP heslo" ""
+            ask ALERTS_SMTP_TO "Příjemce (To)" ""
+        fi
+        explain "Syslog forwarding do SIEM (RFC 5424, UDP)."
+        ask ALERTS_SYSLOG_HOST "Syslog host (empty = skip)" ""
+        [[ -n "$ALERTS_SYSLOG_HOST" ]] && ask ALERTS_SYSLOG_PORT "Syslog port" "514"
+    fi
+
+    # ── Externí IP lookup (obě módy) ─────────────────────────────────────────
+    section "External IP Lookup" "Obohacení IP intel karty o externí reputaci (nepovinné, potřebují API klíč)."
+    ask_yn WANT_INTEGRATIONS "Nakonfigurovat externí lookup služby?" "n"
+    INTEG_ABUSE=""; INTEG_VT=""; INTEG_SHODAN=""; INTEG_GREY=""
+    if [[ "$WANT_INTEGRATIONS" == "true" ]]; then
+        explain "AbuseIPDB — skóre zneužití + hlášení (abuseipdb.com/account/api)."
+        ask_secret INTEG_ABUSE "AbuseIPDB API key" ""
+        explain "VirusTotal — počet detekcí malicious/harmless."
+        ask_secret INTEG_VT "VirusTotal API key" ""
+        explain "Shodan — otevřené porty/služby útočící IP."
+        ask_secret INTEG_SHODAN "Shodan API key" ""
+        explain "GreyNoise — cílený útok vs. internetový šum."
+        ask_secret INTEG_GREY "GreyNoise API key" ""
+    fi
+
+    # ── DB údržba (obě módy) ─────────────────────────────────────────────────
+    section "Database Maintenance" "Automatická údržba SQLite: retence, VACUUM, noční záloha."
+    ask DB_RETENTION "Retence útoků/banů ve dnech" "90"
+    explain "Offsite kopie zálohy přes rsync (user@host:/cesta) — prázdné = jen lokální."
+    ask DB_RSYNC "rsync cíl zálohy (empty = jen lokální)" ""
+
+    # ── Zabezpečení navíc (obě módy) ─────────────────────────────────────────
+    section "Extra Security" "Read-only účet, rate-limit API, důvěra reverse-proxy autentizaci."
+    explain "Viewer účet vidí vše, ale nemůže nic měnit (žádné blokace/mazání/config)."
+    ask AUTH_VIEWER_USER "Viewer username (empty = disable)" ""
+    [[ -n "$AUTH_VIEWER_USER" ]] && ask_secret AUTH_VIEWER_PASS "Viewer password" "" || AUTH_VIEWER_PASS=""
+    explain "Rate-limit /api na IP (0 = vypnuto). Chrání před zahlcením."
+    ask AUTH_RATE_LIMIT "API rate-limit (req/min, 0 = off)" "0"
+    explain "Za oauth2-proxy/OIDC: hlavička s ověřeným uživatelem = auto-login (např. X-Forwarded-User). Prázdné = vypnuto."
+    ask AUTH_TRUST_HEADER "Trust proxy auth header (empty = off)" ""
 
     # ── write config ───────────────────────────────────────────────────────
     info "Creating $CONF_DIR ..."
@@ -387,6 +505,16 @@ username = ${AUTH_USER}
 password = ${AUTH_PASS}
 # HMAC secret for session tokens — leave blank to auto-generate on each start
 secret   =
+# 2FA (TOTP) and read-only API token — managed from Settings UI
+totp_secret =
+api_token   =
+# Optional read-only viewer account (can view, cannot change anything)
+viewer_username = ${AUTH_VIEWER_USER}
+viewer_password = ${AUTH_VIEWER_PASS}
+# Trust reverse-proxy auth header (oauth2-proxy/OIDC), e.g. X-Forwarded-User. Empty = off.
+trust_proxy_header = ${AUTH_TRUST_HEADER}
+# General API rate-limit (requests/min per IP; 0 = off)
+api_rate_limit = ${AUTH_RATE_LIMIT}
 
 [server]
 # Address and port for the web UI
@@ -410,6 +538,8 @@ hostname = ${SENTINEL_HOSTNAME}
 # Ports the fake services listen on (must be > 1024 unless running as root)
 ssh_port  = ${HONEYPOT_SSH_PORT}
 http_port = ${HONEYPOT_HTTP_PORT}
+# Extra deception services (comma-separated: ftp,telnet,smtp,rdp,smb). Need root for <1024.
+extra_services = ${HONEYPOT_EXTRA}
 
 [collector]
 # SSH settings for fail2ban ban polling across hosts
@@ -442,6 +572,60 @@ ignore_ips = ${FSC_IGNORE_IPS}
 [threat]
 # Optional: path to a file with one blocked IP per line (visualized on the globe)
 blocks_ips_file = ${BLOCKS_IPS_FILE}
+# Import public threat-intel blocklists (blocklist.de/Spamhaus/FireHOL) → known-bad ☠
+intel_enabled   = ${THREAT_INTEL_ENABLED}
+# Auto-block known-bad IPs on MikroTik (needs mikrotik.auto_block)
+intel_autoblock = ${THREAT_INTEL_AUTOBLOCK}
+
+[mikrotik]
+# MikroTik firewall integration over SSH (address lists, filter/NAT, blocking).
+# Empty host = disabled. HOME instance only.
+host                 = ${MIKROTIK_HOST}
+ssh_user             = ${MIKROTIK_SSH_USER}
+# Auto-block: fail2ban ban → immediately, honeypot/proxy → after N hits
+auto_block           = ${MIKROTIK_AUTO_BLOCK}
+auto_block_threshold = ${MIKROTIK_AB_THRESHOLD}
+
+[pihole]
+# PiHole v6 DNS stats (comma-separated hosts, one primary). Empty = disabled.
+hosts    = ${PIHOLE_HOSTS}
+primary  = ${PIHOLE_PRIMARY}
+password = ${PIHOLE_PASSWORD}
+
+[alerts]
+# Push notifications: new LAN device, host offline, watchlist hit, attack spike
+enabled            = ${ALERTS_ENABLED}
+ntfy_url           = ${ALERTS_NTFY_URL}
+telegram_token     = ${ALERTS_TG_TOKEN}
+telegram_chat      = ${ALERTS_TG_CHAT}
+slack_webhook      = ${ALERTS_SLACK}
+discord_webhook    = ${ALERTS_DISCORD}
+rocketchat_webhook = ${ALERTS_ROCKET}
+# E-mail (SMTP, STARTTLS)
+smtp_host = ${ALERTS_SMTP_HOST}
+smtp_port = ${ALERTS_SMTP_PORT}
+smtp_user = ${ALERTS_SMTP_USER}
+smtp_pass = ${ALERTS_SMTP_PASS}
+smtp_to   = ${ALERTS_SMTP_TO}
+# Syslog forwarding (RFC 5424, UDP) to a SIEM
+syslog_host = ${ALERTS_SYSLOG_HOST}
+syslog_port = ${ALERTS_SYSLOG_PORT}
+
+[integrations]
+# External IP lookup services (blank = disabled). Shown on-demand in the IP card.
+abuseipdb_key  = ${INTEG_ABUSE}
+virustotal_key = ${INTEG_VT}
+shodan_key     = ${INTEG_SHODAN}
+greynoise_key  = ${INTEG_GREY}
+# MISP threat-intel feed (imported alongside public blocklists)
+misp_url =
+misp_key =
+
+[db]
+# Retention for attacks + ban history (daily prune at 04:30 + VACUUM)
+retention_days = ${DB_RETENTION}
+# Optional offsite backup target (rsync over SSH); empty = local only
+backup_rsync_target = ${DB_RSYNC}
 
 [geoip]
 # MaxMind license key for automatic GeoLite2 database download

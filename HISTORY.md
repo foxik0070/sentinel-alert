@@ -1,5 +1,44 @@
 # Sentinel-Alert — Change History
 
+## 2026-07-18 — pátá vlna: 53 vylepšení (6 kategorií)
+
+Rozšíření napříč celou aplikací, commity `116a2f4` … `4822450`. Vše ověřeno
+headless Chromiem (0 JS chyb), 84 pytest testy a live proti běžící službě.
+
+### A — UI/vizuál
+Attack ticker (páska živých útoků), count-up animace, konfigurovatelný dashboard
+(skrytí panelů), fullscreen + PNG export grafů, proxy domain→backend flow, výběr
+textury globusu (NIGHT/DAY/TOPO), světlé varianty schémat, country timeline sparkline,
+animovaný gauge (@property).
+
+### B — UX
+Kontextové menu na IP (pravé tlačítko), palette historie + připnuté akce + uložené
+pohledy, bulk block (BLOCK ALL + `/api/mikrotik/block-batch`), undo mazání v DB
+vieweru (`/api/db/{table}/restore`), onboarding tour, HOME/WORK indikátor, klávesová
+navigace tabulek, řazení sloupců.
+
+### C — Analytika
+Heatmapa hodina×den, top cílové porty, korelace IP (koordinovaní útočníci), /24 subnet
+clustering (botnety), on-this-day, DB statistiky, lineární predikce útoků, reputační
+skóre IP 0-100, SIEM CEF export, ANALYTICS modál.
+
+### D — Integrace/feeds
+`intel_ext.py` (AbuseIPDB/VirusTotal/Shodan/GreyNoise lookup), SMTP e-mail, Syslog
+RFC 5424, Rocket.Chat webhook, MISP feed import, RSS feed (`/feed.xml`), Alertmanager
+pravidla (`/alertmanager-rules.yml`).
+
+### E — Bezpečnost/provoz
+Multi-user role (viewer read-only), reverse-proxy auth trust (OIDC), env config
+(12-factor `SENTINEL_<SECTION>_<KEY>` + `env:VAR` secret refs), obecný API rate-limit,
+rsync offsite zálohy, strukturovaný JSON audit log s rotací, graceful shutdown,
+CVE scan scheduling.
+
+### F — Honeypot
+Extra deception služby (FTP/Telnet/SMTP/RDP/SMB) s realistickými bannery, payload
+capture, per-služba ošetření bind chyb.
+
+---
+
 ## 2026-07-17 / 18 — velký sci-fi upgrade (verze 2026.07.001)
 
 Přepracování na moderní "sci-fi command center". 18 commitů (`f19e239` … `7458ade`),
