@@ -13,15 +13,43 @@ _c = configparser.ConfigParser(interpolation=None)
 _c.read(CONF_PATH)  # silent if file missing — all values fall back to defaults
 
 
+def _resolve(val):
+    """Secret ref: hodnota 'env:VARNAME' se načte z prostředí (12-factor,
+    secret nezůstává na disku). Jinak vrací hodnotu beze změny."""
+    if isinstance(val, str) and val.startswith("env:"):
+        return os.environ.get(val[4:], "")
+    return val
+
+
+def _env(section, key):
+    """Přepis přes env: SENTINEL_<SECTION>_<KEY> má přednost před conf souborem."""
+    return os.environ.get(f"SENTINEL_{section.upper()}_{key.upper()}")
+
+
 def _s(section, key, fallback=""):
-    return _c.get(section, key, fallback=fallback)
+    ev = _env(section, key)
+    if ev is not None:
+        return _resolve(ev)
+    return _resolve(_c.get(section, key, fallback=fallback))
 
 
 def _i(section, key, fallback=0):
+    ev = _env(section, key)
+    if ev is not None:
+        try:
+            return int(ev)
+        except ValueError:
+            return fallback
     return _c.getint(section, key, fallback=fallback)
 
 
 def _f(section, key, fallback=0.0):
+    ev = _env(section, key)
+    if ev is not None:
+        try:
+            return float(ev)
+        except ValueError:
+            return fallback
     return _c.getfloat(section, key, fallback=fallback)
 
 
@@ -35,6 +63,15 @@ AUTH_PASSWORD = _s("auth", "password", "admin")
 AUTH_SECRET   = _s("auth", "secret",   "") or os.urandom(32).hex()
 AUTH_TOTP_SECRET = _s("auth", "totp_secret", "")          # prázdné = 2FA vypnuté
 AUTH_API_TOKEN   = _s("auth", "api_token",   "")          # read-only token pro GET /api
+# Viewer účet (read-only, nemůže mutovat) — prázdné = vypnuto
+AUTH_VIEWER_USERNAME = _s("auth", "viewer_username", "")
+AUTH_VIEWER_PASSWORD = _s("auth", "viewer_password", "")
+# Trust reverse-proxy auth (oauth2-proxy/OIDC): hlavička X-Forwarded-User → přihlášený
+AUTH_TRUST_PROXY_HEADER = _s("auth", "trust_proxy_header", "")
+# Obecný API rate-limit (req/min per IP; 0 = vypnuto)
+API_RATE_LIMIT = _i("auth", "api_rate_limit", 0)
+# Zálohy na vzdálený cíl přes rsync (user@host:/path; prázdné = jen lokální)
+BACKUP_RSYNC_TARGET = _s("db", "backup_rsync_target", "")
 
 # [home]
 HOME_LAT = _f("home", "lat", 0.0)   # 0.0 = auto-detect from public IP

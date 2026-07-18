@@ -237,18 +237,23 @@ def _recompute_24h():
     data_store["domain_stats"] = dom_stats
 
 
+def save_state():
+    """Jednorázový flush stavu na disk (volá se i při graceful shutdown)."""
+    try:
+        with _lock:
+            snapshot = {k: data_store[k] for k in
+                        ("total_tx", "total_rx", "total_connections", "bans")}
+        os.makedirs(os.path.dirname(_STATS_FILE), exist_ok=True)
+        with open(_STATS_FILE, "w") as f:
+            json.dump(snapshot, f)
+    except Exception:
+        pass
+
+
 def _save_stats():
     while True:
         time.sleep(60)
-        try:
-            with _lock:
-                snapshot = {k: data_store[k] for k in
-                            ("total_tx", "total_rx", "total_connections", "bans")}
-            os.makedirs(os.path.dirname(_STATS_FILE), exist_ok=True)
-            with open(_STATS_FILE, "w") as f:
-                json.dump(snapshot, f)
-        except Exception:
-            pass
+        save_state()
 
 
 def _poll_worker():

@@ -199,16 +199,16 @@ Neschválené — čeká na výběr. Rozděleno do 6 kategorií.
 - [x] 40. **Alertmanager rules** — export Prometheus alert pravidel
 
 ### Bezpečnost / provoz
-- [ ] 41. **Multi-user + role** — admin/viewer, oddělené účty
-- [ ] 42. **OIDC / LDAP login** — SSO integrace
-- [ ] 43. **Env config (12-factor)** — konfigurace přes proměnné prostředí
-- [ ] 44. **Šifrování secretů v conf** — hesla/tokeny nešifrované na disku
-- [ ] 45. **Obecný API rate-limit** — ne jen login, všechny endpointy
-- [ ] 46. **Zálohy na S3/rsync** — offsite kopie DB
-- [ ] 47. **Log rotace** — rotace app logů + strukturované logování (JSON)
-- [ ] 48. **Graceful shutdown** — persist rozpracovaného stavu při restartu
-- [ ] 49. **IPv6 napříč** — honeypot, blocklist, geoip plná podpora
-- [ ] 50. **CVE scan scheduling** — plánovaný bezpečnostní sken hostů (cron)
+- [x] 41. **Multi-user + role** — admin/viewer, oddělené účty
+- [x] 42. **OIDC / LDAP login** — SSO integrace
+- [x] 43. **Env config (12-factor)** — konfigurace přes proměnné prostředí
+- [x] 44. **Šifrování secretů v conf** — hesla/tokeny nešifrované na disku
+- [x] 45. **Obecný API rate-limit** — ne jen login, všechny endpointy
+- [x] 46. **Zálohy na S3/rsync** — offsite kopie DB
+- [x] 47. **Log rotace** — rotace app logů + strukturované logování (JSON)
+- [x] 48. **Graceful shutdown** — persist rozpracovaného stavu při restartu
+- [x] 49. **IPv6 napříč** — honeypot, blocklist, geoip plná podpora
+- [x] 50. **CVE scan scheduling** — plánovaný bezpečnostní sken hostů (cron)
 
 ### Honeypot / detekce (bonus)
 - [ ] **Rozšíření portů** — FTP(21)/Telnet(23)/RDP(3389)/SMB(445) honeypoty

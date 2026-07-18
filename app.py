@@ -420,7 +420,7 @@ async def lifespan(app: FastAPI):
         while True:
             now = datetime.now()
             jobs = []
-            for hh, mm, kind in ((4, 0, "backup"), (4, 30, "db"), (6, 0, "report")):
+            for hh, mm, kind in ((3, 0, "cve"), (4, 0, "backup"), (4, 30, "db"), (6, 0, "report")):
                 t = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
                 if t <= now:
                     t += timedelta(days=1)
@@ -445,6 +445,24 @@ async def lifespan(app: FastAPI):
                         os.remove(os.path.join(BACKUP_DIR, old))
                     size_mb = os.path.getsize(path) / 1e6
                     msg = f"DB backup: {os.path.basename(path)} ({size_mb:.1f} MB), keeping last 7"
+                    # Volitelná offsite kopie přes rsync
+                    if conf.BACKUP_RSYNC_TARGET:
+                        try:
+                            import subprocess as _sp
+                            await asyncio.to_thread(
+                                _sp.run,
+                                ["rsync", "-a", "-e",
+                                 f"ssh -i {os.path.join(BASE_DIR, 'conf', 'id_ed25519')} -o StrictHostKeyChecking=accept-new",
+                                 path, conf.BACKUP_RSYNC_TARGET],
+                                timeout=120, check=False)
+                            msg += f" → rsync {conf.BACKUP_RSYNC_TARGET}"
+                        except Exception:
+                            msg += " (rsync selhal)"
+                elif kind == "cve":
+                    # Plánovaný bezpečnostní sken hostů (fsc) na pozadí
+                    import threading as _th
+                    _th.Thread(target=fsc.run_full_scan, daemon=True).start()
+                    msg = "CVE/security scan triggered (scheduled)"
                 else:
                     os.makedirs(REPORTS_DIR, exist_ok=True)
                     name = f"report-{datetime.now():%Y-%m-%d}.html"
@@ -480,8 +498,20 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        # Graceful shutdown — persist stavu a čisté ukončení tasků
+        print("Sentinel-Alert: graceful shutdown…")
+        try:
+            proxy_monitor.save_state()
+        except Exception:
+            pass
         for t in bg:
             t.cancel()
+        # Uzavři WS spojení klientů
+        for ws in list(_clients):
+            try:
+                await ws.close()
+            except Exception:
+                pass
 
 
 # Výsledek self-testu konfigurace (naplní _config_selftest, čte /healthz)
@@ -560,8 +590,25 @@ _SECURITY_HEADERS = {
 }
 
 
+# Obecný API rate-limit — sliding window per IP na /api/ (mimo /metrics, /ws)
+_api_hits: dict = {}
+_API_RATE_MAX = conf.API_RATE_LIMIT  # req / okno
+_API_RATE_WINDOW = 60
+
+
 @app.middleware("http")
 async def _security_headers(request: Request, call_next):
+    path = request.url.path
+    if _API_RATE_MAX > 0 and path.startswith("/api/") and not path.startswith("/api/webhook"):
+        ip = request.client.host if request.client else "?"
+        now = time.time()
+        hits = [t for t in _api_hits.get(ip, []) if now - t < _API_RATE_WINDOW]
+        if len(hits) >= _API_RATE_MAX:
+            return JSONResponse({"error": "rate limited"}, status_code=429)
+        hits.append(now)
+        _api_hits[ip] = hits
+        if len(_api_hits) > 10000:
+            _api_hits.clear()
     resp = await call_next(request)
     for k, v in _SECURITY_HEADERS.items():
         resp.headers.setdefault(k, v)
@@ -608,23 +655,36 @@ _AUTH_COOKIE = "sa_token"
 _TOKEN_TTL   = 86400 * 7  # 7 days
 
 
-def _make_token() -> str:
+def _make_token(role: str = "a") -> str:
     ts = str(int(time.time()))
-    sig = hmac.new(conf.AUTH_SECRET.encode(), ts.encode(), hashlib.sha256).hexdigest()
-    return f"{ts}.{sig}"
+    payload = f"{ts}.{role}"
+    sig = hmac.new(conf.AUTH_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+
+
+def _token_role(token: str | None) -> str | None:
+    """Vrací roli ('a'=admin, 'v'=viewer) platného tokenu, jinak None."""
+    if not token:
+        return None
+    try:
+        parts = token.split(".")
+        # zpětná kompatibilita: starý formát ts.sig (bez role) = admin
+        if len(parts) == 2:
+            ts_str, sig = parts
+            payload, role = ts_str, "a"
+        else:
+            ts_str, role, sig = parts[0], parts[1], parts[2]
+            payload = f"{ts_str}.{role}"
+        if int(time.time()) - int(ts_str) > _TOKEN_TTL:
+            return None
+        expected = hmac.new(conf.AUTH_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        return role if hmac.compare_digest(expected, sig) else None
+    except Exception:
+        return None
 
 
 def _verify_token(token: str | None) -> bool:
-    if not token:
-        return False
-    try:
-        ts_str, sig = token.rsplit(".", 1)
-        if int(time.time()) - int(ts_str) > _TOKEN_TTL:
-            return False
-        expected = hmac.new(conf.AUTH_SECRET.encode(), ts_str.encode(), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(expected, sig)
-    except Exception:
-        return False
+    return _token_role(token) is not None
 
 
 def _has_api_token(request: Request) -> bool:
@@ -635,11 +695,25 @@ def _has_api_token(request: Request) -> bool:
     return bool(tok) and hmac.compare_digest(tok, conf.AUTH_API_TOKEN)
 
 
-def _is_authed(request: Request, allow_token: bool = True) -> bool:
-    """Plný přístup přes session cookie. Read-only API token platí jen pro GET
-    a jen na endpointech, které povolí allow_token (ne backup/config/export)."""
-    if _verify_token(request.cookies.get(_AUTH_COOKIE)):
+def _request_role(request: Request) -> str | None:
+    """Role žadatele: cookie token, reverse-proxy trust header, nebo API token (viewer)."""
+    role = _token_role(request.cookies.get(_AUTH_COOKIE))
+    if role:
+        return role
+    # Trust reverse-proxy auth (oauth2-proxy/OIDC za proxy)
+    if conf.AUTH_TRUST_PROXY_HEADER and request.headers.get(conf.AUTH_TRUST_PROXY_HEADER):
+        return "a"
+    return None
+
+
+def _is_authed(request: Request, allow_token: bool = True, require_admin: bool = False) -> bool:
+    """Plný přístup přes session cookie / trust proxy. Viewer role je read-only.
+    Read-only API token platí jen pro GET a jen kde allow_token (ne backup/config)."""
+    role = _request_role(request)
+    if role == "a":
         return True
+    if role == "v" and not require_admin and request.method == "GET":
+        return True  # viewer: jen čtení
     if allow_token and request.method == "GET" and _has_api_token(request):
         return True
     return False
@@ -649,8 +723,37 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request and request.client else "?"
 
 
+def _init_audit_logger():
+    """Strukturovaný JSON audit log s rotací (5×2 MB) vedle DB."""
+    import logging
+    from logging.handlers import RotatingFileHandler
+    lg = logging.getLogger("sentinel.audit")
+    lg.setLevel(logging.INFO)
+    lg.propagate = False
+    if not lg.handlers:
+        try:
+            os.makedirs(os.path.join(BASE_DIR, "data"), exist_ok=True)
+            # delay=True: soubor se otevře až při prvním zápisu (test-friendly)
+            h = RotatingFileHandler(
+                os.path.join(BASE_DIR, "data", "audit.log"),
+                maxBytes=2_000_000, backupCount=5, delay=True)
+            h.setFormatter(logging.Formatter("%(message)s"))
+            lg.addHandler(h)
+        except Exception:
+            pass
+    return lg
+
+
+_audit_log = _init_audit_logger()
+
+
 def _audit(ip: str, action: str, detail: str = ""):
-    """Audit log akcí (login, block, config…) do DB. Nesmí nikdy shodit volajícího."""
+    """Audit log akcí (login, block, config…) do DB + JSON souboru. Nesmí shodit volajícího."""
+    try:
+        _audit_log.info(_json_mod.dumps({
+            "ts": datetime.now().isoformat(), "ip": ip, "action": action, "detail": str(detail)[:500]}))
+    except Exception:
+        pass
     try:
         conn = sqlite3.connect(DB_PATH, timeout=10)
         conn.execute(
@@ -690,11 +793,20 @@ def login(request: Request, payload: dict = Body(...), response: Response = None
                 _audit(ip, "login_totp_fail", payload.get("username", ""))
                 return JSONResponse({"ok": False, "totp_required": True,
                                      "error": "Invalid 2FA code"}, status_code=401)
-        token = _make_token()
+        token = _make_token("a")
         response.set_cookie(_AUTH_COOKIE, token, max_age=_TOKEN_TTL, httponly=True, samesite="lax")
         _login_attempts.pop(ip, None)
         _audit(ip, "login_ok", payload.get("username", ""))
-        return {"ok": True}
+        return {"ok": True, "role": "admin"}
+    # Viewer účet (read-only)
+    if (conf.AUTH_VIEWER_USERNAME
+            and payload.get("username") == conf.AUTH_VIEWER_USERNAME
+            and payload.get("password") == conf.AUTH_VIEWER_PASSWORD):
+        token = _make_token("v")
+        response.set_cookie(_AUTH_COOKIE, token, max_age=_TOKEN_TTL, httponly=True, samesite="lax")
+        _login_attempts.pop(ip, None)
+        _audit(ip, "login_ok_viewer", payload.get("username", ""))
+        return {"ok": True, "role": "viewer"}
     attempts.append(now)
     _login_attempts[ip] = attempts
     _audit(ip, "login_fail", payload.get("username", ""))
@@ -800,14 +912,16 @@ def logout(response: Response):
 @app.get("/api/auth/status")
 def auth_status(request: Request):
     tok = request.cookies.get(_AUTH_COOKIE)
-    ok = _verify_token(tok)
+    role = _token_role(tok)
+    ok = role is not None
     expires_in = None
     if ok:
         try:
-            expires_in = _TOKEN_TTL - (int(time.time()) - int(tok.rsplit(".", 1)[0]))
+            expires_in = _TOKEN_TTL - (int(time.time()) - int(tok.split(".")[0]))
         except Exception:
             pass
-    return {"authenticated": ok, "expires_in": expires_in}
+    return {"authenticated": ok, "expires_in": expires_in,
+            "role": ("viewer" if role == "v" else "admin") if ok else None}
 
 
 @app.get("/")
@@ -997,6 +1111,11 @@ def config_full(request: Request):
               "misp_url", "misp_key"):
         _in.setdefault(k, "")
     result.setdefault("mikrotik", {}).setdefault("auto_block_threshold", "3")
+    _au = result.setdefault("auth", {})
+    for k in ("viewer_username", "viewer_password", "trust_proxy_header"):
+        _au.setdefault(k, "")
+    _au.setdefault("api_rate_limit", "0")
+    result.setdefault("db", {}).setdefault("backup_rsync_target", "")
     _t = result.setdefault("threat", {})
     _t.setdefault("intel_enabled", "false")
     _t.setdefault("intel_autoblock", "false")
