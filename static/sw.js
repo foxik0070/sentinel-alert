@@ -1,6 +1,6 @@
 // Service worker — offline shell pro Sentinel-Alert.
 // Strategie: app shell (statické soubory) cache-first; API a WS vždy z network.
-const CACHE = 'sentinel-shell-v1';
+const CACHE = 'sentinel-shell-v2';
 const SHELL = [
     '/',
     '/static/style.css',

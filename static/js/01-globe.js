@@ -346,6 +346,13 @@ const PROTO_RGB = {
     fail2ban: [210,  40, 255],  // magenta-purple — Fail2Ban ban
     blocked:  [120,  20, 200],  // dark purple — blocked IP
     who:      [  0, 200, 200],  // cyan — active user session
+    // honeypot deception služby (kat. F)
+    ftp:      [ 46, 255, 161],  // spring green — FTP
+    telnet:   [ 56, 189, 248],  // sky blue — Telnet
+    smtp:     [255, 105, 180],  // hot pink — SMTP
+    rdp:      [148, 130, 255],  // periwinkle — RDP
+    smb:      [255, 232,  59],  // yellow — SMB
+    webhook:  [  0, 255, 213],  // teal — externí webhook event
 };
 const _DEFAULT_RGB = [0, 220, 180];  // teal fallback
 
@@ -357,6 +364,12 @@ const PROTO_COLOR = {
     fail2ban: '#d228ff',
     blocked:  '#7814c8',
     who:      '#00c8c8',
+    ftp:      '#2effa1',
+    telnet:   '#38bdf8',
+    smtp:     '#ff69b4',
+    rdp:      '#9482ff',
+    smb:      '#ffe83b',
+    webhook:  '#00ffd5',
 };
 
 const MAX_AGE_S = 24 * 3600;
@@ -428,7 +441,7 @@ function refreshCountryPolygons() {
 async function loadCountryPolygons() {
     if (!GLOBE_OK) return;     // fallback mód — bez WebGL nemá smysl stahovat geojson
     if (_countriesGeo) return; // already loaded, skip
-    if (_isMobile) return;     // skip on mobile — 180 country meshes are too heavy
+    if (window.innerWidth <= 700) return;  // skip jen na opravdových mobilech
     try {
         const geo = await fetch('/static/vendor/countries.geojson').then(r => r.json());
         _countriesGeo = geo.features;
@@ -438,14 +451,15 @@ async function loadCountryPolygons() {
             .polygonAltitude(0.02)
             .polygonCapColor(d => {
                 const hits = _countryAttackMap[_polyName(d)];
-                if (!hits) return 'rgba(0,160,70,0.12)';
-                const intensity = Math.min(0.75, 0.35 + hits.length * 0.05);
-                return `rgba(210,25,55,${intensity.toFixed(2)})`;
+                // neútočící = zřetelně zelená; útočící = červená sílící s počtem
+                if (!hits) return 'rgba(0,200,90,0.28)';
+                const intensity = Math.min(0.85, 0.4 + hits.length * 0.05);
+                return `rgba(230,25,55,${intensity.toFixed(2)})`;
             })
             .polygonSideColor(() => 'rgba(0,0,0,0)')
             .polygonStrokeColor(d => {
                 const hits = _countryAttackMap[_polyName(d)];
-                return hits ? 'rgba(255,50,30,0.9)' : 'rgba(0,200,90,0.5)';
+                return hits ? 'rgba(255,60,40,1)' : 'rgba(0,220,100,0.65)';
             })
             .polygonLabel(d => {
                 const name = _polyName(d);
@@ -463,6 +477,8 @@ async function loadCountryPolygons() {
                 if (!d) return;
                 _openCountryModal(_polyName(d));
             });
+        // Přebarvi hned podle už načtených útoků (mapa mohla vzniknout dřív než geojson)
+        refreshCountryPolygons();
     } catch(e) {
         console.warn('countries.geojson unavailable:', e);
     }
@@ -619,7 +635,7 @@ function attackStatsUpdate() {
     if (totalEl) totalEl.textContent = total;
 
     const maxCount = Math.max(...Object.values(counts), 1);
-    const PROTO_BAR_COLOR = { ssh: '#ffe83b', http: '#ff6e00', https: '#e6003c', fail2ban: '#d228ff' };
+    const PROTO_BAR_COLOR = PROTO_COLOR;  // sdílená paleta (vč. honeypot protokolů)
     barsEl.innerHTML = Object.entries(counts)
         .sort((a, b) => b[1] - a[1])
         .map(([p, n]) => {
