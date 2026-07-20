@@ -446,13 +446,18 @@ function refreshCountryPolygons() {
 // Trvalé názvy zemí na globusu: útočící výrazně (žlutě, s počtem útoků),
 // neútočící tlumeně zeleně. labelColor/labelSize rozliší přes flag `count`.
 let _labelsAllCountries = UIState.get('globe-labels-all', true); // všechny země vs. jen útočící
+let _labelTimer = null;
 function _updateCountryLabels() {
+    // Bez geojson (mobil ≤700px / nedostupné) nemáme centroidy — nech fallback
+    // labely z pushAttack, nemazat je.
+    if (!_countriesGeo) return;
     labels.length = 0;
-    // útočící země — výrazné popisky s počtem
+    // útočící země — výrazné popisky s počtem (fallback na souřadnice útoku
+    // když centroid chybí kvůli name-mismatch)
     for (const [name, hits] of Object.entries(_countryAttackMap)) {
-        const c = _countryCentroids[name];
-        if (!c) continue;
         const a = hits[0];
+        const c = _countryCentroids[name] || (a.lat || a.lon ? { lat: a.lat, lon: a.lon } : null);
+        if (!c) continue;
         labels.push({ lat: c.lat, lon: c.lon, country: name, count: hits.length,
                       src_ip: a.src_ip, isp: a.isp, protocol: a.protocol });
     }
@@ -463,7 +468,11 @@ function _updateCountryLabels() {
             labels.push({ lat: c.lat, lon: c.lon, country: name, count: 0, quiet: true });
         }
     }
-    if (!_globePaused) globe.labelsData([...labels]);
+    // debounce redraw — refreshCountryPolygons se volá při každém útoku
+    clearTimeout(_labelTimer);
+    _labelTimer = setTimeout(() => {
+        if (!_globePaused) globe.labelsData([...labels]);
+    }, 800);
 }
 
 // Centroid GeoJSON geometrie (průměr vrcholů — dost přesné pro umístění popisku)

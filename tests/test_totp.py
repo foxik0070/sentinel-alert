@@ -108,3 +108,26 @@ def test_login_requires_totp_when_enabled(client, monkeypatch):
     code = totp._hotp(secret, int(time.time()) // 30)
     r = client.post("/api/login", json={"username": "admin", "password": "pw", "totp": code})
     assert r.status_code == 200
+
+
+# ── viewer role bezpečnost (code review fixes) ────────────────────────────────
+
+def test_viewer_cannot_read_config_full(client, monkeypatch):
+    import conf, app as _app
+    monkeypatch.setattr(conf, "AUTH_VIEWER_USERNAME", "view")
+    monkeypatch.setattr(conf, "AUTH_VIEWER_PASSWORD", "vpass")
+    r = client.post("/api/login", json={"username": "view", "password": "vpass"})
+    assert r.status_code == 200 and r.json()["role"] == "viewer"
+    # viewer smí číst běžné GET
+    assert client.get("/api/status").status_code == 200
+    # ale NE citlivé config/full (secrets)
+    assert client.get("/api/config/full").status_code == 401
+    assert client.get("/api/backup").status_code == 401
+
+
+def test_empty_viewer_password_rejected(client, monkeypatch):
+    import conf
+    monkeypatch.setattr(conf, "AUTH_VIEWER_USERNAME", "view")
+    monkeypatch.setattr(conf, "AUTH_VIEWER_PASSWORD", "")  # prázdné → login zamítnut
+    r = client.post("/api/login", json={"username": "view", "password": ""})
+    assert r.status_code == 401

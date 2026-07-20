@@ -682,7 +682,10 @@ async def _security_headers(request: Request, call_next):
         hits.append(now)
         _api_hits[ip] = hits
         if len(_api_hits) > 10000:
-            _api_hits.clear()
+            # evikce jen prošlých oken — nesmí resetovat aktivní limity všem naráz
+            cutoff = now - _API_RATE_WINDOW
+            for k in [k for k, v in _api_hits.items() if not v or v[-1] < cutoff]:
+                del _api_hits[k]
     resp = await call_next(request)
     for k, v in _SECURITY_HEADERS.items():
         resp.headers.setdefault(k, v)
@@ -775,8 +778,17 @@ def _request_role(request: Request) -> str | None:
     if role:
         return role
     # Trust reverse-proxy auth (oauth2-proxy/OIDC za proxy)
+    # Trust proxy header jen když request přišel z privátní/loopback IP (reverse
+    # proxy je lokální) — jinak by šla hlavička spoofovat přímým přístupem na port.
     if conf.AUTH_TRUST_PROXY_HEADER and request.headers.get(conf.AUTH_TRUST_PROXY_HEADER):
-        return "a"
+        import ipaddress as _ip
+        peer = request.client.host if request and request.client else ""
+        try:
+            a = _ip.ip_address(peer)
+            if a.is_private or a.is_loopback:
+                return "a"
+        except ValueError:
+            pass
     return None
 
 
@@ -872,8 +884,9 @@ def login(request: Request, payload: dict = Body(...), response: Response = None
         _login_attempts.pop(ip, None)
         _audit(ip, "login_ok", payload.get("username", ""))
         return {"ok": True, "role": "admin"}
-    # Viewer účet (read-only)
-    if (conf.AUTH_VIEWER_USERNAME
+    # Viewer účet (read-only) — vyžaduje nastavené NEPRÁZDNÉ heslo (jinak by
+    # prázdné heslo v configu umožnilo přihlášení komukoli)
+    if (conf.AUTH_VIEWER_USERNAME and conf.AUTH_VIEWER_PASSWORD
             and payload.get("username") == conf.AUTH_VIEWER_USERNAME
             and payload.get("password") == conf.AUTH_VIEWER_PASSWORD):
         token = _make_token("v")
@@ -1165,7 +1178,7 @@ def get_logs(limit: int = 200):
 
 @app.get("/api/config/full")
 def config_full(request: Request):
-    if not _is_authed(request, allow_token=False):
+    if not _is_authed(request, allow_token=False, require_admin=True):
         return JSONResponse({"error": "unauthorized"}, 401)
     import configparser
     c = configparser.ConfigParser(interpolation=None)
@@ -1220,7 +1233,7 @@ async def config_update(request: Request, payload: dict = Body(...)):
 
 @app.get("/api/config/export")
 def config_export(request: Request):
-    if not _is_authed(request, allow_token=False):
+    if not _is_authed(request, allow_token=False, require_admin=True):
         return JSONResponse({"error": "unauthorized"}, 401)
     from fastapi.responses import FileResponse as FR
     if os.path.exists(conf.CONF_PATH):
@@ -1876,7 +1889,7 @@ def _make_db_backup() -> str:
 @app.get("/api/backup")
 def backup_download(request: Request):
     """Vytvoří a stáhne konzistentní zálohu DB (SQLite .backup)."""
-    if not _is_authed(request, allow_token=False):
+    if not _is_authed(request, allow_token=False, require_admin=True):
         return JSONResponse({"error": "unauthorized"}, 401)
     path = _make_db_backup()
     _audit(_client_ip(request), "db_backup", os.path.basename(path))
