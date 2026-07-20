@@ -243,9 +243,10 @@ function _initGlobe() {
     .labelsData(labels)
     .labelLat(d => d.lat).labelLng(d => d.lon)
     .labelText(d => d.count ? `${d.country} (${d.count})` : d.country)
-    .labelSize(d => d.count ? Math.min(1.4, 0.7 + Math.log10(d.count + 1) * 0.4) : 0.7)
-    .labelDotRadius(0.3)
-    .labelColor(() => '#ffe322').labelResolution(2)
+    .labelSize(d => d.count ? Math.min(1.4, 0.7 + Math.log10(d.count + 1) * 0.4) : 0.45)
+    .labelDotRadius(d => d.count ? 0.3 : 0.12)
+    .labelColor(d => d.quiet ? 'rgba(120,190,150,0.55)' : '#ffe322')
+    .labelResolution(2)
     .ringsData(_allRings())
     .ringLat(d => d.lat).ringLng(d => d.lon)
     .ringColor(d => d.color || (t => `rgba(255,42,94,${1 - t})`))
@@ -442,17 +443,25 @@ function refreshCountryPolygons() {
     }, 1000);
 }
 
-// Trvalé názvy útočících zemí na globusu (u centroidu země, s počtem útoků).
-// Neútočící země zůstávají zelené bez popisku (jinak by bylo 177 labelů = nečitelné).
+// Trvalé názvy zemí na globusu: útočící výrazně (žlutě, s počtem útoků),
+// neútočící tlumeně zeleně. labelColor/labelSize rozliší přes flag `count`.
+let _labelsAllCountries = UIState.get('globe-labels-all', true); // všechny země vs. jen útočící
 function _updateCountryLabels() {
     labels.length = 0;
+    // útočící země — výrazné popisky s počtem
     for (const [name, hits] of Object.entries(_countryAttackMap)) {
         const c = _countryCentroids[name];
         if (!c) continue;
-        // reprezentativní útok pro tooltip/kliknutí
         const a = hits[0];
         labels.push({ lat: c.lat, lon: c.lon, country: name, count: hits.length,
                       src_ip: a.src_ip, isp: a.isp, protocol: a.protocol });
+    }
+    // neútočící země — tlumené názvy pro orientaci (volitelné)
+    if (_labelsAllCountries) {
+        for (const [name, c] of Object.entries(_countryCentroids)) {
+            if (_countryAttackMap[name]) continue; // útočící už přidané
+            labels.push({ lat: c.lat, lon: c.lon, country: name, count: 0, quiet: true });
+        }
     }
     if (!_globePaused) globe.labelsData([...labels]);
 }
@@ -964,3 +973,17 @@ function updateHotZones() {
     if (GLOBE_OK && !_globePaused) globe.ringsData(_allRings());
 }
 setInterval(updateHotZones, 20000);
+
+// Přepínač zobrazení názvů zemí: všechny (s tlumenými neútočícími) / jen útočící
+$('globe-labels-btn')?.addEventListener('click', () => {
+    _labelsAllCountries = !_labelsAllCountries;
+    UIState.set('globe-labels-all', _labelsAllCountries);
+    const btn = $('globe-labels-btn');
+    if (btn) btn.style.background = _labelsAllCountries ? 'var(--accent)' : '';
+    if (btn) btn.style.color = _labelsAllCountries ? '#0a1a1e' : '';
+    _updateCountryLabels();
+});
+if ($('globe-labels-btn') && _labelsAllCountries) {
+    $('globe-labels-btn').style.background = 'var(--accent)';
+    $('globe-labels-btn').style.color = '#0a1a1e';
+}
