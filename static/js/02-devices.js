@@ -494,7 +494,8 @@ function renderAttackHistory() {
         attackHistEl.innerHTML = `<div class="empty">No ${_attackHistFilter === 'all' ? '' : _attackHistFilter + ' '}attacks yet.</div>`;
         return;
     }
-    const _PROTO_LABEL = { fail2ban: 'F2B', ssh: 'SSH', http: 'HTTP', https: 'HTTPS' };
+    const _PROTO_LABEL = { fail2ban: 'F2B', ssh: 'SSH', http: 'HTTP', https: 'HTTPS',
+                           ftp: 'FTP', telnet: 'TELNET', smtp: 'SMTP', rdp: 'RDP', smb: 'SMB', webhook: 'WH' };
     const _sorted = [...filtered].sort((a, b) => (b.ts || '') > (a.ts || '') ? 1 : -1);
     const showBlock = !_workMode && _lastCfg?.mikrotik_enabled;
     attackHistEl.innerHTML = _sorted.slice(0, 10).map(b => {

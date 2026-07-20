@@ -242,9 +242,10 @@ function _initGlobe() {
             : `<b>${d.src_ip}</b><br>${d.country} · ${d.isp || '?'}<br>:${d.dst_port}/${d.protocol}`)
     .labelsData(labels)
     .labelLat(d => d.lat).labelLng(d => d.lon)
-    .labelText(d => d.country)
-    .labelSize(0.6).labelDotRadius(0.25)
-    .labelColor(() => '#ffe83b').labelResolution(2)
+    .labelText(d => d.count ? `${d.country} (${d.count})` : d.country)
+    .labelSize(d => d.count ? Math.min(1.4, 0.7 + Math.log10(d.count + 1) * 0.4) : 0.7)
+    .labelDotRadius(0.3)
+    .labelColor(() => '#ffe322').labelResolution(2)
     .ringsData(_allRings())
     .ringLat(d => d.lat).ringLng(d => d.lon)
     .ringColor(d => d.color || (t => `rgba(255,42,94,${1 - t})`))
@@ -422,6 +423,8 @@ const COUNTRY_NORM = {
 };
 
 let _polyRefreshTimer = null;
+let _countryCentroids = {};   // name → {lat, lon} pro umístění názvu na globusu
+
 function refreshCountryPolygons() {
     _countryAttackMap = {};
     _attackHistory.forEach(a => {
@@ -430,12 +433,43 @@ function refreshCountryPolygons() {
         if (!_countryAttackMap[key]) _countryAttackMap[key] = [];
         _countryAttackMap[key].push(a);
     });
+    _updateCountryLabels();
     // Debounce — each polygonsData() call rebuilds all meshes, causing a flash.
     // Long delay keeps it rare; color functions read from _countryAttackMap live.
     clearTimeout(_polyRefreshTimer);
     _polyRefreshTimer = setTimeout(() => {
         if (_countriesGeo && !_globePaused) globe.polygonsData(_countriesGeo);
     }, 1000);
+}
+
+// Trvalé názvy útočících zemí na globusu (u centroidu země, s počtem útoků).
+// Neútočící země zůstávají zelené bez popisku (jinak by bylo 177 labelů = nečitelné).
+function _updateCountryLabels() {
+    labels.length = 0;
+    for (const [name, hits] of Object.entries(_countryAttackMap)) {
+        const c = _countryCentroids[name];
+        if (!c) continue;
+        // reprezentativní útok pro tooltip/kliknutí
+        const a = hits[0];
+        labels.push({ lat: c.lat, lon: c.lon, country: name, count: hits.length,
+                      src_ip: a.src_ip, isp: a.isp, protocol: a.protocol });
+    }
+    if (!_globePaused) globe.labelsData([...labels]);
+}
+
+// Centroid GeoJSON geometrie (průměr vrcholů — dost přesné pro umístění popisku)
+function _geoCentroid(geometry) {
+    let sx = 0, sy = 0, n = 0;
+    const walk = (coords, depth) => {
+        if (depth > 0) { coords.forEach(c => walk(c, depth - 1)); return; }
+        // coords = [lon, lat]
+        sx += coords[0]; sy += coords[1]; n++;
+    };
+    try {
+        if (geometry.type === 'Polygon') geometry.coordinates.forEach(ring => walk(ring, 1));
+        else if (geometry.type === 'MultiPolygon') geometry.coordinates.forEach(poly => poly.forEach(ring => walk(ring, 1)));
+    } catch { return null; }
+    return n ? { lat: sy / n, lon: sx / n } : null;
 }
 
 async function loadCountryPolygons() {
@@ -445,16 +479,22 @@ async function loadCountryPolygons() {
     try {
         const geo = await fetch('/static/vendor/countries.geojson').then(r => r.json());
         _countriesGeo = geo.features;
+        // Předpočítej centroidy pro umístění názvů zemí na globusu
+        _countryCentroids = {};
+        _countriesGeo.forEach(f => {
+            const c = _geoCentroid(f.geometry);
+            if (c) _countryCentroids[_polyName(f)] = c;
+        });
         globe
             .polygonsData(_countriesGeo)
             .polygonGeoJsonGeometry(d => d.geometry)
-            .polygonAltitude(0.02)
+            .polygonAltitude(d => _countryAttackMap[_polyName(d)] ? 0.026 : 0.02)
             .polygonCapColor(d => {
                 const hits = _countryAttackMap[_polyName(d)];
                 // neútočící = zřetelně zelená; útočící = červená sílící s počtem
-                if (!hits) return 'rgba(0,200,90,0.28)';
-                const intensity = Math.min(0.85, 0.4 + hits.length * 0.05);
-                return `rgba(230,25,55,${intensity.toFixed(2)})`;
+                if (!hits) return 'rgba(0,200,90,0.45)';
+                const intensity = Math.min(0.88, 0.45 + hits.length * 0.05);
+                return `rgba(235,25,55,${intensity.toFixed(2)})`;
             })
             .polygonSideColor(() => 'rgba(0,0,0,0)')
             .polygonStrokeColor(d => {
@@ -547,7 +587,9 @@ function pushAttack(a, isNew = true) {
     points.push({ ...a, color: c1, radius: 0.3, alt: 0.01 });
     while (points.length > MAX_PTS) points.shift();
 
-    if (a.country && !labels.some(l => l.country === a.country)) {
+    // Názvy zemí na globusu řídí _updateCountryLabels (u centroidu s počtem).
+    // Fallback pro mobil/bez geojson: label u místa útoku.
+    if (!_countriesGeo && a.country && !labels.some(l => l.country === a.country)) {
         labels.push({ lat: a.lat, lon: a.lon, country: a.country });
         while (labels.length > MAX_LABELS) labels.shift();
     }
