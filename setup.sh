@@ -456,6 +456,29 @@ if [[ "$SKIP_CONF" == "false" ]]; then
         ask_secret INTEG_GREY "GreyNoise API key" ""
     fi
 
+    # ── SIEM export (obě módy) ───────────────────────────────────────────────
+    section "SIEM Export (OpenSearch/Elasticsearch)" "Streamování útoků do OpenSearch/Elasticsearch přes _bulk API pro dlouhodobou analýzu."
+    explain "URL instance, např. https://opensearch.local:9200 — prázdné = vypnuto."
+    ask SIEM_URL "OpenSearch/Elastic URL (empty = disable)" ""
+    SIEM_INDEX="sentinel-attacks"; SIEM_USER=""; SIEM_PASSWORD=""
+    if [[ -n "$SIEM_URL" ]]; then
+        ask SIEM_INDEX "Index" "sentinel-attacks"
+        ask SIEM_USER "Uživatel (empty = bez auth)" ""
+        [[ -n "$SIEM_USER" ]] && ask_secret SIEM_PASSWORD "Heslo" ""
+    fi
+
+    # ── MQTT / Home Assistant (obě módy) ─────────────────────────────────────
+    section "MQTT / Home Assistant" "Publikace metrik (útoky, hot zone, zařízení) do MQTT brokeru pro HA senzory."
+    explain "IP/hostname MQTT brokeru — prázdné = vypnuto."
+    ask MQTT_HOST "MQTT broker host (empty = disable)" ""
+    MQTT_PORT=1883; MQTT_USER=""; MQTT_PASSWORD=""; MQTT_PREFIX="sentinel"
+    if [[ -n "$MQTT_HOST" ]]; then
+        ask MQTT_PORT "MQTT port" "1883"
+        ask MQTT_USER "MQTT uživatel (empty = anonymní)" ""
+        [[ -n "$MQTT_USER" ]] && ask_secret MQTT_PASSWORD "MQTT heslo" ""
+        ask MQTT_PREFIX "Topic prefix" "sentinel"
+    fi
+
     # ── DB údržba (obě módy) ─────────────────────────────────────────────────
     section "Database Maintenance" "Automatická údržba SQLite: retence, VACUUM, noční záloha."
     ask DB_RETENTION "Retence útoků/banů ve dnech" "90"
@@ -620,6 +643,21 @@ greynoise_key  = ${INTEG_GREY}
 # MISP threat-intel feed (imported alongside public blocklists)
 misp_url =
 misp_key =
+
+[siem]
+# Stream attacks to OpenSearch/Elasticsearch via _bulk (blank url = disabled)
+url      = ${SIEM_URL}
+index    = ${SIEM_INDEX}
+user     = ${SIEM_USER}
+password = ${SIEM_PASSWORD}
+
+[mqtt]
+# Publish metrics to an MQTT broker for Home Assistant (blank host = disabled)
+host     = ${MQTT_HOST}
+port     = ${MQTT_PORT}
+user     = ${MQTT_USER}
+password = ${MQTT_PASSWORD}
+prefix   = ${MQTT_PREFIX}
 
 [db]
 # Retention for attacks + ban history (daily prune at 04:30 + VACUUM)

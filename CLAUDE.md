@@ -42,6 +42,9 @@ Sentinel-Alert je nástroj pro monitoring domácí sítě a vizualizaci honeypot
 14. **mikrotik.py** — MikroTik firewall (address-list, filter/NAT rules) přes SSH; ruční/auto/batch blokace, GeoIP country block.
 15. **pihole.py** — PiHole v6 REST API (multi-instance, primary/secondary).
 16. **intel_ext.py** — externí IP lookup (AbuseIPDB/VirusTotal/Shodan/GreyNoise), `[integrations]` klíče.
+17. **playbooks.py** — response playbooky (pravidla → akce block/notify/tag), `data/playbooks.json`.
+18. **siem_export.py** — stream útoků do OpenSearch/Elasticsearch (`[siem]`, _bulk API).
+19. **mqtt_pub.py** — MQTT QoS0 publisher (stdlib) pro Home Assistant metriky (`[mqtt]`).
 
 Frontend je rozdělen do modulů `static/js/00-ui.js … 11-ux.js` (klasické skripty načítané v pořadí, sdílený globální scope — žádný build step). 00 = sdílené utility (toasty, UIState, zvuk, boot, notifikace, gauge, watchlist), 01–10 = per-tab logika, 11 = command palette/UX/IP intel/trends/reports/kiosk/f2b.
 

@@ -214,3 +214,19 @@ Neschválené — čeká na výběr. Rozděleno do 6 kategorií.
 - [x] **Rozšíření portů** — FTP(21)/Telnet(23)/RDP(3389)/SMB(445) honeypoty
 - [x] **Payload capture** — co útočníci posílají (příkazy, credentials, user-agenty)
 - [x] **Deception bannery** — realistické fake služby pro delší zdržení útočníka
+
+---
+
+## Šestá vlna námětů (schváleno)
+
+### Detekce / response
+- [x] **Response playbooky** — pravidla → řetězce akcí (block+notify+tag)
+- [x] **Honeypot session capture** — celá relace, payloady, credentials
+- [x] **JA3/TLS fingerprint** — rozpoznání nástroje/botnetu i při změně IP
+- [x] **ML anomálie** — statistická detekce (z-score/EWMA, stdlib)
+
+### Vizualizace / integrace
+- [x] **Attack network graf** — D3 force graf vztahů útočníků (IP/subnet/ASN)
+- [x] **PDF reporty** — denní/týdenní report i jako PDF
+- [x] **MQTT / Home Assistant** — publish eventů/metrik pro HA senzory
+- [x] **OpenSearch/Elastic export** — streamování útoků do OpenSearch

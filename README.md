@@ -88,6 +88,15 @@ Additional capabilities:
 - **12-factor config** — any value overridable via `SENTINEL_<SECTION>_<KEY>`; `env:VAR` secret refs
 - **General API rate-limit**, **rsync offsite backups**, **rotating JSON audit log**
 - **Honeypot deception** — optional FTP/Telnet/SMTP/RDP/SMB fake services with realistic banners
+- **Honeypot session capture** — full session payload, HTTP Basic creds, User-Agent, SSH client banner
+- **JA3 fingerprint** — TLS ClientHello fingerprint (spots the same tool/botnet across IPs)
+- **Response playbooks** — rules (known_bad/watchlist/protocol/country/min_hits) → actions (block/notify/tag)
+- **ML anomaly** — `/api/analytics/anomaly` z-score of last 10 min vs. 7-day baseline
+- **Attack network graph** — D3 force graph IP→ISP→country (spots coordinated campaigns)
+- **PDF reports** — daily report as PDF via headless Chromium
+- **MQTT / Home Assistant** — publishes metrics for HA sensors (`[mqtt]`)
+- **OpenSearch / Elasticsearch export** — streams attacks via `_bulk` (`[siem]`)
+- **Country names on the globe** — attacking countries labelled with hit counts, toggleable
 
 ---
 
@@ -295,7 +304,26 @@ greynoise_key  =
 # MISP threat-intel feed (imported alongside blocklist.de/Spamhaus/FireHOL)
 misp_url =
 misp_key =
+
+[siem]
+# Stream attacks to OpenSearch/Elasticsearch via _bulk (blank url = disabled)
+url      =
+index    = sentinel-attacks
+user     =
+password =
+
+[mqtt]
+# Publish metrics to an MQTT broker for Home Assistant (blank host = disabled)
+host     =
+port     = 1883
+user     =
+password =
+prefix   = sentinel
 ```
+
+Response playbooks are edited in the UI (command palette → *Response playbooks*)
+and stored in `data/playbooks.json`. `[honeypot] extra_services` also enables
+session capture + JA3 fingerprinting on those listeners.
 
 Extra `[auth]` keys: `viewer_username` / `viewer_password` (read-only account),
 `trust_proxy_header` (trust reverse-proxy auth header, e.g. `X-Forwarded-User`),

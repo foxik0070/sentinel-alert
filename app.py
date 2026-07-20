@@ -1197,6 +1197,12 @@ def config_full(request: Request):
     for k in ("abuseipdb_key", "virustotal_key", "shodan_key", "greynoise_key",
               "misp_url", "misp_key"):
         _in.setdefault(k, "")
+    _si = result.setdefault("siem", {})
+    for k, v in {"url": "", "index": "sentinel-attacks", "user": "", "password": ""}.items():
+        _si.setdefault(k, v)
+    _mq = result.setdefault("mqtt", {})
+    for k, v in {"host": "", "port": "1883", "user": "", "password": "", "prefix": "sentinel"}.items():
+        _mq.setdefault(k, v)
     result.setdefault("mikrotik", {}).setdefault("auto_block_threshold", "3")
     _au = result.setdefault("auth", {})
     for k in ("viewer_username", "viewer_password", "trust_proxy_header"):

@@ -1,5 +1,34 @@
 # Sentinel-Alert — Change History
 
+## 2026-07-20 — šestá vlna: detekce, integrace + code-review hardening
+
+Osm nových funkcí + oprava 9 nálezů z workflow code-review (high effort).
+
+### Detekce / response
+- **Response playbooky** (`playbooks.py`) — pravidla match(known_bad/watchlist/
+  protocol/country/min_hits) → actions(block/notify/tag), `data/playbooks.json`,
+  editor v paletě; vyhodnocení na každý attack/ban.
+- **Honeypot session capture** — víc read kol, akumulace celé relace (4 KB),
+  extrakce credentials (HTTP Basic), User-Agent, SSH klient banner.
+- **JA3/TLS fingerprint** — z ClientHello (verze+ciphers+ext+curves+ecpf, GREASE
+  filtr, MD5); funguje na jakémkoli portu s TLS handshake.
+- **ML anomálie** — `/api/analytics/anomaly` z-score posledních 10 min vs. 7denní baseline.
+
+### Vizualizace / integrace
+- **Attack network graf** — `/api/analytics/graph` + D3 force graf IP→ISP→země.
+- **PDF reporty** — HTML→PDF přes headless Chromium.
+- **MQTT / Home Assistant** (`mqtt_pub.py`) — minimální QoS0 publisher (stdlib), metriky á 60 s.
+- **OpenSearch/Elastic export** (`siem_export.py`) — stream útoků přes _bulk API.
+- **Externí lookup** (`intel_ext.py`) — AbuseIPDB/VirusTotal/Shodan/GreyNoise.
+
+### Code-review hardening
+- viewer role nemůže číst config/full/export/backup (secrets) — `require_admin`;
+  prázdné viewer heslo odmítnuto; trust-proxy header jen z privátní IP;
+  API rate-limit evikce jen prošlých oken; opravy globe labelů (mobil/centroid/debounce)
+  a sanitizačních regresí (AP lookup dle typu, generický domain strip). 95 testů.
+
+---
+
 ## 2026-07-18 — pátá vlna: 53 vylepšení (6 kategorií)
 
 Rozšíření napříč celou aplikací, commity `116a2f4` … `4822450`. Vše ověřeno
