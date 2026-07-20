@@ -142,6 +142,19 @@ THREATINTEL_AUTOBLOCK = _c.getboolean("threat", "intel_autoblock", fallback=Fals
 # [db]
 DB_RETENTION_DAYS = _i("db", "retention_days", 90)
 
+# [siem] — OpenSearch/Elasticsearch export
+SIEM_URL      = _s("siem", "url", "")
+SIEM_INDEX    = _s("siem", "index", "sentinel-attacks")
+SIEM_USER     = _s("siem", "user", "")
+SIEM_PASSWORD = _s("siem", "password", "")
+
+# [mqtt] — publish metrik pro Home Assistant
+MQTT_HOST     = _s("mqtt", "host", "")
+MQTT_PORT     = _i("mqtt", "port", 1883)
+MQTT_USER     = _s("mqtt", "user", "")
+MQTT_PASSWORD = _s("mqtt", "password", "")
+MQTT_PREFIX   = _s("mqtt", "prefix", "sentinel")
+
 # [alerts]
 ALERTS_ENABLED        = _c.getboolean("alerts", "enabled", fallback=False)
 ALERTS_NTFY_URL       = _s("alerts", "ntfy_url", "")

@@ -27,6 +27,8 @@ import fsc
 import geoip
 import honeypot
 import intel_ext
+import mqtt_pub
+import siem_export
 import mikrotik
 import pihole
 import proxy_monitor
@@ -144,6 +146,15 @@ async def _broadcaster():
                             _auto_blocked.discard(bip)  # retry při dalším útoku
 
                     asyncio.create_task(_do_autoblock())
+        # SIEM export — stream útoků do OpenSearch/Elasticsearch
+        if ev.get("type") in ("attack", "ban"):
+            siem_export.push({
+                "@timestamp": ev.get("ts") or datetime.now().isoformat(),
+                "src_ip": ev.get("src_ip") or ev.get("ip"),
+                "protocol": ev.get("protocol"), "dst_port": ev.get("dst_port"),
+                "country": ev.get("country"), "isp": ev.get("isp"),
+                "type": ev.get("type"),
+            })
         # Threat-intel: označ known-bad IP (obohatí event pro globus/UI)
         if ev.get("type") in ("attack", "ban"):
             _tip = ev.get("src_ip") or ev.get("ip") or ""
@@ -232,6 +243,9 @@ async def lifespan(app: FastAPI):
         primary=conf.PIHOLE_PRIMARY,
         password=conf.PIHOLE_PASSWORD,
     )
+    siem_export.start(conf.SIEM_URL, conf.SIEM_INDEX, conf.SIEM_USER, conf.SIEM_PASSWORD)
+    mqtt_pub.start(conf.MQTT_HOST, conf.MQTT_PORT, conf.MQTT_USER,
+                   conf.MQTT_PASSWORD, conf.MQTT_PREFIX)
 
     def _sniproxy_attack(ev: dict):
         entry = {**ev, "source": "proxy"}
@@ -370,6 +384,26 @@ async def lifespan(app: FastAPI):
                 except asyncio.QueueFull:
                     pass
 
+    async def _mqtt_publisher():
+        """Periodicky publikuje metriky přes MQTT pro Home Assistant (á 60 s)."""
+        if not conf.MQTT_HOST:
+            return
+        while True:
+            await asyncio.sleep(60)
+            try:
+                s = stats_summary()
+                mqtt_pub.publish({
+                    "attacks_today": s.get("attacks_today", 0),
+                    "attacks_last_hour": s.get("attacks_last_hour", 0),
+                    "top_vector": s.get("top_vector") or "none",
+                    "hot_country": s.get("hot_country") or "none",
+                    "devices_online": s.get("devices_online", 0),
+                    "devices_total": s.get("devices_total", 0),
+                    "pihole_block_pct": s.get("pihole_block_pct") or 0,
+                })
+            except Exception:
+                pass
+
     async def _alerts_watcher():
         """Nové zařízení v LAN / zařízení offline → log event + push notifikace."""
         prev_macs: set | None = None
@@ -483,6 +517,7 @@ async def lifespan(app: FastAPI):
     bg = [
         asyncio.create_task(_broadcaster()),
         asyncio.create_task(_alerts_watcher()),
+        asyncio.create_task(_mqtt_publisher()),
         asyncio.create_task(_anomaly_watcher()),
         asyncio.create_task(_daily_jobs()),
         asyncio.create_task(_heartbeat_loop()),
