@@ -6,6 +6,7 @@ import os
 import random
 import socket
 import sqlite3
+import threading
 import ssl
 import time
 from collections import deque
@@ -28,6 +29,7 @@ import geoip
 import honeypot
 import intel_ext
 import mqtt_pub
+import playbooks
 import siem_export
 import mikrotik
 import pihole
@@ -181,6 +183,7 @@ async def _broadcaster():
         if ev.get("type") in ("attack", "ban"):
             _wip = ev.get("src_ip") or ev.get("ip") or ""
             if _wip and alerts.is_watched(_wip):
+                ev["_watched"] = True
                 alerts.notify("WATCHLIST HIT",
                               f"{_wip} — {ev.get('protocol', '?')} ({ev.get('country', '?')})")
                 try:
@@ -191,6 +194,12 @@ async def _broadcaster():
                     })
                 except asyncio.QueueFull:
                     pass
+        # Response playbooky — pravidla → akce (block/notify/tag)
+        if ev.get("type") in ("attack", "ban"):
+            try:
+                playbooks.evaluate(ev)
+            except Exception:
+                pass
         dead = []
         for ws in list(_clients):
             try:
@@ -246,6 +255,35 @@ async def lifespan(app: FastAPI):
     siem_export.start(conf.SIEM_URL, conf.SIEM_INDEX, conf.SIEM_USER, conf.SIEM_PASSWORD)
     mqtt_pub.start(conf.MQTT_HOST, conf.MQTT_PORT, conf.MQTT_USER,
                    conf.MQTT_PASSWORD, conf.MQTT_PREFIX)
+
+    # Response playbooky — callbacky do MikroTik / alertů / logu
+    def _pb_block(ip, comment):
+        if conf.MIKROTIK_HOST and conf.MODE_TYPE == "home" and ip not in _auto_blocked:
+            _auto_blocked.add(ip)
+            def _do():
+                ok, _ = mikrotik.block_ip(ip, comment, "4w")
+                if ok:
+                    _audit("system", "playbook_block", ip)
+                else:
+                    _auto_blocked.discard(ip)
+            threading.Thread(target=_do, daemon=True).start()
+
+    def _pb_notify(title, msg):
+        alerts.notify(title, msg)
+        try:
+            _broadcast_queue.put_nowait({"type": "log", "level": "warn", "source": "playbook",
+                                         "ts": datetime.now().isoformat(), "msg": f"{title}: {msg}"})
+        except asyncio.QueueFull:
+            pass
+
+    def _pb_tag(ip, tag):
+        try:
+            _broadcast_queue.put_nowait({"type": "log", "level": "attack", "source": "playbook",
+                                         "ts": datetime.now().isoformat(), "msg": f"⚑ {tag}: {ip}"})
+        except asyncio.QueueFull:
+            pass
+
+    playbooks.set_callbacks(block=_pb_block, notify=_pb_notify, tag=_pb_tag)
 
     def _sniproxy_attack(ev: dict):
         entry = {**ev, "source": "proxy"}
@@ -2080,6 +2118,42 @@ def alertmanager_rules():
 """
     return Response(rules, media_type="text/yaml",
                     headers={"Content-Disposition": 'attachment; filename="alertmanager-rules.yml"'})
+
+
+@app.get("/api/playbooks")
+def playbooks_get(request: Request):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    return playbooks.load_rules()
+
+
+@app.post("/api/playbooks")
+def playbooks_save(request: Request, payload: list = Body(...)):
+    if not _is_authed(request, require_admin=True):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    if not isinstance(payload, list):
+        return JSONResponse({"ok": False, "error": "expected list"}, status_code=400)
+    playbooks.save_rules(payload)
+    _audit(_client_ip(request), "playbooks_save", f"{len(payload)} rules")
+    return {"ok": True, "count": len(payload)}
+
+
+@app.get("/api/analytics/anomaly")
+def analytics_anomaly():
+    """Statistická anomálie: z-score posledních 10 min vůči hodinovému baseline (7 dní)."""
+    recent = _query("SELECT COUNT(*) AS n FROM attacks WHERE ts >= datetime('now','-10 minutes')")[0]["n"]
+    # rozdělení posledních 7 dní do 10min oken → průměr a směrodatná odchylka
+    rows = _query(
+        "SELECT COUNT(*) AS n FROM attacks WHERE ts >= datetime('now','-7 day') "
+        "GROUP BY strftime('%Y-%m-%d %H', ts), CAST(strftime('%M', ts) AS INT)/10")
+    counts = [r["n"] for r in rows] or [0]
+    mean = sum(counts) / len(counts)
+    var = sum((c - mean) ** 2 for c in counts) / len(counts)
+    std = var ** 0.5
+    z = (recent - mean) / std if std > 0 else 0.0
+    return {"recent_10min": recent, "baseline_mean": round(mean, 1),
+            "baseline_std": round(std, 1), "z_score": round(z, 2),
+            "anomaly": z >= 3.0}
 
 
 @app.get("/api/analytics/heatmap")

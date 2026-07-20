@@ -46,6 +46,7 @@ function _cpStaticActions() {
         { label: 'SCHEME — RED ALERT',        run: () => applyScheme('red') },
         { label: 'ATTACK TRENDS — 7 / 30 DNÍ', run: () => trendsOpen(30) },
         { label: 'ANALYTICS — heatmapa/korelace/predikce', run: () => analyticsOpen() },
+        { label: 'RESPONSE PLAYBOOKS — pravidla', run: () => playbooksOpen() },
         { label: 'DAILY REPORTS',             run: () => reportsOpen() },
         { label: 'REPLAY 24H NA GLOBUSU',     run: () => { _cpTab('threat'); replayStart(); } },
         { label: 'KIOSK MÓD — AUTO-CYKLENÍ TABŮ', run: () => kioskToggle() },
@@ -1115,4 +1116,52 @@ async function ipEnrich(ip) {
     box.innerHTML = none
         ? 'Žádná externí služba není nakonfigurovaná (Settings → [integrations]).'
         : rows.map(r => `<div style="padding:2px 0;">${r}</div>`).join('');
+}
+
+// ================================================================
+// RESPONSE PLAYBOOKS — editor pravidel (JSON) + anomaly skóre
+// ================================================================
+const _pbm = document.createElement('div');
+_pbm.id = 'playbooks-modal';
+_pbm.className = 'modal hidden';
+_pbm.innerHTML = `
+    <div class="modal-box" style="width:640px;max-width:96vw;max-height:85vh;display:flex;flex-direction:column;">
+        <div class="ph"><span>◤ RESPONSE PLAYBOOKS</span>
+            <button class="btn ghost" onclick="document.getElementById('playbooks-modal').classList.add('hidden')">✕</button></div>
+        <div style="font-size:10px;color:var(--muted);padding:6px 0;">
+            Pravidla: match (known_bad, watchlist, protocol, country, min_hits) → actions (block, notify, tag).</div>
+        <textarea id="pb-json" spellcheck="false" style="flex:1;min-height:260px;background:var(--input-bg);border:1px solid var(--border-2);color:var(--fg);font-family:monospace;font-size:11px;padding:8px;outline:none;resize:vertical;"></textarea>
+        <div id="pb-err" style="font-size:10px;color:var(--red);min-height:14px;padding:4px 0;"></div>
+        <div class="modal-actions">
+            <button class="btn" onclick="pbAddExample()">+ PŘÍKLAD</button>
+            <button class="btn primary" onclick="pbSave()">ULOŽIT</button>
+        </div>
+    </div>`;
+document.body.appendChild(_pbm);
+_pbm.addEventListener('click', e => { if (e.target === _pbm) _pbm.classList.add('hidden'); });
+
+async function playbooksOpen() {
+    _pbm.classList.remove('hidden');
+    $('pb-err').textContent = '';
+    const r = await fetch('/api/playbooks').then(x => x.json()).catch(() => null);
+    if (r && r.error) { $('pb-err').textContent = 'Vyžaduje přihlášení.'; $('pb-json').value = '[]'; return; }
+    $('pb-json').value = JSON.stringify(Array.isArray(r) ? r : [], null, 1);
+}
+function pbAddExample() {
+    let arr = [];
+    try { arr = JSON.parse($('pb-json').value || '[]'); } catch {}
+    arr.push({ name: 'block-known-bad', enabled: true,
+               match: { known_bad: true }, actions: ['block', 'notify'] });
+    $('pb-json').value = JSON.stringify(arr, null, 1);
+}
+async function pbSave() {
+    let data;
+    try { data = JSON.parse($('pb-json').value); }
+    catch (e) { $('pb-err').textContent = 'Neplatný JSON: ' + e.message; return; }
+    const r = await fetch('/api/playbooks', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    }).then(x => x.json()).catch(() => ({ ok: false }));
+    if (r.ok) { showToast({ title: 'PLAYBOOKS ULOŽENY', body: `${r.count} pravidel`, color: 'var(--green)' }); _pbm.classList.add('hidden'); }
+    else { $('pb-err').textContent = r.error || 'Uložení selhalo (admin only)'; }
 }
