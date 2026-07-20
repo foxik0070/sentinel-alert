@@ -33,12 +33,82 @@ SMTP_BANNER   = b"220 mail.local ESMTP Postfix (Ubuntu)\r\n"
 # RDP/SMB jsou binární — jen connect capture bez banneru
 
 MAX_PAYLOAD = 512
-READ_TIMEOUT = 5.0
+MAX_SESSION = 4096          # session capture — akumulovaný payload celé relace
+READ_TIMEOUT = 8.0
+
+
+def _extract_creds(text: str) -> str:
+    """Vytáhne z relace zajímavé stopy: HTTP Basic auth, User-Agent, login pokusy."""
+    import base64 as _b64
+    import re as _re
+    out = []
+    m = _re.search(r"Authorization:\s*Basic\s+(\S+)", text, _re.I)
+    if m:
+        try:
+            out.append("basic=" + _b64.b64decode(m.group(1)).decode("utf-8", "replace")[:60])
+        except Exception:
+            pass
+    m = _re.search(r"User-Agent:\s*(.+)", text, _re.I)
+    if m:
+        out.append("ua=" + m.group(1).strip()[:80])
+    # SSH klient banner (SSH-2.0-...) identifikuje nástroj
+    m = _re.search(r"SSH-2\.0-\S+", text)
+    if m:
+        out.append("ssh=" + m.group(0)[:60])
+    return " | ".join(out)[:200]
+
+
+# ── JA3 TLS fingerprint ────────────────────────────────────────────────────────
+def _ja3_from_client_hello(data: bytes):
+    """Spočítá JA3 fingerprint z TLS ClientHello. Vrací (ja3_str, md5) nebo None."""
+    import hashlib as _h
+    import struct as _st
+    try:
+        if len(data) < 44 or data[0] != 0x16:      # TLS handshake record
+            return None
+        # přeskoč record header (5) + handshake type (1) + length (3)
+        p = 5
+        if data[p] != 0x01:                          # ClientHello
+            return None
+        p += 4
+        ver = _st.unpack(">H", data[p:p + 2])[0]     # legacy_version
+        p += 2 + 32                                  # version + random
+        sid_len = data[p]; p += 1 + sid_len          # session id
+        cs_len = _st.unpack(">H", data[p:p + 2])[0]; p += 2
+        ciphers = [_st.unpack(">H", data[p + i:p + i + 2])[0] for i in range(0, cs_len, 2)]
+        p += cs_len
+        comp_len = data[p]; p += 1 + comp_len         # compression methods
+        exts, curves, ecpf = [], [], []
+        if p + 2 <= len(data):
+            ext_total = _st.unpack(">H", data[p:p + 2])[0]; p += 2
+            end = p + ext_total
+            while p + 4 <= end and p + 4 <= len(data):
+                etype = _st.unpack(">H", data[p:p + 2])[0]
+                elen = _st.unpack(">H", data[p + 2:p + 4])[0]
+                exts.append(etype)
+                body = data[p + 4:p + 4 + elen]
+                if etype == 0x000a and len(body) >= 2:   # supported_groups
+                    n = _st.unpack(">H", body[:2])[0]
+                    curves = [_st.unpack(">H", body[2 + i:4 + i])[0] for i in range(0, n, 2)]
+                elif etype == 0x000b and len(body) >= 1:  # ec_point_formats
+                    ecpf = list(body[1:1 + body[0]])
+                p += 4 + elen
+        _GREASE = {0x0a0a, 0x1a1a, 0x2a2a, 0x3a3a, 0x4a4a, 0x5a5a, 0x6a6a, 0x7a7a,
+                   0x8a8a, 0x9a9a, 0xaaaa, 0xbaba, 0xcaca, 0xdada, 0xeaea, 0xfafa}
+        f = lambda lst: "-".join(str(x) for x in lst if x not in _GREASE)
+        ja3 = f"{ver},{f(ciphers)},{f(exts)},{f(curves)},{f(ecpf)}"
+        return ja3, _h.md5(ja3.encode()).hexdigest()
+    except Exception:
+        return None
 
 
 def _persist(event):
     conn = sqlite3.connect(DB_PATH)
     try:
+        # payload = session capture; creds/JA3 přidáme na začátek pro viditelnost v IP intel
+        pl = event.get("payload", "")
+        if event.get("creds"):
+            pl = f"[{event['creds']}] {pl}"[:MAX_SESSION]
         conn.execute(
             "INSERT INTO attacks (ts, src_ip, dst_port, protocol, payload, country, lat, lon, isp) "
             "VALUES (?,?,?,?,?,?,?,?,?)",
@@ -47,7 +117,7 @@ def _persist(event):
                 event["src_ip"],
                 event["dst_port"],
                 event["protocol"],
-                event["payload"],
+                pl,
                 event["country"],
                 event["lat"],
                 event["lon"],
@@ -73,15 +143,24 @@ async def _handle(reader, writer, protocol, port, banner):
             return
     except ValueError:
         pass
+    # Session capture — čti víc kol do timeoutu, akumuluj celou relaci
     payload = b""
     try:
         if banner:
             writer.write(banner)
             await writer.drain()
-        try:
-            payload = await asyncio.wait_for(reader.read(MAX_PAYLOAD), READ_TIMEOUT)
-        except asyncio.TimeoutError:
-            pass
+        deadline = asyncio.get_event_loop().time() + READ_TIMEOUT
+        while len(payload) < MAX_SESSION:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                break
+            try:
+                chunk = await asyncio.wait_for(reader.read(4096), min(remaining, 2.0))
+            except asyncio.TimeoutError:
+                break
+            if not chunk:
+                break
+            payload += chunk
     except Exception:
         pass
     finally:
@@ -91,13 +170,21 @@ async def _handle(reader, writer, protocol, port, banner):
         except Exception:
             pass
 
+    text = payload.decode("utf-8", errors="replace")
+    creds = _extract_creds(text)
+    # JA3 fingerprint pokud útočník poslal TLS ClientHello
+    ja3 = _ja3_from_client_hello(payload)
+    if ja3:
+        creds = (creds + " | " if creds else "") + f"ja3={ja3[1]}"
     lat, lon, country, isp = geoip.lookup(src_ip)
     event = {
         "ts": datetime.now().isoformat(),
         "src_ip": src_ip,
         "dst_port": port,
         "protocol": protocol,
-        "payload": payload.decode("utf-8", errors="replace")[:MAX_PAYLOAD],
+        "payload": text[:MAX_SESSION],
+        "creds": creds,                  # credentials / user-agent / JA3
+        "ja3": ja3[1] if ja3 else "",
         "country": country,
         "lat": lat,
         "lon": lon,
