@@ -2151,6 +2151,71 @@ def playbooks_save(request: Request, payload: list = Body(...)):
     return {"ok": True, "count": len(payload)}
 
 
+@app.get("/api/analytics/graph")
+def analytics_graph(days: int = 7, limit: int = 40):
+    """Graf vztahů útočníků: uzly IP/ISP/země, hrany IP→ISP→země.
+    Odhalí koordinované kampaně (víc IP pod jedním ISP/zemí)."""
+    days = max(1, min(days, 90))
+    limit = max(1, min(limit, 100))
+    rows = _query(
+        "SELECT src_ip, isp, country, COUNT(*) AS n FROM attacks "
+        "WHERE ts >= datetime('now', ?) AND src_ip != '' "
+        "GROUP BY src_ip ORDER BY n DESC LIMIT ?", (f"-{days} day", limit))
+    nodes, links, seen = [], [], {}
+
+    def _node(nid, label, group, val):
+        if nid not in seen:
+            seen[nid] = len(nodes)
+            nodes.append({"id": nid, "label": label, "group": group, "val": val})
+        else:
+            nodes[seen[nid]]["val"] += val
+
+    for r in rows:
+        ip, isp, country = r["src_ip"], (r["isp"] or "?"), (r["country"] or "?")
+        _node("ip:" + ip, ip, "ip", r["n"])
+        _node("isp:" + isp, isp[:30], "isp", r["n"])
+        _node("cc:" + country, country, "country", r["n"])
+        links.append({"source": "ip:" + ip, "target": "isp:" + isp})
+        links.append({"source": "isp:" + isp, "target": "cc:" + country})
+    # dedup hran
+    uniq = {(l["source"], l["target"]): l for l in links}
+    return {"nodes": nodes, "links": list(uniq.values())}
+
+
+@app.post("/api/reports/generate-pdf")
+def report_generate_pdf(request: Request):
+    """Vygeneruje PDF report z HTML přes headless Chromium (pokud dostupný)."""
+    if not _is_authed(request, require_admin=True):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    import shutil
+    import subprocess
+    import tempfile
+    chromium = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
+    if not chromium:
+        return JSONResponse({"ok": False, "error": "Chromium není nainstalován"}, status_code=501)
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    html_path = os.path.join(tempfile.gettempdir(), f"sentinel-report-{stamp}.html")
+    pdf_path = os.path.join(REPORTS_DIR, f"report-{stamp}.pdf")
+    with open(html_path, "w") as f:
+        f.write(_generate_report_html())
+    try:
+        subprocess.run(
+            [chromium, "--headless", "--no-sandbox", "--disable-gpu",
+             f"--print-to-pdf={pdf_path}", "--no-pdf-header-footer",
+             "file://" + html_path],
+            timeout=60, check=True, capture_output=True)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:120]}, status_code=500)
+    finally:
+        try:
+            os.remove(html_path)
+        except OSError:
+            pass
+    _audit(_client_ip(request), "report_pdf", os.path.basename(pdf_path))
+    return {"ok": True, "name": os.path.basename(pdf_path)}
+
+
 @app.get("/api/analytics/anomaly")
 def analytics_anomaly():
     """Statistická anomálie: z-score posledních 10 min vůči hodinovému baseline (7 dní)."""
@@ -2374,7 +2439,7 @@ def reports_list(request: Request):
         return JSONResponse({"error": "unauthorized"}, 401)
     try:
         return sorted(
-            (f for f in os.listdir(REPORTS_DIR) if f.endswith(".html")), reverse=True)
+            (f for f in os.listdir(REPORTS_DIR) if f.endswith((".html", ".pdf"))), reverse=True)
     except OSError:
         return []
 
@@ -2383,12 +2448,13 @@ def reports_list(request: Request):
 def report_file(name: str, request: Request):
     if not _is_authed(request):
         return JSONResponse({"error": "unauthorized"}, 401)
-    if "/" in name or ".." in name or not name.endswith(".html"):
+    if "/" in name or ".." in name or not name.endswith((".html", ".pdf")):
         return JSONResponse({"error": "bad name"}, 400)
     path = os.path.join(REPORTS_DIR, name)
     if not os.path.exists(path):
         return JSONResponse({"error": "not found"}, 404)
-    return FileResponse(path, media_type="text/html")
+    media = "application/pdf" if name.endswith(".pdf") else "text/html"
+    return FileResponse(path, media_type=media)
 
 
 @app.post("/api/reports/generate")

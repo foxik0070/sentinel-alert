@@ -47,6 +47,7 @@ function _cpStaticActions() {
         { label: 'ATTACK TRENDS — 7 / 30 DNÍ', run: () => trendsOpen(30) },
         { label: 'ANALYTICS — heatmapa/korelace/predikce', run: () => analyticsOpen() },
         { label: 'RESPONSE PLAYBOOKS — pravidla', run: () => playbooksOpen() },
+        { label: 'ATTACK NETWORK GRAF', run: () => netGraphOpen() },
         { label: 'DAILY REPORTS',             run: () => reportsOpen() },
         { label: 'REPLAY 24H NA GLOBUSU',     run: () => { _cpTab('threat'); replayStart(); } },
         { label: 'KIOSK MÓD — AUTO-CYKLENÍ TABŮ', run: () => kioskToggle() },
@@ -533,8 +534,9 @@ _rpm.innerHTML = `
         <div class="ph"><span>◤ DAILY REPORTS</span>
             <button class="btn ghost" onclick="document.getElementById('reports-modal').classList.add('hidden')">✕</button></div>
         <div id="rp-list" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px;padding:6px 0;"></div>
-        <div style="border-top:1px solid var(--border);padding-top:8px;">
-            <button class="btn primary" id="rp-gen" style="width:100%;">⚡ GENERATE NOW</button>
+        <div style="border-top:1px solid var(--border);padding-top:8px;display:flex;gap:6px;">
+            <button class="btn primary" id="rp-gen" style="flex:1;">⚡ HTML</button>
+            <button class="btn" id="rp-gen-pdf" style="flex:1;">⬇ PDF</button>
         </div>
     </div>`;
 document.body.appendChild(_rpm);
@@ -554,6 +556,12 @@ $('rp-gen').addEventListener('click', async () => {
     const j = await fetch('/api/reports/generate', { method: 'POST' }).then(r => r.json()).catch(() => ({}));
     if (j.ok) { showToast({ title: 'REPORT GENERATED', body: j.name, color: 'var(--green)' }); reportsOpen(); }
     else showToast({ title: 'REPORT FAILED', body: j.error || 'auth required', color: 'var(--red)' });
+});
+$('rp-gen-pdf').addEventListener('click', async () => {
+    showToast({ title: 'PDF', body: 'Generuji…', color: 'var(--muted)' });
+    const j = await fetch('/api/reports/generate-pdf', { method: 'POST' }).then(r => r.json()).catch(() => ({}));
+    if (j.ok) { showToast({ title: 'PDF GENERATED', body: j.name, color: 'var(--green)' }); reportsOpen(); }
+    else showToast({ title: 'PDF FAILED', body: j.error || 'auth/chromium', color: 'var(--red)' });
 });
 
 // ================================================================
@@ -1164,4 +1172,62 @@ async function pbSave() {
     }).then(x => x.json()).catch(() => ({ ok: false }));
     if (r.ok) { showToast({ title: 'PLAYBOOKS ULOŽENY', body: `${r.count} pravidel`, color: 'var(--green)' }); _pbm.classList.add('hidden'); }
     else { $('pb-err').textContent = r.error || 'Uložení selhalo (admin only)'; }
+}
+
+// ================================================================
+// ATTACK NETWORK GRAF — D3 force graf vztahů útočníků (IP→ISP→země)
+// ================================================================
+const _ngm = document.createElement('div');
+_ngm.id = 'netgraph-modal';
+_ngm.className = 'modal hidden';
+_ngm.innerHTML = `
+    <div class="modal-box" style="width:min(94vw,900px);height:82vh;display:flex;flex-direction:column;">
+        <div class="ph"><span>◤ ATTACK NETWORK GRAPH</span>
+            <div style="display:flex;gap:6px;align-items:center;">
+                <span style="font-size:9px;color:var(--muted);">● IP ● ISP ● země</span>
+                <button class="btn ghost" onclick="document.getElementById('netgraph-modal').classList.add('hidden')">✕</button>
+            </div></div>
+        <svg id="ng-svg" style="flex:1;width:100%;border:1px solid var(--border);"></svg>
+    </div>`;
+document.body.appendChild(_ngm);
+_ngm.addEventListener('click', e => { if (e.target === _ngm) _ngm.classList.add('hidden'); });
+
+async function netGraphOpen() {
+    _ngm.classList.remove('hidden');
+    let d;
+    try { d = await fetch('/api/analytics/graph?days=7').then(r => r.json()); }
+    catch { return; }
+    const svg = d3.select('#ng-svg');
+    svg.selectAll('*').remove();
+    const box = document.getElementById('ng-svg').getBoundingClientRect();
+    const W = box.width, H = box.height;
+    const COL = { ip: '#ffbe00', isp: '#38bdf8', country: '#2effa1' };
+
+    const links = d.links.map(l => ({ ...l }));
+    const nodes = d.nodes.map(n => ({ ...n }));
+    const sim = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links).id(x => x.id).distance(50))
+        .force('charge', d3.forceManyBody().strength(-90))
+        .force('center', d3.forceCenter(W / 2, H / 2))
+        .force('collide', d3.forceCollide(12));
+
+    const link = svg.append('g').attr('stroke', 'rgba(120,160,168,0.35)')
+        .selectAll('line').data(links).join('line').attr('stroke-width', 1);
+    const node = svg.append('g').selectAll('circle').data(nodes).join('circle')
+        .attr('r', n => n.group === 'country' ? 9 : n.group === 'isp' ? 6 : 3 + Math.min(6, Math.log2((n.val || 1) + 1)))
+        .attr('fill', n => COL[n.group] || '#888')
+        .call(d3.drag()
+            .on('start', (e, n) => { if (!e.active) sim.alphaTarget(0.3).restart(); n.fx = n.x; n.fy = n.y; })
+            .on('drag', (e, n) => { n.fx = e.x; n.fy = e.y; })
+            .on('end', (e, n) => { if (!e.active) sim.alphaTarget(0); n.fx = null; n.fy = null; }));
+    node.append('title').text(n => `${n.label} (${n.val})`);
+    const label = svg.append('g').selectAll('text').data(nodes.filter(n => n.group !== 'ip')).join('text')
+        .text(n => n.label).attr('font-size', 9).attr('fill', 'var(--fg)').attr('dx', 8).attr('dy', 3);
+
+    sim.on('tick', () => {
+        link.attr('x1', l => l.source.x).attr('y1', l => l.source.y)
+            .attr('x2', l => l.target.x).attr('y2', l => l.target.y);
+        node.attr('cx', n => n.x).attr('cy', n => n.y);
+        label.attr('x', n => n.x).attr('y', n => n.y);
+    });
 }
