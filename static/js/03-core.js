@@ -96,6 +96,10 @@ function applyTabVisibility(cfg) {
         if (settingsBtn) settingsBtn.style.display  = "none";
         const btnPihole = $("tab-btn-pihole");
         if (btnPihole)   btnPihole.style.display   = "none";
+        const btnMikrotik = $("tab-btn-mikrotik");
+        if (btnMikrotik) btnMikrotik.style.display = "none";
+        const btnBlockAll = document.querySelector('button[onclick="bulkBlockVisible()"]');
+        if (btnBlockAll) btnBlockAll.style.display = "none";
         // In work mode attacks table is empty — hide the tab, ban_history is the default
         const dbvTabAttacks = $('dbv-tab-attacks');
         if (dbvTabAttacks) dbvTabAttacks.style.display = 'none';
