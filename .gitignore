@@ -17,6 +17,8 @@ data/topology.json
 data/settings.json
 data/net_settings.json
 data/svc_settings.json
+data/services.json
+data/proxy_stats.json
 
 # Sentinel credentials (configured via UI or setup.sh)
 data/sentinel.json
