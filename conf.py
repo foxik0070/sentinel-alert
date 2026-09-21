@@ -141,6 +141,10 @@ THREATINTEL_AUTOBLOCK = _c.getboolean("threat", "intel_autoblock", fallback=Fals
 
 # [db]
 DB_RETENTION_DAYS = _i("db", "retention_days", 90)
+# Kam ukladat denni zalohy DB. Prazdne = vedle dat (data/backups).
+# Na rpi5 zalohy narostly na 4,3 GB a zaplnovaly SD kartu, proto se daji
+# presmerovat na jiny svazek (tam je 419 GB volnych misto 2 GB).
+BACKUP_DIR = _s("db", "backup_dir", "")
 
 # [siem] — OpenSearch/Elasticsearch export
 SIEM_URL      = _s("siem", "url", "")

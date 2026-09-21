@@ -1872,7 +1872,7 @@ def export_table(table: str, request: Request, fmt: str = "csv", ip: str = ""):
         headers={"Content-Disposition": f'attachment; filename="{base}.csv"'})
 
 
-BACKUP_DIR = os.path.join(BASE_DIR, "data", "backups")
+BACKUP_DIR = conf.BACKUP_DIR or os.path.join(BASE_DIR, "data", "backups")
 
 
 def _make_db_backup() -> str:
