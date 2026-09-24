@@ -229,6 +229,7 @@ lon      = 18.2625
 url      = https://sentinel.example.com
 token    = <64-char-token>
 hostname = my-node
+# ca_bundle = /etc/sentinel/tls/sentinel.crt   # self-signed Sentinel server CA
 
 [honeypot]
 # Ports the fake services listen on (must be > 1024 unless running as root)

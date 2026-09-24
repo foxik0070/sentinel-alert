@@ -82,6 +82,8 @@ HOME_IP  = _s("home", "ip",  "")  or None
 SENTINEL_URL      = _s("sentinel", "url",      "") or None
 SENTINEL_TOKEN    = _s("sentinel", "token",    "") or None
 SENTINEL_HOSTNAME = _s("sentinel", "hostname", "") or None
+# Sentinel server má vlastní CA (self-signed) — cesta k jeho certifikátu.
+SENTINEL_CA       = _s("sentinel", "ca_bundle", "") or None
 
 # [honeypot]
 HONEYPOT_SSH_PORT  = _i("honeypot", "ssh_port",  2222)

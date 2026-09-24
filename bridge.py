@@ -34,6 +34,14 @@ SENTINEL_HOSTNAME = (os.environ.get("SENTINEL_AGENT_HOSTNAME")
                      or socket.gethostname())
 
 
+def _verify():
+    """TLS ověření: vlastní CA Sentinelu ([sentinel] ca_bundle), jinak systémové CA."""
+    if _conf.SENTINEL_CA:
+        import ssl
+        return ssl.create_default_context(cafile=_conf.SENTINEL_CA)
+    return True
+
+
 def configure(url: str | None, token: str | None, hostname: str | None = None):
     """Update runtime config and persist to disk. Empty url disables."""
     global SENTINEL_URL, SENTINEL_TOKEN, SENTINEL_HOSTNAME
@@ -77,7 +85,7 @@ async def ping():
             }]
         }
 
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=5.0, verify=_verify()) as client:
             r = await client.post(SENTINEL_URL, json=payload, headers=headers)
 
             # Expect HTTP 200 with {"status":"success","processed":1}
@@ -190,14 +198,14 @@ async def send_heartbeat():
             "hostname": SENTINEL_HOSTNAME,
             "events": [event]
         }
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=5.0, verify=_verify()) as client:
             r = await client.post(SENTINEL_URL, json=payload, headers=headers)
             if r.status_code == 200:
                 print(f"bridge: heartbeat OK - agent {SENTINEL_HOSTNAME} is ONLINE")
             else:
                 print(f"bridge: heartbeat failed: HTTP {r.status_code}")
     except Exception as e:
-        print(f"bridge: heartbeat failed: {e}")
+        print(f"bridge: heartbeat failed: {e!r}")
 
 
 async def forward(event: dict):
@@ -216,7 +224,7 @@ async def forward(event: dict):
             "hostname": SENTINEL_HOSTNAME,
             "events": [payload]
         }
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=5.0, verify=_verify()) as client:
             r = await client.post(SENTINEL_URL, json=ingest_payload, headers=headers)
             if r.status_code != 200:
                 print(f"bridge: forward failed: HTTP {r.status_code}")
@@ -225,4 +233,4 @@ async def forward(event: dict):
                 elif r.status_code == 400:
                     print(f"  → Invalid payload: {payload}")
     except Exception as e:
-        print(f"bridge: forward failed: {e}")
+        print(f"bridge: forward failed: {e!r}")
