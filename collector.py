@@ -29,9 +29,10 @@ def discover_hosts():
 
     If collector.monitor_hosts is set in conf, use that list explicitly.
     Otherwise auto-discover from hosts_file (loopback/IPv6 skipped).
+    collector.exclude_hosts (names or IPs) are always skipped.
     """
     if conf.COLLECTOR_MONITOR_HOSTS:
-        return list(conf.COLLECTOR_MONITOR_HOSTS)
+        return [h for h in conf.COLLECTOR_MONITOR_HOSTS if h not in conf.COLLECTOR_EXCLUDE_HOSTS]
 
     if not os.path.exists(HOSTS_FILE):
         return []
@@ -46,6 +47,8 @@ def discover_hosts():
                 continue
             ip, names = parts[0], parts[1:]
             if ip.startswith("127.") or ip.startswith("::") or ip.startswith("fe80") or ip.startswith("ff"):
+                continue
+            if any(n in conf.COLLECTOR_EXCLUDE_HOSTS for n in names) or ip in conf.COLLECTOR_EXCLUDE_HOSTS:
                 continue
             for name in names:
                 if name in ("localhost",) or name.startswith("ip6-"):

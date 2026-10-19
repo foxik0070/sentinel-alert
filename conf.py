@@ -98,6 +98,10 @@ COLLECTOR_HOSTS_FILE    = _s("collector", "hosts_file",    "/etc/hosts")
 COLLECTOR_MONITOR_HOSTS = [
     h.strip() for h in _s("collector", "monitor_hosts", "").split(",") if h.strip()
 ]
+# Hosts never polled over SSH (who, fail2ban) — e.g. a RouterOS router without root/Linux.
+COLLECTOR_EXCLUDE_HOSTS = {
+    h.strip() for h in _s("collector", "exclude_hosts", "").split(",") if h.strip()
+}
 
 # [pihole]
 PIHOLE_HOSTS    = [h.strip() for h in _s("pihole", "hosts",    "").split(",") if h.strip()]
