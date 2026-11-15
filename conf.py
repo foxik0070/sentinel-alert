@@ -14,7 +14,7 @@ _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 # Jediny zdroj verze. Kalendarni rok.mesic.poradi, poradi se kazdy mesic vraci
 # na 001 a plati zvlast pro kazdou komponentu — cislo Sentinelu s timhle nijak
 # nesouvisi. Odsud ji bere i balickovani, takze se nedaji rozejit.
-VERSION = "2026.11.001"
+VERSION = "2026.11.002"
 
 _c = configparser.ConfigParser(interpolation=None)
 _c.read(CONF_PATH)  # silent if file missing — all values fall back to defaults

@@ -1,5 +1,33 @@
 # Sentinel-Alert — Change History
 
+## 2026-11-15 — Security Center za přihlášením
+
+`/api/fsc/*` byly přístupné bez přihlášení. `data` přitom vrací **inventář
+hostů** — OS, jádro, otevřené problémy, otevřené porty a stav firewallu —
+a `scan` uměl spustit sken komukoliv, kdo dosáhl na port.
+
+Důvod, proč to tak bylo, mezitím odpadl: sken spouštěl systemd časovač přes
+`POST /api/fsc/scan` bez přihlášení, takže zavření cesty by ho rozbilo. Od
+`[security_center] scan_interval_minutes` (2026.11.001) si sken plánuje
+aplikace sama a časovač už na instanci není.
+
+Zavřené jsou **všechny čtyři** cesty, ne jen dvě z hlášení:
+
+| cesta | kdo smí |
+|---|---|
+| `GET /api/fsc/data` | admin, viewer, read-only token |
+| `GET /api/fsc/hosts` | admin, viewer, read-only token |
+| `POST /api/fsc/scan` | jen admin |
+| `POST /api/fsc/hosts/toggle` | jen admin |
+
+`hosts/toggle` v hlášení nebyl, ale **mění stav** — vypnutí hosta ze skenu je
+tišší způsob, jak oslepit monitoring, než spuštění skenu navíc.
+
+Frontend se nemění; volá je stejným `fetch()` jako ostatní chráněné cesty,
+takže session cookie chodí s nimi.
+
+Testy 115 → **126**.
+
 ## 2026-11-15 — Security: aktuální stav, střízlivá závažnost, data mimo kód
 
 ### Záložka Security ukazovala stav před aktualizacemi

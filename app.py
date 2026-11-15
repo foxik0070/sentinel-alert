@@ -1665,13 +1665,21 @@ async def db_restore(table: str, request: Request, rows: list = Body(...)):
     return {"restored": restored}
 
 
+# Security Center vraci inventar hostu — OS, jadro, otevrene problemy a porty,
+# stav firewallu. Dokud sken spoustel systemd casovac bez prihlaseni, musely
+# tyhle cesty zustat otevrene; od [security_center] scan_interval_minutes si
+# sken plánuje aplikace sama, takze uz to neni potreba.
 @app.get("/api/fsc/data")
-def fsc_data():
+def fsc_data(request: Request):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
     return fsc.data_store
 
 
 @app.post("/api/fsc/scan")
-def fsc_scan():
+def fsc_scan(request: Request):
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
     import threading as _threading
     if not fsc.data_store["system"]["scan_in_progress"]:
         _threading.Thread(target=fsc.run_full_scan, daemon=True).start()
@@ -1679,12 +1687,17 @@ def fsc_scan():
 
 
 @app.get("/api/fsc/hosts")
-def fsc_hosts():
+def fsc_hosts(request: Request):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
     return {"hosts": fsc.get_all_hosts_with_status()}
 
 
 @app.post("/api/fsc/hosts/toggle")
-async def fsc_hosts_toggle(payload: dict = Body(...)):
+async def fsc_hosts_toggle(request: Request, payload: dict = Body(...)):
+    # Meni stav, ne jen cte — proto bez read-only tokenu.
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
     ip = payload.get("ip", "")
     if not ip:
         return JSONResponse({"error": "ip required"}, status_code=400)

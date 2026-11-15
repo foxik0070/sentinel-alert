@@ -104,3 +104,58 @@ def test_login_success_resets_counter(client, monkeypatch):
     # counter cleared → can attempt again without hitting limit
     r = client.post("/api/login", json={"username": "admin", "password": "wrong"})
     assert r.status_code == 401
+
+
+# --- Security Center: inventar hostu patri za prihlaseni ---------------------
+# Endpointy /api/fsc/* byly verejne, protoze sken spoustel systemd casovac bez
+# prihlaseni. Od [security_center] scan_interval_minutes si sken plánuje
+# aplikace sama, takze duvod odpadl. /api/fsc/data pritom vraci OS, jadro,
+# otevrene problemy a porty vsech monitorovanych hostu.
+
+FSC_READ = ["/api/fsc/data", "/api/fsc/hosts"]
+FSC_WRITE = [("/api/fsc/scan", None), ("/api/fsc/hosts/toggle", {"ip": "192.0.2.1"})]
+
+
+@pytest.mark.parametrize("path", FSC_READ)
+def test_fsc_read_requires_auth(client, path):
+    assert client.get(path).status_code == 401
+
+
+@pytest.mark.parametrize("path,payload", FSC_WRITE)
+def test_fsc_write_requires_auth(client, path, payload):
+    r = client.post(path, json=payload) if payload else client.post(path)
+    assert r.status_code == 401
+
+
+@pytest.mark.parametrize("path", FSC_READ)
+def test_fsc_read_allowed_for_admin(client, path):
+    import app as _app
+    client.cookies.set(_app._AUTH_COOKIE, _app._make_token("a"))
+    assert client.get(path).status_code == 200
+
+
+def test_fsc_scan_allowed_for_admin(client):
+    import app as _app
+    client.cookies.set(_app._AUTH_COOKIE, _app._make_token("a"))
+    assert client.post("/api/fsc/scan").json() == {"status": "started"}
+
+
+@pytest.mark.parametrize("path", FSC_READ)
+def test_fsc_read_allowed_for_viewer(client, path):
+    """Viewer smi cist, ne menit."""
+    import app as _app
+    client.cookies.set(_app._AUTH_COOKIE, _app._make_token("v"))
+    assert client.get(path).status_code == 200
+
+
+def test_fsc_scan_denied_for_viewer(client):
+    import app as _app
+    client.cookies.set(_app._AUTH_COOKIE, _app._make_token("v"))
+    assert client.post("/api/fsc/scan").status_code == 401
+
+
+def test_fsc_toggle_denied_for_viewer(client):
+    """Prepnuti hosta meni stav — viewer na to nema."""
+    import app as _app
+    client.cookies.set(_app._AUTH_COOKIE, _app._make_token("v"))
+    assert client.post("/api/fsc/hosts/toggle", json={"ip": "192.0.2.1"}).status_code == 401
