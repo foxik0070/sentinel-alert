@@ -61,6 +61,10 @@ Nasazení: systemd (`setup.sh`) nebo Docker (`docker-compose.yml`). Monitoring: 
 - `[security_center]` ha_url, ha_token, ignore_ips, scan_interval_minutes
 - `[scanner]` enabled, ssh_key
 - `[paths]` data_dir (běhová data mimo kód — balíček má kód v /opt)
+
+Verze je v `conf.py` (`VERSION`) — odtud ji bere UI i balíčkování. Kalendářní
+`rok.měsíc.pořadí`, pořadí se každý měsíc vrací na 001 a platí zvlášť pro každou
+komponentu (číslo Sentinelu s alertem nesouvisí).
 - `[mode]` type (home/work), ips_file, who_file
 
 ---
