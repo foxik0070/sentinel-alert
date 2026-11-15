@@ -9,6 +9,8 @@ import os
 
 CONF_PATH = os.environ.get("SENTINEL_CONF", "/etc/sentinel/sentinel-alert.conf")
 
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
 _c = configparser.ConfigParser(interpolation=None)
 _c.read(CONF_PATH)  # silent if file missing — all values fall back to defaults
 
@@ -130,6 +132,8 @@ SCANNER_ENABLED = _c.getboolean("scanner", "enabled", fallback=False)
 
 # [security_center]
 FSC_ENABLED   = _c.getboolean("security_center", "enabled", fallback=True)
+# Interval bezpecnostniho skenu hostu v minutach (0 = jen jednou denne ve 2:00 jako drive)
+FSC_SCAN_INTERVAL_MIN = _c.getint("security_center", "scan_interval_minutes", fallback=60)
 FSC_HA_URL    = _s("security_center", "ha_url",    "")
 FSC_HA_TOKEN  = _s("security_center", "ha_token",  "")
 FSC_IGNORE_IPS = [
@@ -144,6 +148,18 @@ BLOCKLIST_FILE = _s("threat", "blocks_ips_file", "")
 THREATINTEL_ENABLED = _c.getboolean("threat", "intel_enabled", fallback=False)
 # Auto-block known-bad IP na MikroTiku (vyžaduje mikrotik.auto_block)
 THREATINTEL_AUTOBLOCK = _c.getboolean("threat", "intel_autoblock", fallback=False)
+
+# [paths]
+# Behova data (DB utoku, inventare, nastaveni, zalohy, GeoIP). Vychozi je
+# adresar data/ vedle kodu, coz staci pro beh z gitu. Pri instalaci z balicku
+# ale kod v /opt prepisuje kazdy upgrade, takze data patri jinam — typicky
+# /var/lib/sentinel-alert.
+DATA_DIR = _s("paths", "data_dir", "") or os.path.join(_APP_DIR, "data")
+
+# SSH klic pro sken hostu. Vychozi je conf/ vedle kodu kvuli behu z gitu;
+# u instalace z balicku by klic lezel v /opt vedle kodu, proto se da
+# presmerovat do /etc/sentinel.
+SSH_KEY = _s("scanner", "ssh_key", "") or os.path.join(_APP_DIR, "conf", "id_ed25519")
 
 # [db]
 DB_RETENTION_DAYS = _i("db", "retention_days", 90)

@@ -18,8 +18,8 @@ import geoip
 sqlite3.register_adapter(datetime, lambda val: val.isoformat())
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "data", "alerts.db")
-SSH_KEY = os.path.join(BASE_DIR, "conf", "id_ed25519")
+DB_PATH = os.path.join(conf.DATA_DIR, "alerts.db")
+SSH_KEY = conf.SSH_KEY
 SSH_USER = os.environ.get("SENTINEL_SSH_USER") or conf.COLLECTOR_SSH_USER
 HOSTS_FILE = os.environ.get("SENTINEL_HOSTS_FILE") or conf.COLLECTOR_HOSTS_FILE
 

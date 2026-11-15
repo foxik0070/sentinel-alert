@@ -179,6 +179,12 @@ Sessions use HMAC-SHA256 signed cookies (7-day TTL). The `secret` key is auto-ge
 All settings live in `/etc/sentinel/sentinel-alert.conf` (INI format).
 
 ```ini
+[paths]
+# Runtime data: attack DB, inventories, settings, backups, GeoIP. Default is
+# data/ next to the code. When installed from a package the code lives in /opt
+# and every upgrade rewrites it, so the data belongs elsewhere.
+data_dir = /var/lib/sentinel-alert
+
 [auth]
 # Dashboard login credentials — change before exposing to any network
 username = admin
@@ -253,10 +259,15 @@ log_files = /var/log/sniproxy/https_access.log,/var/log/sniproxy/http_access.log
 [scanner]
 # ARP-based LAN scanning — enables the Network Map tab
 enabled = false
+# SSH key used to scan hosts. Default: conf/id_ed25519 next to the code, which
+# only makes sense when running from a git checkout — an installed package
+# would keep the key in /opt beside the code.
+ssh_key = /etc/sentinel/sentinel-alert/id_ed25519
 
 [security_center]
 # enabled = false hides the Security Center tab
 enabled    = true
+scan_interval_minutes = 60   # How often hosts are rescanned; 0 = once a day at 02:00
 ha_url     =          # Home Assistant URL for push notifications
 ha_token   =
 ignore_ips = 192.168.1.1,192.168.1.202

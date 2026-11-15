@@ -16,6 +16,7 @@ import threading
 import time
 
 import geoip
+import conf as _conf
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -59,7 +60,7 @@ def _is_external(ip: str) -> bool:
     except ValueError:
         return False
 
-_STATS_FILE = os.path.join(BASE_DIR, "data", "proxy_stats.json")
+_STATS_FILE = os.path.join(_conf.DATA_DIR, "proxy_stats.json")
 
 _PATTERN = re.compile(
     r"(?P<src_ip>[0-9a-fA-F.:]+)\s+"

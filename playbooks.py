@@ -11,9 +11,10 @@ Callbacky (block/notify) injektuje app.py, aby modul neměl závislosti.
 import json
 import os
 import threading
+import conf as _conf
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PLAYBOOKS_PATH = os.path.join(BASE_DIR, "data", "playbooks.json")
+PLAYBOOKS_PATH = os.path.join(_conf.DATA_DIR, "playbooks.json")
 
 _lock = threading.Lock()
 _cache = {"mtime": -1.0, "rules": []}

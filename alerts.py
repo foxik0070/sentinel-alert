@@ -9,9 +9,10 @@ import json
 import os
 import threading
 import urllib.request
+import conf as _conf
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-WATCHLIST_PATH = os.path.join(BASE_DIR, "data", "watchlist.json")
+WATCHLIST_PATH = os.path.join(_conf.DATA_DIR, "watchlist.json")
 
 _lock = threading.Lock()
 _cfg = {"enabled": False, "ntfy_url": "", "telegram_token": "", "telegram_chat": "",

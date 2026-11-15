@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import threading
 import time
@@ -8,8 +9,8 @@ import urllib.request
 import conf as _conf
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-_HOSTS_STATE_FILE = os.path.join(BASE_DIR, "data", "fsc_hosts.json")
-_SSH_KEY = os.path.join(BASE_DIR, "conf", "id_ed25519")
+_HOSTS_STATE_FILE = os.path.join(_conf.DATA_DIR, "fsc_hosts.json")
+_SSH_KEY = _conf.SSH_KEY
 
 HA_URL = os.environ.get("FSC_HA_URL") or _conf.FSC_HA_URL or ""
 HA_TOKEN = os.environ.get("FSC_HA_TOKEN") or _conf.FSC_HA_TOKEN or ""
@@ -239,6 +240,34 @@ def get_hosts():
     return [h for h in _parse_all_hosts() if h["ip"] not in disabled]
 
 
+# Zavaznost podle NAZVU BALICKU (prefix), ne podretezce. Drive 'libc' chytalo
+# libcares2 a 'linux' chytalo linux-libc-dev — to jsou jen hlavicky jadra pro
+# kompilaci, za behu se nepouzivaji, takze z nich bylo "critical CVE" na kazdem
+# kontejneru. Pocita se dal balicek, ne CVE.
+_CRIT_RX = re.compile(
+    r"^(linux-image|linux-headers-\d|linux-(signed-)?image|proxmox-kernel|pve-kernel|pve-manager|"
+    r"openssh|openssl|libssl|sudo|bash$|systemd|libsystemd|udev|libc6|libc-bin|"
+    r"libcrypt|libgcrypt|gnupg|gpg|libgnutls|polkit|libpolkit|xz-utils|liblzma|"
+    r"raspi-firmware|linux-firmware|firmware-)")
+_HIGH_RX = re.compile(
+    r"^(apache2|nginx|php|python3|libpython|curl|libcurl|wget|mysql|mariadb|libmariadb|"
+    r"postgresql|libpq|docker|containerd|runc|qemu|bind9|libnss|exim4|postfix|samba|"
+    r"libxml2|libexpat|zlib|libtiff|libpng|libjpeg|libwebp|libcares)")
+_LOW_PKGS = {"linux-libc-dev"}
+
+
+def classify_package(pkg: str) -> str:
+    """'crit' / 'high' / 'med' pro bezpecnostni aktualizaci balicku."""
+    p = pkg.strip().lower()
+    if p in _LOW_PKGS:
+        return "med"
+    if _CRIT_RX.match(p):
+        return "crit"
+    if _HIGH_RX.match(p):
+        return "high"
+    return "med"
+
+
 def check_host_security(ip, name):
     status = {
         "name": name, "ip": ip, "online": False,
@@ -277,15 +306,13 @@ def check_host_security(ip, name):
             status["os"] = f"ERR: {err[:50]}" if err else "ERR: SSH failed"
         elif json_start != -1 and json_end != -1:
             data = json.loads(out[json_start:json_end], strict=False)
-            crit_keys = ['linux', 'kernel', 'ssh', 'ssl', 'sudo', 'bash', 'systemd', 'libc', 'crypt', 'pve']
-            high_keys = ['apache', 'nginx', 'php', 'python', 'curl', 'wget', 'mysql', 'maria', 'postgre', 'docker', 'qemu', 'bind']
             c_crit = c_high = c_med = 0
             if data.get("sec_packages"):
                 for pkg in data["sec_packages"].split(','):
-                    p = pkg.lower()
-                    if any(k in p for k in crit_keys):
+                    sev = classify_package(pkg)
+                    if sev == "crit":
                         c_crit += 1
-                    elif any(k in p for k in high_keys):
+                    elif sev == "high":
                         c_high += 1
                     else:
                         c_med += 1
@@ -358,18 +385,37 @@ def run_full_scan():
                 f"{chr(10).join(parts)}\n\nAct immediately."
             )
     data_store["system"]["last_scan_time"] = time.strftime("%d.%m.%Y %H:%M:%S")
-    now = time.localtime()
-    data_store["system"]["next_scan_time"] = "Today at 02:00" if now.tm_hour < 2 else "Tomorrow at 02:00"
+    interval = _scan_interval_seconds()
+    if interval:
+        nxt = time.localtime(time.time() + interval)
+        data_store["system"]["next_scan_time"] = time.strftime("Today at %H:%M", nxt)
+    else:
+        now = time.localtime()
+        data_store["system"]["next_scan_time"] = "Today at 02:00" if now.tm_hour < 2 else "Tomorrow at 02:00"
     data_store["system"]["scan_in_progress"] = False
+
+
+def _scan_interval_seconds():
+    return max(0, int(getattr(_conf, "FSC_SCAN_INTERVAL_MIN", 60) or 0)) * 60
 
 
 def _worker():
     run_full_scan()
+    interval = _scan_interval_seconds()
+    last = time.time()
     while True:
-        now = time.localtime()
-        if now.tm_hour == 2 and now.tm_min == 0:
-            run_full_scan()
-            time.sleep(60)
+        if interval:
+            # Pravidelne, aby zalozka Security ukazovala aktualni stav i po
+            # aktualizacich behem dne. Drive se skenovalo jen ve 2:00, tedy
+            # pred nedelni aktualizaci ve 4:00 — a cely den svitila stara data.
+            if time.time() - last >= interval:
+                run_full_scan()
+                last = time.time()
+        else:
+            now = time.localtime()
+            if now.tm_hour == 2 and now.tm_min == 0:
+                run_full_scan()
+                time.sleep(60)
         time.sleep(30)
 
 

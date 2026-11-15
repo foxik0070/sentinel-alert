@@ -12,7 +12,7 @@ from pathlib import Path
 import conf as _conf
 
 BASE_DIR = Path(__file__).resolve().parent
-CFG_PATH = BASE_DIR / "data" / "sentinel.json"
+CFG_PATH = Path(_conf.DATA_DIR) / "sentinel.json"
 
 
 def _load():
@@ -149,7 +149,7 @@ def _translate(event: dict):
         if mac and state in ("online", "offline", "new"):
             try:
                 import json as _json
-                settings_path = BASE_DIR / "data" / "net_settings.json"
+                settings_path = Path(_conf.DATA_DIR) / "net_settings.json"
                 if settings_path.exists():
                     cfg = (_json.loads(settings_path.read_text())
                            .get("devices", {}).get(mac, {}))

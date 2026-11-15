@@ -3,10 +3,11 @@ import os
 import urllib.request
 import json
 import threading
+import conf as _conf
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-GEOIP_PATH = os.path.join(BASE_DIR, "data", "GeoLite2-City.mmdb")
-ASN_PATH   = os.path.join(BASE_DIR, "data", "GeoLite2-ASN.mmdb")
+GEOIP_PATH = os.path.join(_conf.DATA_DIR, "GeoLite2-City.mmdb")
+ASN_PATH   = os.path.join(_conf.DATA_DIR, "GeoLite2-ASN.mmdb")
 
 _reader     = None
 _asn_reader = None

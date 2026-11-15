@@ -1,9 +1,10 @@
 """User-toggleable runtime settings, persisted in data/settings.json."""
 import json
 from pathlib import Path
+import conf as _conf
 
 BASE_DIR = Path(__file__).resolve().parent
-PATH = BASE_DIR / "data" / "settings.json"
+PATH = Path(_conf.DATA_DIR) / "settings.json"
 
 DEFAULTS = {
     "lan_scan_enabled": True,

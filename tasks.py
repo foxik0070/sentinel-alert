@@ -12,8 +12,8 @@ import conf
 import geoip
 import scanner
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "alerts.db")
-_NET_SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "net_settings.json")
+DB_PATH = os.path.join(conf.DATA_DIR, "alerts.db")
+_NET_SETTINGS_PATH = os.path.join(conf.DATA_DIR, "net_settings.json")
 
 
 def _device_notify_allowed(mac: str, state: str) -> bool:

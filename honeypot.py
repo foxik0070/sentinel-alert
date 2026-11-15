@@ -11,11 +11,12 @@ from datetime import datetime
 
 import bridge
 import geoip
+import conf as _conf
 
 sqlite3.register_adapter(datetime, lambda val: val.isoformat())
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "data", "alerts.db")
+DB_PATH = os.path.join(_conf.DATA_DIR, "alerts.db")
 
 SSH_BANNER = b"SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.4\r\n"
 HTTP_RESPONSE = (

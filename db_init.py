@@ -1,8 +1,9 @@
 import os
 import sqlite3
+import conf as _conf
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "data", "alerts.db")
+DB_PATH = os.path.join(_conf.DATA_DIR, "alerts.db")
 
 
 def _ensure_column(cur, table, col, ddl):

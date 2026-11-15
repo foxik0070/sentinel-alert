@@ -41,7 +41,7 @@ import workmode
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-DB_PATH = os.path.join(BASE_DIR, "data", "alerts.db")
+DB_PATH = os.path.join(conf.DATA_DIR, "alerts.db")
 
 # Priority: env var > conf file > auto-detect
 _env_lat = os.environ.get("SENTINEL_HOME_LAT")
@@ -818,10 +818,10 @@ def _init_audit_logger():
     lg.propagate = False
     if not lg.handlers:
         try:
-            os.makedirs(os.path.join(BASE_DIR, "data"), exist_ok=True)
+            os.makedirs(conf.DATA_DIR, exist_ok=True)
             # delay=True: soubor se otevře až při prvním zápisu (test-friendly)
             h = RotatingFileHandler(
-                os.path.join(BASE_DIR, "data", "audit.log"),
+                os.path.join(conf.DATA_DIR, "audit.log"),
                 maxBytes=2_000_000, backupCount=5, delay=True)
             h.setFormatter(logging.Formatter("%(message)s"))
             lg.addHandler(h)
@@ -1406,7 +1406,7 @@ async def demo_attack(count: int = 5):
 def get_topo_data():
     try:
         import json
-        with open(os.path.join(BASE_DIR, "data", "topo.json")) as f:
+        with open(os.path.join(conf.DATA_DIR, "topo.json")) as f:
             return json.load(f)
     except:
         return {"nodes": [], "links": []}
@@ -1416,8 +1416,8 @@ def get_topo_data():
 async def save_topo_data(data: dict = Body(...)):
     try:
         import json
-        os.makedirs(os.path.join(BASE_DIR, "data"), exist_ok=True)
-        with open(os.path.join(BASE_DIR, "data", "topo.json"), "w") as f:
+        os.makedirs(conf.DATA_DIR, exist_ok=True)
+        with open(os.path.join(conf.DATA_DIR, "topo.json"), "w") as f:
             json.dump(data, f, indent=2)
         return {"ok": True}
     except Exception as e:
@@ -1467,7 +1467,7 @@ def report_data():
     }
 
 
-_NET_SETTINGS_FILE = os.path.join(BASE_DIR, "data", "net_settings.json")
+_NET_SETTINGS_FILE = os.path.join(conf.DATA_DIR, "net_settings.json")
 
 
 def _load_net_settings() -> dict:
@@ -1481,7 +1481,7 @@ def _load_net_settings() -> dict:
 
 def _save_net_settings(data: dict):
     import json
-    os.makedirs(os.path.join(BASE_DIR, "data"), exist_ok=True)
+    os.makedirs(conf.DATA_DIR, exist_ok=True)
     with open(_NET_SETTINGS_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
@@ -1823,7 +1823,7 @@ async def mikrotik_rule_toggle(payload: dict = Body(...)):
 # ── PiHole ───────────────────────────────────────────────────────────────────
 
 # ── Trends + scheduled reports ────────────────────────────────────────────────
-REPORTS_DIR = os.path.join(BASE_DIR, "data", "reports")
+REPORTS_DIR = os.path.join(conf.DATA_DIR, "reports")
 
 
 @app.get("/api/export/{table}")
@@ -1872,7 +1872,7 @@ def export_table(table: str, request: Request, fmt: str = "csv", ip: str = ""):
         headers={"Content-Disposition": f'attachment; filename="{base}.csv"'})
 
 
-BACKUP_DIR = conf.BACKUP_DIR or os.path.join(BASE_DIR, "data", "backups")
+BACKUP_DIR = conf.BACKUP_DIR or os.path.join(conf.DATA_DIR, "backups")
 
 
 def _make_db_backup() -> str:
@@ -2545,8 +2545,8 @@ def pihole_data():
 
 import uuid as _uuid_mod
 
-_SVC_PATH     = os.path.join(BASE_DIR, "data", "services.json")
-_SVC_SETTINGS_PATH = os.path.join(BASE_DIR, "data", "svc_settings.json")
+_SVC_PATH     = os.path.join(conf.DATA_DIR, "services.json")
+_SVC_SETTINGS_PATH = os.path.join(conf.DATA_DIR, "svc_settings.json")
 
 def _load_svc_settings() -> dict:
     try:

@@ -48,7 +48,7 @@ Sentinel-Alert je nástroj pro monitoring domácí sítě a vizualizaci honeypot
 
 Frontend je rozdělen do modulů `static/js/00-ui.js … 11-ux.js` (klasické skripty načítané v pořadí, sdílený globální scope — žádný build step). 00 = sdílené utility (toasty, UIState, zvuk, boot, notifikace, gauge, watchlist), 01–10 = per-tab logika, 11 = command palette/UX/IP intel/trends/reports/kiosk/f2b.
 
-Testy: `.venv/bin/python -m pytest tests/` (84 testů). Dev závislosti: `requirements-dev.txt`.
+Testy: `.venv/bin/python -m pytest tests/` (115 testů). Dev závislosti: `requirements-dev.txt`.
 Nasazení: systemd (`setup.sh`) nebo Docker (`docker-compose.yml`). Monitoring: `/healthz`, `/metrics` (+ `grafana-dashboard.json`).
 
 ## Konfigurace
@@ -58,8 +58,9 @@ Nasazení: systemd (`setup.sh`) nebo Docker (`docker-compose.yml`). Monitoring: 
 - `[auth]` username, password, secret (persistentní — nesmí chybět, jinak se generuje random secret a uživatel je vylogován po každém restartu)
 - `[honeypot]` ssh_port, http_port
 - `[collector]` ssh_user, monitor_hosts
-- `[security_center]` ha_url, ha_token, ignore_ips
-- `[scanner]` enabled
+- `[security_center]` ha_url, ha_token, ignore_ips, scan_interval_minutes
+- `[scanner]` enabled, ssh_key
+- `[paths]` data_dir (běhová data mimo kód — balíček má kód v /opt)
 - `[mode]` type (home/work), ips_file, who_file
 
 ---

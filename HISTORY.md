@@ -1,5 +1,55 @@
 # Sentinel-Alert — Change History
 
+## 2026-11-15 — Security: aktuální stav, střízlivá závažnost, data mimo kód
+
+### Záložka Security ukazovala stav před aktualizacemi
+
+Skenovalo se jen ve 2:00, zatímco týdenní aktualizace OS běží v neděli ve 4:00.
+Záložka tak celý den svítila stavem *před* aktualizací — ráno 28 security
+alertů na 10 hostech, přitom ve 4:02 už bylo všechno nainstalované; ruční sken
+vrátil nulu.
+
+Nově `[security_center] scan_interval_minutes` (výchozí **60**). `0` zachová
+původní chování, tedy jediný sken ve 2:00. Údaj „next scan" v hlavičce se řídí
+stejným intervalem, aby neukazoval 02:00, když se skenuje každou hodinu.
+
+### Závažnost podle názvu balíčku, ne podřetězce
+
+`linux-libc-dev` se počítal jako **critical**, protože jeho název obsahuje
+„linux" i „libc" — jsou to přitom jen hlavičky jádra pro kompilaci, za běhu
+se nepoužívají. Stejně tak `libcares2` kvůli „libc". Z jedné aktualizace tak
+vznikalo „critical CVE" na devíti kontejnerech.
+
+Závažnost se nově určuje podle **prefixu** názvu (`classify_package()`):
+
+| balíček | dřív | nově |
+|---|---|---|
+| `linux-libc-dev` | crit | med |
+| `libcares2` | crit | high |
+| `linux-image-*`, `proxmox-kernel-*`, `openssh-*`, `libssl*`, `libc6`, `sudo`, `bash` | crit | crit |
+| `apache2-bin`, `libpq5`, `python3-*` | high/med | high |
+
+Pořád se počítá balíček, ne CVE — čtyři balíčky Apache z jedné aktualizace jsou
+dál čtyři položky.
+
+### Běhová data a SSH klíč mimo adresář s kódem
+
+Cesty byly natvrdo `data/` a `conf/` vedle kódu. Při běhu z gitu to nevadí, ale
+instalace z balíčku má kód v `/opt`, který každý upgrade přepíše — včetně
+databáze útoků, inventářů a nastavení. SSH klíč pro sken hostů by navíc ležel
+vedle kódu.
+
+Nově `[paths] data_dir` a `[scanner] ssh_key`; bez nich platí původní chování,
+takže běh z gitu se nemění. Balíček data nevozí vůbec — výchozí soubory jsou
+v `/usr/share/sentinel-alert/data-defaults/` a `postinst` je zkopíruje do
+`/var/lib/sentinel-alert/` jen tehdy, když tam ještě nejsou.
+
+### Testy
+
+76 → **115**. Dřívějších „19 selhávajících testů v main" se netýkalo kódu:
+chybělo `pytest-asyncio` z `requirements-dev.txt`, bez něj se async testy
+neumí spustit. Po doinstalování je sada zelená.
+
 ## 2026-07-20 — šestá vlna: detekce, integrace + code-review hardening
 
 Osm nových funkcí + oprava 9 nálezů z workflow code-review (high effort).

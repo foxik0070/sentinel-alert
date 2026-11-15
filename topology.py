@@ -14,10 +14,11 @@ If the file is missing, _autoseed() builds a star topology from current devices.
 import json
 import sqlite3
 from pathlib import Path
+import conf as _conf
 
 BASE_DIR = Path(__file__).resolve().parent
-PATH = BASE_DIR / "data" / "topology.json"
-DB = BASE_DIR / "data" / "alerts.db"
+PATH = Path(_conf.DATA_DIR) / "topology.json"
+DB = Path(_conf.DATA_DIR) / "alerts.db"
 
 
 def _autoseed() -> dict:

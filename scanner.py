@@ -11,11 +11,12 @@ import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timedelta
+import conf as _conf
 
 sqlite3.register_adapter(datetime, lambda val: val.isoformat())
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "data", "alerts.db")
+DB_PATH = os.path.join(_conf.DATA_DIR, "alerts.db")
 
 OFFLINE_AFTER = timedelta(minutes=10)
 
