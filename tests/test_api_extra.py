@@ -159,3 +159,50 @@ def test_fsc_toggle_denied_for_viewer(client):
     import app as _app
     client.cookies.set(_app._AUTH_COOKIE, _app._make_token("v"))
     assert client.post("/api/fsc/hosts/toggle", json={"ip": "192.0.2.1"}).status_code == 401
+
+
+# --- Service checky: zapis jen pro prihlasene -------------------------------
+# Stejny pripad jako /api/fsc/*: kdokoliv v siti mohl service checky mazat
+# nebo pridavat. Cteni smi i viewer a read-only token, zapis jen admin.
+
+SVC_READ = ["/api/services", "/api/services/settings"]
+SVC_WRITE = [
+    ("post", "/api/services", {"type": "http", "name": "x", "target": "http://example.invalid"}),
+    ("post", "/api/services/check", None),
+    ("post", "/api/services/settings", {"interval_min": 5}),
+    ("delete", "/api/services/does-not-exist", None),
+]
+
+
+@pytest.mark.parametrize("path", SVC_READ)
+def test_services_read_requires_auth(client, path):
+    assert client.get(path).status_code == 401
+
+
+@pytest.mark.parametrize("method,path,payload", SVC_WRITE)
+def test_services_write_requires_auth(client, method, path, payload):
+    fn = getattr(client, method)
+    r = fn(path, json=payload) if payload else fn(path)
+    assert r.status_code == 401
+
+
+@pytest.mark.parametrize("path", SVC_READ)
+def test_services_read_allowed_for_viewer(client, path):
+    import app as _app
+    client.cookies.set(_app._AUTH_COOKIE, _app._make_token("v"))
+    assert client.get(path).status_code == 200
+
+
+def test_services_delete_denied_for_viewer(client):
+    import app as _app
+    client.cookies.set(_app._AUTH_COOKIE, _app._make_token("v"))
+    assert client.delete("/api/services/does-not-exist").status_code == 401
+
+
+def test_services_delete_reports_missing_for_admin(client):
+    """Admin dostane 404, ne ticho — frontend na tom stavi hlasku."""
+    import app as _app
+    client.cookies.set(_app._AUTH_COOKIE, _app._make_token("a"))
+    r = client.delete("/api/services/does-not-exist")
+    assert r.status_code == 404
+    assert r.json() == {"error": "not found"}

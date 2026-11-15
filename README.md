@@ -231,6 +231,12 @@ lon      = 18.2625
 #ip      = 1.2.3.4
 
 [sentinel]
+# Závažnost běžných zásahů honeypotu posílaných do Sentinelu. Honeypot je
+# vystavený právě proto, aby ho skenery trefovaly — jako "high" překrývá
+# skutečné problémy. Neobvyklé události (zadané údaje, příkazy, payload,
+# zásah z vlastní sítě) dostanou notable_severity.
+hit_severity     = low
+notable_severity = medium
 # Central Sentinel server — leave url blank to disable
 url      = https://sentinel.example.com
 token    = <64-char-token>

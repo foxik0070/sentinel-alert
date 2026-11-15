@@ -108,6 +108,20 @@ async def ping():
         return False, 0, f"Connection error: {str(e)}"
 
 
+# Co u zasahu honeypotu znamena "neobvykle". Samotne pripojeni nebo sken portu
+# je ocekavany sum; zajimave zacne byt, az kdyz utocnik neco DOKAZE — zada
+# prihlasovaci udaje, spusti prikaz, stahne payload — nebo prijde zevnitr site.
+def _is_notable(event: dict) -> bool:
+    if event.get("credentials") or event.get("commands") or event.get("payload"):
+        return True
+    if event.get("session") and len(str(event.get("session"))) > 0:
+        return True
+    ip = str(event.get("src_ip") or "")
+    if ip.startswith(("10.", "192.168.", "127.")) or ip.startswith(tuple(f"172.{i}." for i in range(16, 32))):
+        return True  # zasah z vlastni site neni bezny internetovy sum
+    return False
+
+
 def _translate(event: dict):
     t = event.get("type")
     if t == "attack":
@@ -115,6 +129,8 @@ def _translate(event: dict):
             "plugin": "fail2ban_honeypot",
             "check_name": "honeypot_hit",
             "status": "active",
+            "severity": (_conf.SENTINEL_NOTABLE_SEVERITY if _is_notable(event)
+                         else _conf.SENTINEL_HIT_SEVERITY),
             "message": (f"{(event.get('protocol') or '?').upper()} hit :"
                         f"{event.get('dst_port')} from {event.get('src_ip')} "
                         f"({event.get('country','?')}, {event.get('isp','?')})"),

@@ -241,9 +241,25 @@ async function svcCheckOne(sid) {
     await svcLoad();
 }
 
-async function svcDelete(sid) {
+async function svcDelete(sid, fromDetail) {
     if (!confirm('Remove this service?')) return;
-    await fetch(`/api/services/${sid}`, { method: 'DELETE' });
+    // Vysledek se musi overit: pri 401/404 se drive nestalo nic viditelneho
+    // a uzivatel nemel jak poznat, ze smazani neproslo.
+    let r;
+    try {
+        r = await fetch(`/api/services/${sid}`, { method: 'DELETE' });
+    } catch (e) {
+        showToast({ title: 'Smazání selhalo', body: 'Server neodpověděl.', color: '#ef4444' });
+        return;
+    }
+    if (!r.ok) {
+        const msg = r.status === 401 ? 'Smazání vyžaduje přihlášení'
+                  : r.status === 404 ? 'Služba už neexistuje'
+                  : `Smazání selhalo (HTTP ${r.status})`;
+        showToast({ title: 'Smazání selhalo', body: msg, color: '#ef4444' });
+        if (r.status !== 404) return;
+    }
+    if (fromDetail) $('svc-detail-overlay').style.display = 'none';
     await svcLoad();
 }
 
@@ -408,6 +424,7 @@ function svcShowDetail(svcId) {
         </div>
         <div style="display:flex;gap:6px;align-items:center;">
             <button class="btn" onclick="_svcDetailRecheck('${svc.id}')" style="font-size:10px;">⟳ RECHECK</button>
+            <button class="btn" onclick="svcDelete('${svc.id}', true)" style="font-size:10px;color:#ef4444;border-color:#ef4444;" title="Remove service">🗑 REMOVE</button>
             <button onclick="$('svc-detail-overlay').style.display='none'" style="background:none;border:none;color:#4d7479;cursor:pointer;font-size:18px;line-height:1;padding:0 4px;">✕</button>
         </div>
     </div>

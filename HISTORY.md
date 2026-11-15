@@ -1,5 +1,29 @@
 # Sentinel-Alert — Change History
 
+## 2026-11-15 — Service checky za přihlášením, honeypot přestal křičet
+
+### Service check nešel smazat
+
+Tlačítko `✕` je poslední sloupec tabulky, která má `white-space: nowrap`. Na telefonu tabulka přeteče a poslední sloupec zůstane **mimo obrazovku** — dosažitelný jen vodorovným posunem uvnitř rámečku, což na řádku, který sám reaguje na klik, nikdo netrefí.
+
+Mazání je proto nově i v detailu služby vedle *Recheck*, kde na něj není potřeba scrollovat.
+
+`svcDelete()` navíc výsledek ignoroval, takže neúspěch nebyl poznat. Teď hlásí rozdíl mezi „vyžaduje přihlášení", „služba už neexistuje" a jinou chybou.
+
+### `/api/services/*` bylo bez přihlášení
+
+Stejný případ jako `/api/fsc/*`: kdokoliv v síti mohl service checky mazat i přidávat. Osm cest zavřeno — čtení admin/viewer/token, zápis jen admin.
+
+### Zásahy honeypotu už nejsou „high"
+
+Honeypot je vystavený právě proto, aby ho skenery trefovaly; za jedno dopoledne 254 zásahů. Jako *high* v Sentinelu překrývaly skutečné problémy.
+
+Běžný zásah jde nově jako `hit_severity` (výchozí **low**). Vyšší stupeň dostane jen to, kde útočník něco **dokázal** — zadané přihlašovací údaje, spuštěný příkaz, stažený payload — nebo zásah z vlastní sítě, což není běžný internetový šum. Obojí je konfigurovatelné v `[sentinel]`.
+
+Vyžaduje Sentinel 2026.11.012 a vyšší, který `severity` v hlášení přijímá; se starším se nic nerozbije, jen se hodnota ignoruje.
+
+Testy 126 → **147**.
+
 ## 2026-11-15 — Security Center za přihlášením
 
 `/api/fsc/*` byly přístupné bez přihlášení. `data` přitom vrací **inventář

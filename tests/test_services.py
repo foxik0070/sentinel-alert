@@ -55,8 +55,12 @@ def tmp_data_dir(monkeypatch, tmp_path):
 
 @pytest.fixture
 def client(tmp_data_dir):
+    """Prihlaseny klient. /api/services/* vyzaduje od 2026.11.003 prihlaseni,
+    takze testy funkcnosti potrebuji session; samotnou autorizaci overuje
+    test_api_extra.py."""
     import app as _app
     with TestClient(_app.app) as c:
+        c.cookies.set(_app._AUTH_COOKIE, _app._make_token("a"))
         yield c
 
 

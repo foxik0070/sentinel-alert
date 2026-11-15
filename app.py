@@ -3026,8 +3026,12 @@ async def _svc_bg_loop():
 
 # ── Service API ───────────────────────────────────────────────────────────────
 
+# Service checky: cteni admin/viewer/token, zapis jen admin. Drive byly
+# vsechny cesty otevrene, takze kdokoliv v siti mohl checky mazat.
 @app.get("/api/services")
-async def services_list():
+async def services_list(request: Request):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
     services = _load_services()
     out = []
     for s in services:
@@ -3040,7 +3044,9 @@ async def services_list():
     return out
 
 @app.post("/api/services")
-async def services_add(payload: dict = Body(...)):
+async def services_add(request: Request, payload: dict = Body(...)):
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
     stype = (payload.get("type") or "http").lower()
     name  = (payload.get("name") or "").strip()
     if stype in ("http", "https"):
@@ -3070,7 +3076,9 @@ async def services_add(payload: dict = Body(...)):
     return {"ok": True, "id": svc["id"]}
 
 @app.post("/api/services/preview")
-async def services_preview(payload: dict = Body(...)):
+async def services_preview(request: Request, payload: dict = Body(...)):
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
     """Run check + security scan on a service definition without saving."""
     stype = (payload.get("type") or "http").lower()
     target = (payload.get("target") or "").strip()
@@ -3099,7 +3107,9 @@ async def services_preview(payload: dict = Body(...)):
     return {"check": check_result, "security": security}
 
 @app.delete("/api/services/{sid}")
-async def services_delete(sid: str):
+async def services_delete(sid: str, request: Request):
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
     services = _load_services()
     new = [s for s in services if s["id"] != sid]
     if len(new) == len(services):
@@ -3110,7 +3120,9 @@ async def services_delete(sid: str):
     return {"ok": True}
 
 @app.post("/api/services/check")
-async def services_check_all():
+async def services_check_all(request: Request):
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
     services = _load_services()
     enabled = [s for s in services if s.get("enabled", True)]
     results = await asyncio.gather(*[_run_check(s) for s in enabled], return_exceptions=True)
@@ -3123,7 +3135,9 @@ async def services_check_all():
     return out
 
 @app.post("/api/services/{sid}/check")
-async def services_check_one(sid: str):
+async def services_check_one(sid: str, request: Request):
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
     services = _load_services()
     svc = next((s for s in services if s["id"] == sid), None)
     if not svc:
@@ -3133,12 +3147,16 @@ async def services_check_one(sid: str):
     return res
 
 @app.get("/api/services/settings")
-async def svc_settings_get():
+async def svc_settings_get(request: Request):
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
     cfg = _load_svc_settings()
     return {"interval_min": int(cfg.get("interval_min", 5))}
 
 @app.post("/api/services/settings")
-async def svc_settings_post(payload: dict = Body(...)):
+async def svc_settings_post(request: Request, payload: dict = Body(...)):
+    if not _is_authed(request, allow_token=False):
+        return JSONResponse({"error": "unauthorized"}, 401)
     global _svc_interval
     cfg = _load_svc_settings()
     if "interval_min" in payload:

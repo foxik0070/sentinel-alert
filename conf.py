@@ -14,7 +14,7 @@ _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 # Jediny zdroj verze. Kalendarni rok.mesic.poradi, poradi se kazdy mesic vraci
 # na 001 a plati zvlast pro kazdou komponentu — cislo Sentinelu s timhle nijak
 # nesouvisi. Odsud ji bere i balickovani, takze se nedaji rozejit.
-VERSION = "2026.11.002"
+VERSION = "2026.11.003"
 
 _c = configparser.ConfigParser(interpolation=None)
 _c.read(CONF_PATH)  # silent if file missing — all values fall back to defaults
@@ -89,6 +89,11 @@ HOME_IP  = _s("home", "ip",  "")  or None
 SENTINEL_URL      = _s("sentinel", "url",      "") or None
 SENTINEL_TOKEN    = _s("sentinel", "token",    "") or None
 SENTINEL_HOSTNAME = _s("sentinel", "hostname", "") or None
+# Zavaznost beznych zasahu honeypotu. Honeypot je vystaveny prave proto, aby ho
+# skenery trefovaly — je to ocekavany sum, ne incident. Jako "high" prebijel
+# v Sentinelu skutecne problemy. Neobvykle udalosti maji vlastni, vyssi stupen.
+SENTINEL_HIT_SEVERITY      = (_s("sentinel", "hit_severity", "low") or "low").lower()
+SENTINEL_NOTABLE_SEVERITY  = (_s("sentinel", "notable_severity", "medium") or "medium").lower()
 # Sentinel server má vlastní CA (self-signed) — cesta k jeho certifikátu.
 SENTINEL_CA       = _s("sentinel", "ca_bundle", "") or None
 
