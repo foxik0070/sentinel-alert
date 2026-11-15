@@ -279,7 +279,7 @@ async function geoPreview() {
 async function geoApply() {
     if (!_geoSelected.size) return;
     const countries = [..._geoSelected];
-    if (!confirm(`Zablokovat útočící IP ze zemí ${countries.join(', ')} na MikroTiku?`)) return;
+    if (!await uiConfirm(`Zablokovat útočící IP ze zemí ${countries.join(', ')} na MikroTiku?`)) return;
     const btn = document.getElementById('geo-apply-btn');
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
     const r = await fetch('/api/geoblock/apply', {

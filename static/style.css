@@ -1508,3 +1508,26 @@ body.light-mode.scheme-red {
 .user-cluster-count {
     margin-left: auto; color: var(--muted); font-weight: 600; letter-spacing: 0;
 }
+
+/* Potvrzovací dialogy — náhrada za nativní confirm/alert/prompt, které se
+   ve vestavěných prohlížečích vůbec nezobrazí. */
+.ui-dialog-overlay {
+    position: fixed; inset: 0; z-index: 9000;
+    background: rgba(0,0,0,.6);
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.ui-dialog {
+    background: var(--bg-1); border: 1px solid var(--border);
+    max-width: 420px; width: 100%; padding: 16px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.6);
+}
+.ui-dialog-title { font-size: 11px; font-weight: 800; letter-spacing: 1.5px;
+    color: var(--accent); text-transform: uppercase; margin-bottom: 8px; }
+.ui-dialog-body { color: var(--fg); font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.ui-dialog-input {
+    width: 100%; margin-top: 10px; padding: 7px 9px;
+    background: var(--bg-0); border: 1px solid var(--border); color: var(--fg);
+    font-family: inherit; font-size: 13px;
+}
+.ui-dialog-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+.ui-dialog-actions .btn { min-width: 84px; padding: 7px 12px; font-size: 12px; }

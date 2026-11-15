@@ -1,5 +1,21 @@
 # Sentinel-Alert — Change History
 
+## 2026-11-15 — Potvrzovací dialogy a verzované skripty
+
+### Proč služba pořád nešla smazat
+
+Oprava z minula nepomohla, protože **požadavek vůbec neodešel**. `svcDelete()` začíná `if (!confirm(…)) return;` a nativní `confirm()` se ve vestavěných prohlížečích — Android WebView bez `onJsConfirm`, HA Companion, Fully Kiosk — **nezobrazí a vrátí `false`**. Akce tedy tiše skončí: žádný požadavek, žádná hláška. Přesně to bylo vidět.
+
+Týkalo se to **všech 27** nativních dialogů v aplikaci (10× `confirm`, 11× `prompt`, 6× `alert`), ne jen mazání služby. Nahradily je vlastní HTML dialogy (`uiConfirm`, `uiPrompt`, `uiAlert`), které fungují všude. Funkce, které je volají, jsou nově `async`; u všech jsem ověřil, že na jejich návratové hodnotě nikdo nestaví.
+
+### Zastaralé skripty z cache
+
+Skripty se načítaly bez verze a statické soubory nemají `Cache-Control`, takže prohlížeč je mohl držet z heuristické cache — zařízení pak běželo na kódu z doby před opravou a vypadalo to, že oprava nefunguje.
+
+Verze se nově vkládá do URL až při odeslání stránky (`?v=<verze>`), soubory na disku zůstávají beze změny. Název cache service workeru nese verzi taky, takže se při vydání zahodí starý shell.
+
+Testy 158 → **161**, mezi nimi hlídač, že se nativní dialog nevrátí.
+
 ## 2026-11-15 — Přihlášení uživatelé podle clusteru
 
 Seznam byl plochý: 61 jmen pod sebou, cluster jen jako drobné šedé písmo vpravo. Na pracovní instanci se přihlašují lidé na Karolinu, Barboru, Barboru2 i CS a nedalo se rozeznat, kdo je kde.

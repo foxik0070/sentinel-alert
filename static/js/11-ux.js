@@ -710,7 +710,7 @@ async function f2bOpen() {
 
     $('f2b-body').querySelectorAll('.f2b-ip').forEach(el => {
         el.addEventListener('click', async () => {
-            if (!confirm(`Unban ${el.dataset.ip} z jailu ${el.dataset.jail} na ${el.dataset.host}?`)) return;
+            if (!await uiConfirm(`Unban ${el.dataset.ip} z jailu ${el.dataset.jail} na ${el.dataset.host}?`)) return;
             el.style.opacity = '0.5';
             const r = await fetch('/api/fail2ban/unban', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -973,8 +973,8 @@ function cpTogglePin(label) {
 // ULOŽENÉ POHLEDY — snapshot tab + filtr + schéma
 // ================================================================
 function _views() { return UIState.get('saved-views', []); }
-function viewSave() {
-    const name = prompt('Název pohledu:');
+async function viewSave() {
+    const name = await uiPrompt('Název pohledu:');
     if (!name) return;
     const v = {
         name,

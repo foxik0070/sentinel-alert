@@ -152,7 +152,7 @@ function playBeep(kind = 'blip') {
     ov.innerHTML = '<pre id="boot-log"></pre><div id="boot-skip">PRESS ANY KEY TO SKIP</div>';
     document.body.appendChild(ov);
     const lines = [
-        '> SENTINEL-ALERT // GRID  v2026.11.005',
+        '> SENTINEL-ALERT // GRID  v2026.11.006',
         '> CORE ................... OK',
         '> UI MODULES [11/11] ..... OK',
         '> GEOIP DATABASE ......... OK',
@@ -253,4 +253,62 @@ function countUp(el, to, dur = 600) {
         if (p < 1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
+}
+
+// ── Potvrzovací dialogy ──────────────────────────────────────────────────────
+// Nativní confirm()/alert()/prompt() se ve vestavěných prohlížečích (Android
+// WebView bez onJsConfirm, HA Companion, Fully Kiosk) VŮBEC NEZOBRAZÍ a vrátí
+// false/null. Akce pak tiše skončí bez požadavku i bez hlášky — přesně tak
+// vypadalo "službu nejde smazat". Tyhle dialogy jsou obyčejné HTML, takže
+// fungují všude.
+
+function _uiDialog({ title, message, defaultValue = null, danger = false, okLabel = 'OK' }) {
+    return new Promise(resolve => {
+        const ov = document.createElement('div');
+        ov.className = 'ui-dialog-overlay';
+        const isPrompt = defaultValue !== null;
+        ov.innerHTML = `
+            <div class="ui-dialog" role="dialog" aria-modal="true">
+                ${title ? `<div class="ui-dialog-title">${_escHtml(title)}</div>` : ''}
+                <div class="ui-dialog-body">${_escHtml(message)}</div>
+                ${isPrompt ? `<input class="ui-dialog-input" type="text" value="${_escHtml(defaultValue)}">` : ''}
+                <div class="ui-dialog-actions">
+                    <button class="btn ui-dialog-cancel">Zrušit</button>
+                    <button class="btn ui-dialog-ok"${danger ? ' style="color:#ef4444;border-color:#ef4444;"' : ''}>${_escHtml(okLabel)}</button>
+                </div>
+            </div>`;
+        document.body.appendChild(ov);
+        const input = ov.querySelector('.ui-dialog-input');
+        const done = val => { ov.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
+        const onKey = e => {
+            if (e.key === 'Escape') done(isPrompt ? null : false);
+            if (e.key === 'Enter' && isPrompt) done(input.value);
+        };
+        ov.querySelector('.ui-dialog-cancel').onclick = () => done(isPrompt ? null : false);
+        ov.querySelector('.ui-dialog-ok').onclick = () => done(isPrompt ? input.value : true);
+        ov.onclick = e => { if (e.target === ov) done(isPrompt ? null : false); };
+        document.addEventListener('keydown', onKey);
+        if (input) { input.focus(); input.select(); }
+    });
+}
+
+function _escHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/** Náhrada confirm() — vrací Promise<boolean>. */
+function uiConfirm(message, opts = {}) {
+    return _uiDialog({ message, title: opts.title || 'Potvrzení',
+                       danger: opts.danger === true, okLabel: opts.okLabel || 'Potvrdit' });
+}
+
+/** Náhrada alert() — vrací Promise, která se splní po zavření. */
+function uiAlert(message, opts = {}) {
+    return _uiDialog({ message, title: opts.title || '', okLabel: 'OK' }).then(() => undefined);
+}
+
+/** Náhrada prompt() — vrací Promise<string|null>. */
+function uiPrompt(message, defaultValue = '') {
+    return _uiDialog({ message, title: 'Zadejte hodnotu', defaultValue: defaultValue ?? '' });
 }

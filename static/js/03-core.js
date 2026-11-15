@@ -302,7 +302,7 @@ async function generateReport() {
         a.href = url; a.download = `sentinel-${now.toISOString().substring(0,10)}.md`;
         a.click();
         URL.revokeObjectURL(url);
-    } catch (e) { alert('Report failed: ' + e.message); }
+    } catch (e) { await uiAlert('Report failed: ' + e.message); }
     if (btn) { btn.textContent = 'REPORT'; btn.disabled = false; }
 }
 
@@ -448,7 +448,7 @@ async function _cfg2faEnable() {
 }
 
 async function _cfg2faDisable() {
-    if (!confirm('Vypnout 2FA?')) return;
+    if (!await uiConfirm('Vypnout 2FA?')) return;
     await fetch('/api/2fa/disable', { method: 'POST' });
     showToast({ title: '2FA VYPNUTO', color: 'var(--yellow)' });
     _cfgSecRender();

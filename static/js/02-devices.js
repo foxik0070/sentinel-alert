@@ -276,7 +276,7 @@ async function openDeviceModal(mac) {
     deleteBtn.textContent = 'DELETE';
     deleteBtn.style.cssText = 'color:#ff2a5e;border-color:#ff2a5e;margin-right:auto;';
     deleteBtn.addEventListener('click', async () => {
-        if (!confirm(`Delete device ${d.ip} (${mac}) from DB? It will reappear on next scan if still online.`)) return;
+        if (!await uiConfirm(`Delete device ${d.ip} (${mac}) from DB? It will reappear on next scan if still online.`)) return;
         await fetch(`/api/device/${encodeURIComponent(mac)}`, { method: 'DELETE' });
         // Remove from topo
         _netData.nodes = _netData.nodes.filter(n => n.mac !== mac);
@@ -339,7 +339,7 @@ async function openVswModal(swId) {
 document.getElementById('add-switch-btn').addEventListener('click', () => openVswModal(null));
 document.getElementById('vsw-save').addEventListener('click', async () => {
     const hostname = document.getElementById('vsw-hostname').value.trim();
-    if (!hostname) { alert('Hostname required'); return; }
+    if (!hostname) { await uiAlert('Hostname required'); return; }
     const payload = {
         id: _vswEditing || undefined,
         hostname,
@@ -352,7 +352,7 @@ document.getElementById('vsw-save').addEventListener('click', async () => {
     fetch('/api/devices').then(r => r.json()).then(renderDevices);
 });
 document.getElementById('vsw-del').addEventListener('click', async () => {
-    if (!_vswEditing || !confirm('Delete this virtual switch?')) return;
+    if (!_vswEditing || !await uiConfirm('Delete this virtual switch?')) return;
     await fetch(`/api/virtual-switch/${encodeURIComponent(_vswEditing)}`, { method: 'DELETE' });
     _netSettings = await fetch('/api/network/settings').then(r => r.json()).catch(() => _netSettings);
     document.getElementById('vsw-modal').classList.add('hidden');
@@ -723,7 +723,7 @@ async function bulkBlockVisible() {
         : _attackHistory.filter(b => (b.protocol || 'fail2ban') === _attackHistFilter);
     const ips = [...new Set(filtered.map(b => b.src_ip).filter(Boolean))].slice(0, 200);
     if (!ips.length) return;
-    if (!confirm(`Zablokovat ${ips.length} IP na MikroTiku (1 týden)?`)) return;
+    if (!await uiConfirm(`Zablokovat ${ips.length} IP na MikroTiku (1 týden)?`)) return;
     const r = await fetch('/api/mikrotik/block-batch', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ips, timeout: '1w' }),

@@ -206,3 +206,44 @@ def test_services_delete_reports_missing_for_admin(client):
     r = client.delete("/api/services/does-not-exist")
     assert r.status_code == 404
     assert r.json() == {"error": "not found"}
+
+
+# --- Dialogy a cache: oprava "sluzbu nejde smazat" -------------------------
+# Nativni confirm() se ve vestavenych prohlizecich (Android WebView bez
+# onJsConfirm, HA Companion, Fully Kiosk) NEZOBRAZI a vrati false. Akce pak
+# skonci bez pozadavku i bez hlasky. Druha cast: skripty se nacitaly bez verze,
+# takze zarizeni mohlo bezet na stare JS z cache.
+
+def test_index_adds_version_to_assets(client):
+    import app as _app
+    client.cookies.set(_app._AUTH_COOKIE, _app._make_token("a"))
+    html = client.get("/").text
+    assert "/static/js/08-services.js?v=" in html, "skripty musi nest verzi"
+    assert f"?v={_app.conf.VERSION}" in html
+
+
+def test_service_worker_cache_carries_version(client):
+    import app as _app
+    js = client.get("/sw.js").text
+    assert f"sentinel-shell-{_app.conf.VERSION}" in js, \
+        "nazev cache musi nest verzi, jinak SW drzi stary shell"
+
+
+def test_no_native_dialogs_left_in_frontend():
+    """Zadne confirm()/alert()/prompt() — ve WebView tise selzou."""
+    import os, re
+    js_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          'static', 'js')
+    offenders = []
+    for f in sorted(os.listdir(js_dir)):
+        if not f.endswith('.js'):
+            continue
+        src = open(os.path.join(js_dir, f), encoding='utf-8').read()
+        # 00-ui.js je definuje jako nahradu, tam je zminka v komentari v poradku
+        for m in re.finditer(r'(?<![\w.$])(confirm|alert|prompt)\(', src):
+            line = src[:m.start()].count('\n') + 1
+            ctx = src.split('\n')[line - 1].strip()
+            if ctx.startswith(('//', '*', '/*')):
+                continue
+            offenders.append(f"{f}:{line} {ctx[:60]}")
+    assert not offenders, "nativni dialogy zustaly:\n" + "\n".join(offenders)

@@ -4,6 +4,7 @@ import hmac
 import json as _json_mod
 import os
 import random
+import re
 import socket
 import sqlite3
 import threading
@@ -1011,16 +1012,41 @@ def auth_status(request: Request):
             "role": ("viewer" if role == "v" else "admin") if ok else None}
 
 
+# Skripty a styly se nacitaly bez verze a staticke soubory nemaji Cache-Control,
+# takze prohlizec mohl drzet starou verzi z heuristicke cache — zarizeni pak
+# bezelo na kodu z doby pred opravou a vypadalo to jako "oprava nefunguje".
+# Verze se proto vklada do URL az pri odeslani stranky; soubory na disku
+# zustavaji beze zmeny.
+_ASSET_RX = re.compile(r'(?P<attr>src|href)="(?P<path>/static/[^"?]+\.(?:js|css))"')
+
+
 @app.get("/")
 def index():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    path = os.path.join(STATIC_DIR, "index.html")
+    try:
+        html = open(path, encoding="utf-8").read()
+        html = _ASSET_RX.sub(
+            lambda m: f'{m.group("attr")}="{m.group("path")}?v={conf.VERSION}"', html)
+        return Response(content=html, media_type="text/html",
+                        headers={"Cache-Control": "no-cache"})
+    except Exception:
+        # Radeji stranka bez cache-bustingu nez zadna.
+        return FileResponse(path)
 
 
 @app.get("/sw.js")
 def service_worker():
     # SW musí běžet z root scope, aby pokryl celou aplikaci
-    return FileResponse(os.path.join(STATIC_DIR, "sw.js"), media_type="application/javascript",
+    # Nazev cache nese verzi, aby se pri vydani zahodil stary shell. Jinak by
+    # service worker servíroval stare skripty i po upgradu balicku.
+    try:
+        js = open(os.path.join(STATIC_DIR, "sw.js"), encoding="utf-8").read()
+        js = re.sub(r"const CACHE = '[^']*'", f"const CACHE = 'sentinel-shell-{conf.VERSION}'", js, count=1)
+        return Response(content=js, media_type="application/javascript",
                         headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+    except Exception:
+        return FileResponse(os.path.join(STATIC_DIR, "sw.js"), media_type="application/javascript",
+                            headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
 
 
 @app.get("/manifest.webmanifest")

@@ -426,15 +426,15 @@ function netDragEnd(ev, d) {
     d.fx = ev.x; d.fy = ev.y; // pin in place after drop
 }
 
-function netClickNode(d) {
+async function netClickNode(d) {
     if (_netEdit && _netLinkArm === 'armed') {
         _netLinkArm = d.id;
         $('net-hint').textContent = 'Click second node to complete link...';
         return;
     }
     if (_netEdit && _netLinkArm && _netLinkArm !== 'armed' && _netLinkArm !== d.id) {
-        const srcPort = prompt('Source port (leave blank if none):') || '';
-        const tgtPort = prompt('Target port (leave blank if none):') || '';
+        const srcPort = await uiPrompt('Source port (leave blank if none):') || '';
+        const tgtPort = await uiPrompt('Target port (leave blank if none):') || '';
         _netData.links.push({ source: _netLinkArm, target: d.id,
                               src_port: srcPort ? +srcPort : null,
                               tgt_port: tgtPort ? +tgtPort : null });
@@ -533,8 +533,8 @@ async function netSaveNode(d) {
     netOpenPanel(d);
 }
 
-function netDeleteNode(d) {
-    if (!confirm(`Delete node "${d.label || d.id}"?`)) return;
+async function netDeleteNode(d) {
+    if (!await uiConfirm(`Delete node "${d.label || d.id}"?`)) return;
     _netData.nodes = _netData.nodes.filter(n => n.id !== d.id);
     _netData.links = _netData.links.filter(l => {
         const s = l.source.id || l.source;
@@ -608,22 +608,22 @@ $('net-add-host').addEventListener('click', async () => {
         });
     });
 
-    $('host-picker-custom').onclick = () => {
+    $('host-picker-custom').onclick = async () => {
         pickerModal.classList.add('hidden');
-        const label = prompt('Hostname / label:');
+        const label = await uiPrompt('Hostname / label:');
         if (!label) return;
-        const ip  = prompt('IP address:') || '';
-        const mac = prompt('MAC address (leave blank for virtual):') || '';
+        const ip  = await uiPrompt('IP address:') || '';
+        const mac = await uiPrompt('MAC address (leave blank for virtual):') || '';
         _netAddHostFromPicker({ hostname: label, ip, mac, type: 'host' });
     };
 
     pickerModal.classList.remove('hidden');
 });
 
-$('net-add-switch').addEventListener('click', () => {
+$('net-add-switch').addEventListener('click', async () => {
     if (!_netEdit) { $('net-hint').textContent = 'Enable EDIT first.'; return; }
-    const label = prompt('Switch label:') || 'SW';
-    const ports = parseInt(prompt('Number of ports:', '24') || '24');
+    const label = await uiPrompt('Switch label:') || 'SW';
+    const ports = parseInt(await uiPrompt('Number of ports:', '24') || '24');
     const w = document.getElementById('net-svg').clientWidth  || 800;
     const h = document.getElementById('net-svg').clientHeight || 500;
     _netData.nodes.push({ id: `sw-${Date.now()}`, type: 'switch', label, ports,
@@ -632,10 +632,10 @@ $('net-add-switch').addEventListener('click', () => {
     netRender();
 });
 
-$('net-add-router').addEventListener('click', () => {
+$('net-add-router').addEventListener('click', async () => {
     if (!_netEdit) { $('net-hint').textContent = 'Enable EDIT first.'; return; }
-    const label = prompt('Router label:') || 'GW';
-    const ip    = prompt('IP / WAN address:') || '';
+    const label = await uiPrompt('Router label:') || 'GW';
+    const ip    = await uiPrompt('IP / WAN address:') || '';
     const w = document.getElementById('net-svg').clientWidth  || 800;
     const h = document.getElementById('net-svg').clientHeight || 500;
     _netData.nodes.push({ id: `rt-${Date.now()}`, type: 'router', label, ip,
@@ -803,7 +803,7 @@ function dbvPage(dir) { _dbv.page = Math.max(0, _dbv.page + dir); dbvLoad(); }
 
 async function dbvDeleteSelected() {
     if (!_dbv.selected.size) return;
-    if (!confirm(`Delete ${_dbv.selected.size} record(s)?`)) return;
+    if (!await uiConfirm(`Delete ${_dbv.selected.size} record(s)?`)) return;
     const ids = [..._dbv.selected];
     // Snapshot smazaných řádků pro undo
     const idSet = new Set(ids);
@@ -945,7 +945,7 @@ $('ns-export-btn').addEventListener('click', () => {
     a.click();
 });
 
-$('ns-scan-btn').addEventListener('click', () => {
-    alert('Port scan: select a device from the list and use the device modal to view/refresh ports.');
+$('ns-scan-btn').addEventListener('click', async () => {
+    await uiAlert('Port scan: select a device from the list and use the device modal to view/refresh ports.');
 });
 

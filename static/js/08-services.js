@@ -242,7 +242,7 @@ async function svcCheckOne(sid) {
 }
 
 async function svcDelete(sid, fromDetail) {
-    if (!confirm('Remove this service?')) return;
+    if (!await uiConfirm('Remove this service?')) return;
     // Vysledek se musi overit: pri 401/404 se drive nestalo nic viditelneho
     // a uzivatel nemel jak poznat, ze smazani neproslo.
     let r;

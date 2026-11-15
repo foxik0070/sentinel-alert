@@ -76,7 +76,7 @@ function renderTopology() {
             if (!node) return;
             topoDragging = { node, startX: e.clientX, startY: e.clientY, x: node.x, y: node.y };
         });
-        g.addEventListener('click', (e) => {
+        g.addEventListener('click', async (e) => {
             if (topoDragging) return;
             const mac = g.dataset.mac;
             // Link creation mode
@@ -94,7 +94,7 @@ function renderTopology() {
             }
             // Show device details
             const dev = topoDevices.get(mac);
-            if (dev) alert(`${dev.hostname || dev.ip}\nIP: ${dev.ip}\nMAC: ${dev.mac}`);
+            if (dev) await uiAlert(`${dev.hostname || dev.ip}\nIP: ${dev.ip}\nMAC: ${dev.mac}`);
         });
     });
 
@@ -125,8 +125,8 @@ document.getElementById('topo-edit-btn').addEventListener('click', () => {
     renderTopology();
 });
 
-document.getElementById('topo-add-node').addEventListener('click', () => {
-    const hostname = prompt('Hostname:');
+document.getElementById('topo-add-node').addEventListener('click', async () => {
+    const hostname = await uiPrompt('Hostname:');
     if (hostname) {
         topoData.nodes.push({
             id: `node-${Date.now()}`,
@@ -152,14 +152,14 @@ document.getElementById('topo-save-btn').addEventListener('click', async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(topoData)
         });
-        alert('Topology saved!');
+        await uiAlert('Topology saved!');
     } catch (e) {
-        alert('Save failed: ' + e.message);
+        await uiAlert('Save failed: ' + e.message);
     }
 });
 
-document.getElementById('topo-reseed-btn').addEventListener('click', () => {
-    if (!confirm('Reseed topology from current devices?')) return;
+document.getElementById('topo-reseed-btn').addEventListener('click', async () => {
+    if (!await uiConfirm('Reseed topology from current devices?')) return;
     const devs = Array.from(topoDevices.values());
     topoData.nodes = devs.map((d, i) => ({
         id: `node-${d.mac}`,
