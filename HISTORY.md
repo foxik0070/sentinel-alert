@@ -22,7 +22,13 @@ Běžný zásah jde nově jako `hit_severity` (výchozí **low**). Vyšší stup
 
 Vyžaduje Sentinel 2026.11.012 a vyšší, který `severity` v hlášení přijímá; se starším se nic nerozbije, jen se hodnota ignoruje.
 
-Testy 126 → **147**.
+### Oprava téhož ještě před nasazením do praxe
+
+První verze brala přítomnost `payload` jako známku interakce. Jenže **payload má každý záchyt** — i holý protokolový pozdrav (`SSH-2.0-libssh_0.9.6`), takže by se jako neobvyklý označil úplně každý zásah a změna by byla k ničemu. Odhaleno kontrolou proti živé databázi, kde první zásah po nasazení vyšel jako `medium`.
+
+Rozhoduje nově obsah: známky interakce (`wget`, `chmod`, `/bin/sh`, `base64`, …), payload delší než 200 znaků, nebo zadané údaje a příkazy. Banner a krátké HTTP pozdravy jsou běžný šum.
+
+Testy 126 → **152**.
 
 ## 2026-11-15 — Security Center za přihlášením
 

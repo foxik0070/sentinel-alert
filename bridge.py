@@ -109,15 +109,46 @@ async def ping():
 
 
 # Co u zasahu honeypotu znamena "neobvykle". Samotne pripojeni nebo sken portu
-# je ocekavany sum; zajimave zacne byt, az kdyz utocnik neco DOKAZE — zada
-# prihlasovaci udaje, spusti prikaz, stahne payload — nebo prijde zevnitr site.
+# je ocekavany sum. POZOR: `payload` ma KAZDY zachyt — i holy protokolovy
+# banner ("SSH-2.0-libssh_0.9.6"), takze jeho pouha pritomnost nic neznamena.
+# Zajimave zacne byt, az kdyz utocnik neco DOKAZE: zada udaje, spusti prikaz,
+# stahne soubor — nebo kdyz zasah prijde zevnitr site.
+_INTERACTION_MARKERS = (
+    "wget ", "curl ", "chmod ", "/bin/sh", "/bin/bash", "busybox",
+    "base64", "nc ", "perl ", "python -c", "rm -rf", "cat /etc",
+    "uname -", "passwd", "authorized_keys",
+)
+# Holy banner vypada takhle — neni to interakce, jen pozdrav klienta.
+_BANNER_PREFIXES = ("ssh-", "[ssh=", "http/", "get ", "head ", "post ")
+
+
+def _payload_is_interaction(payload) -> bool:
+    text = str(payload or "").strip().lower()
+    if not text:
+        return False
+    if any(m in text for m in _INTERACTION_MARKERS):
+        return True
+    # Zbytek: banner a kratke pozdravy necháme byt.
+    first = text.split("\n", 1)[0]
+    if first.startswith(_BANNER_PREFIXES):
+        return False
+    return len(text) > 200
+
+
+def _is_private_ip(ip: str) -> bool:
+    try:
+        import ipaddress
+        return ipaddress.ip_address(str(ip)).is_private
+    except ValueError:
+        return False
+
+
 def _is_notable(event: dict) -> bool:
-    if event.get("credentials") or event.get("commands") or event.get("payload"):
+    if event.get("credentials") or event.get("commands"):
         return True
-    if event.get("session") and len(str(event.get("session"))) > 0:
+    if _payload_is_interaction(event.get("payload")):
         return True
-    ip = str(event.get("src_ip") or "")
-    if ip.startswith(("10.", "192.168.", "127.")) or ip.startswith(tuple(f"172.{i}." for i in range(16, 32))):
+    if _is_private_ip(event.get("src_ip")):
         return True  # zasah z vlastni site neni bezny internetovy sum
     return False
 
