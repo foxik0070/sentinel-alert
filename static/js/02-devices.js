@@ -366,25 +366,71 @@ document.getElementById('vsw-modal').addEventListener('click', e => {
 let _workMode = false;
 let _globeInitialized = false; // prevent loadStatic from resetting camera on periodic refresh
 
+// Barvy clusteru. PEVNE PORADI, necykli se — 9. cluster by dostal barvu
+// nekoho jineho. Hodnoty jsou overene validatorem proti tmavemu podkladu
+// #06121a (CVD ΔE 8.4, kontrast vsech >= 3:1), nevymyslet nove od oka.
+const CLUSTER_ORDER = ['karolina', 'barbora', 'cs', 'barbora2', 'karolina2'];
+const CLUSTER_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#9085e9'];
+const CLUSTER_OTHER = '#6e7e80';
+
+function clusterColor(name) {
+    const i = CLUSTER_ORDER.indexOf(String(name || '').toLowerCase());
+    return i >= 0 ? CLUSTER_COLORS[i] : CLUSTER_OTHER;
+}
+
+function clusterLabel(name) {
+    return (name && String(name).trim()) ? String(name) : 'ostatní';
+}
+
 function renderActiveUsers(users) {
     const el = $('users-list');
     const countEl = $('users-count');
     if (!el) return;
     if (countEl) countEl.textContent = users.length;
     if (!users.length) { el.innerHTML = '<div class="empty">No active users.</div>'; return; }
-    el.innerHTML = users.map(u => `
-        <div class="row ban clickable" data-lat="${u.lat}" data-lon="${u.lon}"
-              data-ip="${escape(u.ip)}" data-country="${escape(u.country)}"
-              data-isp="${escape(u.isp)}" data-user="${escape(u.username)}" data-node="${escape(u.node)}">
-            <span class="port" style="min-width:48px;background:#06121a;color:var(--accent);">${escape(u.username)}</span>
-            <div style="flex:1;min-width:0;padding-left:4px;">
-                <div style="display:flex;justify-content:space-between;">
-                    <span class="ip">${escape(u.ip)}</span>
-                    <span class="meta" style="color:var(--muted);font-size:9px;">${escape(u.node)}</span>
+
+    // Seskupit podle clusteru. Poradi: znamé clustery podle CLUSTER_ORDER,
+    // zbytek abecedne — aby se skupiny nepreskakovaly mezi obnovenimi.
+    const groups = new Map();
+    users.forEach(u => {
+        const key = clusterLabel(u.cluster).toLowerCase();
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(u);
+    });
+    const keys = [...groups.keys()].sort((a, b) => {
+        const ia = CLUSTER_ORDER.indexOf(a), ib = CLUSTER_ORDER.indexOf(b);
+        if (ia >= 0 && ib >= 0) return ia - ib;
+        if (ia >= 0) return -1;
+        if (ib >= 0) return 1;
+        return a.localeCompare(b);
+    });
+
+    el.innerHTML = keys.map(key => {
+        const list = groups.get(key);
+        const col = clusterColor(key);
+        const head = `
+            <div class="user-cluster-head">
+                <span class="user-cluster-dot" style="background:${col};"></span>
+                <span style="color:${col};">${escape(key.toUpperCase())}</span>
+                <span class="user-cluster-count">${list.length}</span>
+            </div>`;
+        const rows = list.map(u => `
+            <div class="row ban clickable" style="border-left:3px solid ${col};"
+                  data-lat="${u.lat}" data-lon="${u.lon}"
+                  data-ip="${escape(u.ip)}" data-country="${escape(u.country)}"
+                  data-isp="${escape(u.isp)}" data-user="${escape(u.username)}" data-node="${escape(u.node)}">
+                <span class="port" style="min-width:48px;background:#06121a;color:${col};">${escape(u.username)}</span>
+                <div style="flex:1;min-width:0;padding-left:4px;">
+                    <div style="display:flex;justify-content:space-between;">
+                        <span class="ip">${escape(u.ip)}</span>
+                        <span class="meta" style="color:var(--muted);font-size:9px;">${escape(u.node)}</span>
+                    </div>
+                    <div style="color:#4d7479;font-size:10px;">${escape(u.country)}</div>
                 </div>
-                <div style="color:#4d7479;font-size:10px;">${escape(u.country)}</div>
-            </div>
-        </div>`).join('');
+            </div>`).join('');
+        return head + rows;
+    }).join('');
+
     el.querySelectorAll('.ban.clickable').forEach(row => {
         row.addEventListener('click', () => {
             const lat = parseFloat(row.dataset.lat);
@@ -402,17 +448,18 @@ async function fetchActiveUsers() {
         userPoints.length = 0;
         users.forEach((u, i) => {
             if (!u.lat && !u.lon) return; // show in panel but no arc without coordinates
-            const colorBase = PROTO_COLOR.who;
+            const colorBase = clusterColor(u.cluster);
             userArcs.push({
                 startLat: u.lat, startLng: u.lon, endLat: HOME.lat, endLng: HOME.lon,
                 color: [colorBase, colorBase], phase: Math.random(),
                 src_ip: u.ip, country: u.country, isp: u.isp, dst_port: 22,
-                protocol: 'who', username: u.username, node: u.node,
+                protocol: 'who', username: u.username, node: u.node, cluster: u.cluster,
             });
             userPoints.push({
                 lat: u.lat, lon: u.lon, color: colorBase,
                 radius: 0.4, alt: 0.01, protocol: 'who',
                 username: u.username, node: u.node, ip: u.ip, country: u.country,
+                cluster: u.cluster,
             });
         });
         renderActiveUsers(users);

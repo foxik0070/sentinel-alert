@@ -1493,3 +1493,18 @@ body.light-mode.scheme-red {
 .an-heat { border-collapse: collapse; font-size: 8px; }
 .an-heat th { color: var(--muted); font-weight: 400; padding: 1px 2px; text-align: center; }
 .an-heat td { width: 13px; height: 13px; border: 1px solid var(--bg-1); }
+
+/* Hlavička skupiny clusteru v seznamu přihlášených uživatelů.
+   Barvy nesou identitu clusteru, ale nikdy samy — vedle vždy stojí název,
+   aby to fungovalo i pro barvoslepé a v tisku. */
+.user-cluster-head {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 6px 3px; margin-top: 4px;
+    font-size: 9px; font-weight: 700; letter-spacing: 1.5px;
+    border-bottom: 1px solid var(--border);
+}
+.user-cluster-head:first-child { margin-top: 0; }
+.user-cluster-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.user-cluster-count {
+    margin-left: auto; color: var(--muted); font-weight: 600; letter-spacing: 0;
+}

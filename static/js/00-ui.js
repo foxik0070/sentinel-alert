@@ -152,7 +152,7 @@ function playBeep(kind = 'blip') {
     ov.innerHTML = '<pre id="boot-log"></pre><div id="boot-skip">PRESS ANY KEY TO SKIP</div>';
     document.body.appendChild(ov);
     const lines = [
-        '> SENTINEL-ALERT // GRID  v2026.11.004',
+        '> SENTINEL-ALERT // GRID  v2026.11.005',
         '> CORE ................... OK',
         '> UI MODULES [11/11] ..... OK',
         '> GEOIP DATABASE ......... OK',

@@ -1,5 +1,21 @@
 # Sentinel-Alert — Change History
 
+## 2026-11-15 — Přihlášení uživatelé podle clusteru
+
+Seznam byl plochý: 61 jmen pod sebou, cluster jen jako drobné šedé písmo vpravo. Na pracovní instanci se přihlašují lidé na Karolinu, Barboru, Barboru2 i CS a nedalo se rozeznat, kdo je kde.
+
+Uživatelé jsou nově **seskupení podle clusteru**, každá skupina má hlavičku s názvem, barevnou tečkou a počtem. Řádky nesou barevný proužek a jméno uživatele má barvu svého clusteru. Stejnou barvu dostaly i oblouky a body na globusu, takže je na první pohled vidět, odkud se kam lidé hlásí — dřív byly všechny stejné.
+
+Pořadí skupin je pevné (Karolina, Barbora, CS, Barbora2, Karolina2), zbytek abecedně, aby skupiny mezi obnoveními neposkakovaly.
+
+### K barvám
+
+Paleta je **ověřená validátorem** proti tmavému podkladu, ne vybraná od oka: nejhorší sousední dvojice má pro barvosleposti ΔE 8,4 a všechny barvy mají proti podkladu kontrast ≥ 3:1. Barvy se **necyklují** — devátý cluster by jinak dostal barvu někoho jiného; spadne do neutrální „ostatní".
+
+Identita nikdy nestojí jen na barvě: název clusteru je vždy vypsaný vedle, takže to funguje i pro barvosleposti a v tisku.
+
+Testy 152 → **158**.
+
 ## 2026-11-15 — Service checky za přihlášením, honeypot přestal křičet
 
 ### Service check nešel smazat
